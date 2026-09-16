@@ -1,0 +1,402 @@
+{
+  "version": 1,
+  "cash": 74,
+  "run_number": 3,
+  "round_index": 1,
+  "run_in_round": 0,
+  "required_score": 8,
+  "required_scores": [
+    1,
+    2,
+    4,
+    8
+  ],
+  "run_results": [
+    true,
+    true,
+    true
+  ],
+  "runs_cleared": 3,
+  "failed_runs": 0,
+  "current_trial": 14,
+  "final_boss": null,
+  "cards": [
+    {
+      "kind": "card",
+      "value": 2085,
+      "price": 31,
+      "amount": 13.5,
+      "col": 0,
+      "row": 0,
+      "name": "Bump card (Cash)"
+    }
+  ],
+  "actions": [],
+  "toolbox": [],
+  "grid": [
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 6,
+      "shape": 5,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 0,
+      "scorer_amount": 0.0,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 9
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 8,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 53
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 5,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 109
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 7,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 19,
+      "scorer_amount": 0.825,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 8,
+      "shape": 19,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 10,
+      "scorer_amount": 1.1,
+      "angle": 270,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 20
+    }
+  ],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 16,
+      "amount": 0,
+      "price": 7,
+      "name": "Peg",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 17,
+      "amount": 0,
+      "price": 11,
+      "name": "Sawtooth",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 9,
+      "amount": 0,
+      "price": 20,
+      "name": "Fragile",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 7,
+      "amount": 810.0,
+      "price": 14,
+      "name": "Rotate",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 22,
+      "amount": 2.2,
+      "price": 26,
+      "name": "Drill",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 7,
+      "amount": 13.5,
+      "price": 13,
+      "name": "Cash",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 23,
+      "amount": 0,
+      "price": 24,
+      "name": "Lucky",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "kind": "card",
+      "value": 3438,
+      "price": 45,
+      "amount": 16.5,
+      "col": 1,
+      "row": 3,
+      "name": "Skater card (Undertaker)"
+    },
+    {
+      "kind": "card",
+      "value": 2379,
+      "price": 32,
+      "amount": 0,
+      "col": 2,
+      "row": 3,
+      "name": "Glitch card (Random)"
+    },
+    {
+      "kind": "condition",
+      "value": 113,
+      "amount": 0,
+      "price": 16,
+      "name": "Spike",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "kind": "condition",
+      "value": 143,
+      "amount": 0,
+      "price": 4,
+      "name": "Piston",
+      "col": 4,
+      "row": 3
+    },
+    {
+      "kind": "action",
+      "value": 0,
+      "price": 24,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Death"
+    },
+    {
+      "kind": "action",
+      "value": 4,
+      "price": 28,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Strength"
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 13,
+      "effects": [
+        14
+      ],
+      "effect_amounts": {
+        "14": 390.0
+      },
+      "scorer": 16,
+      "scorer_amount": 1.8,
+      "price": 50,
+      "name": "Spike Picky",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 8,
+      "row": 3,
+      "shape": 4,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 6,
+      "scorer_amount": 0.0,
+      "price": 18,
+      "name": "Circle Quick",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    }
+  ],
+  "component_purchases": [
+    [
+      "scorer",
+      19,
+      1
+    ],
+    [
+      "shape",
+      5,
+      1
+    ],
+    [
+      "shape",
+      19,
+      1
+    ],
+    [
+      "scorer",
+      10,
+      1
+    ],
+    [
+      "condition",
+      119,
+      1
+    ],
+    [
+      "scorer",
+      7,
+      1
+    ]
+  ],
+  "wrecking_bonus": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      1.0
+    ]
+  ],
+  "tesseract_bonus": 1.0,
+  "tokens": [],
+  "shred_points": 0.3666666666666667,
+  "rubble_points": 0,
+  "idea_points": 0,
+  "free_rerolls": 0,
+  "option_points": 0,
+  "bonus_slots": 0,
+  "marble_type": 2,
+  "upgrades_enabled": true,
+  "game_over": false,
+  "game_won": false,
+  "game_perfect": false,
+  "continue_past_game_over": false,
+  "score_chips": 31,
+  "score_mult": 1,
+  "last_run_cash_gained": 54,
+  "last_run_cash_breakdown": {
+    "base": 20,
+    "interest": 2,
+    "score": 19,
+    "cards": 13,
+    "scorers": 0,
+    "debt": false
+  },
+  "unlocked_cells": [
+    [
+      5,
+      8
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      4,
+      5
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      4,
+      7
+    ]
+  ],
+  "board_units": 0
+}
