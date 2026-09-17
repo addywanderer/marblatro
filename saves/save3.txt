@@ -12,6 +12,7 @@
   "runs_cleared": 0,
   "failed_runs": 0,
   "current_trial": 10,
+  "difficulty": 4,
   "final_boss": null,
   "cards": [],
   "actions": [],

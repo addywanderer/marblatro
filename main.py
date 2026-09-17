@@ -8,6 +8,7 @@ from components import (
     CARD_SCORERS,
     COMPONENT_PRICES,
     CONDITION_ORDER,
+    DEFAULT_DIFFICULTY,
     MAGNITUDE_MAX_STEPS,
     MAGNITUDE_STEP_DIVISOR,
     MAGNITUDE_WEIGHTS,
@@ -16,6 +17,7 @@ from components import (
     Card,
     Component,
     Condition,
+    Difficulty,
     Effect,
     FinalBoss,
     MarbleType,
@@ -1193,11 +1195,22 @@ def block_shape(block):
     return original if original is not None else block.shape
 
 
-def get_next_required_score(run):
-    """Return the score needed to reach the next level in the given run."""
+def get_next_required_score(run, growth=None):
+    """Return the score needed to reach the next level in the given run.
+
+    ``growth`` is the factor a run's target grows by for the next one: the
+    save's own difficulty (see Difficulty.SCORE_GROWTH), or 2x when the caller
+    has none to hand (the difficulty-2-and-up doubling every plain test
+    expects). Targets are whole numbers and always strictly grow: the gentler
+    1.6x growth rounds down, so the ``+ 1`` keeps an early target from
+    stalling (1 -> 2 -> 3 -> 4 -> 6 -> 9 ...).
+    """
+    if growth is None:
+        growth = Difficulty.score_growth(DEFAULT_DIFFICULTY)
     if run >= len(REQUIRED_SCORES):
         for _ in range(len(REQUIRED_SCORES), run + 1):
-            REQUIRED_SCORES.append(int(REQUIRED_SCORES[-1] * 2))
+            REQUIRED_SCORES.append(max(REQUIRED_SCORES[-1] + 1,
+                                       int(REQUIRED_SCORES[-1] * growth)))
     return REQUIRED_SCORES[run]
 
 
@@ -1789,6 +1802,12 @@ class Game:
         # The marble type chosen for this save (see MarbleType); a fresh game
         # starts vanilla until the player picks one on the selection screen.
         self.marble_type = MarbleType.VANILLA
+        # The difficulty chosen for this save (see Difficulty): how many
+        # trials a round is played under and how fast the required score
+        # grows. A fresh game starts on the game's original balance until the
+        # player picks a level on the selection screen; a loaded save restores
+        # its own.
+        self.difficulty = DEFAULT_DIFFICULTY
         # Whether the permanent metagame upgrade effects (bought with dice on
         # the UPGRADES tab) apply to this save's runs. The player can turn them
         # off for a save on the marble-selection screen; on by default.
@@ -1938,11 +1957,14 @@ class Game:
         # card fires: it is folded into the run's end-of-run cash award, so it
         # only sticks after a run (retrying discards it).
         self.card_cash_run_gain = 0
-        # The current run's trial (exactly one per run) and the blocks/card it
-        # affects. The trial is CHOSEN before the run starts (at game start and
-        # each time a run advances) so the info box can show it during setup;
-        # its effects are applied when the run actually begins.
-        self._choose_trial()
+        # The current run's trial (a run plays at most one; the difficulty
+        # decides which of a round's runs have one — see _choose_trial) and the
+        # blocks/card it affects. The trial is CHOSEN before the run starts (at
+        # game start and each time a run advances) so the info box can show it
+        # during setup; its effects are applied when the run actually begins.
+        # The run being set up at game start is run 0 itself (the run_number a
+        # fresh game holds), not the run after the last finished one.
+        self._choose_trial(self.run_number)
         self.trial_maxed_blocks = set()
         self.disabled_card = None
         # The deal-breaker trial disables every owned card whose 
@@ -2084,13 +2106,23 @@ class Game:
                         break
         return candidates
 
-    def _grant_locked_units(self, count):
+    def _grant_locked_units(self, count, announce=True):
         """Unlock up to ``count`` random locked squares next to an unlocked one.
 
         The Drill scorer earns two such squares per trigger (granted after a
         run) and the Conquistador card earns four after every run. Returns how
         many squares were actually unlocked (0 when the board is already fully
         unlocked or ``count`` is 0).
+
+        The squares are picked off the frontier (see _locked_adjacent_cells) one
+        at a time, so what the caller gets is always ``count`` squares the board
+        really gained — but only against the board as it stands HERE. A Bomb
+        blast that runs afterwards would cover squares this grant already added,
+        which is why _continue_run detonates the bombs first.
+
+        ``announce`` is cleared by _continue_run, which grants every source of
+        expansion for the finished run together and reports them in one message
+        (see _announce_board_expansion); the sound plays either way.
         """
         if count <= 0:
             return 0
@@ -2101,19 +2133,24 @@ class Game:
             if self._unlock_cell(x, y):
                 granted += 1
         if granted:
-            plural = "s" if granted != 1 else ""
-            self._set_shop_message(
-                f"Board expanded ({granted} square{plural} unlocked)")
+            if announce:
+                plural = "s" if granted != 1 else ""
+                self._set_shop_message(
+                    f"Board expanded ({granted} square{plural} unlocked)")
             sounds.play_coin()
         return granted
 
-    def _detonate_bombs(self):
+    def _detonate_bombs(self, announce=True):
         """Detonate Bomb blocks primed this run (called after a run).
 
         Each bomb unlocks every board unit within 1 cell of it (Chebyshev
         distance, so diagonals count), then destroys itself. Retrying a run
         never detonates a bomb — it only goes off after a run.
         Returns how many board units were newly unlocked.
+
+        ``announce`` is cleared by _continue_run, which reports the finished
+        run's whole expansion — bomb blasts and drill/Conquistador grants — in
+        one message (see _announce_board_expansion).
         """
         if not self.bomb_cells:
             return 0
@@ -2129,11 +2166,38 @@ class Game:
                         unlocked += 1
             self.grid.pop((x, y), None)
         if unlocked:
-            plural = "s" if unlocked != 1 else ""
-            self._set_shop_message(
-                f"Bombs detonated: {unlocked} unit{plural} unlocked")
+            if announce:
+                plural = "s" if unlocked != 1 else ""
+                self._set_shop_message(
+                    f"Bombs detonated: {unlocked} unit{plural} unlocked")
             sounds.play_coin()
         return unlocked
+
+    def _announce_board_expansion(self, blasted, drilled, conquered):
+        """Report every square the finished run unlocked, and where they came from.
+
+        The three sources are Bombs (a fixed 1-cell blast around each primed
+        bomb), the Drill scorer (squares banked by its triggers), and the
+        Conquistador card. They are granted as one step and reported as one
+        message naming each that contributed, because each grant used to
+        announce itself on its own — and with a bomb in the run the blast
+        always went last, so its message replaced the drill's and a player whose
+        drill had just expanded the board was told only about the bomb.
+        """
+        total = blasted + drilled + conquered
+        if not total:
+            return
+        sources = []
+        if blasted:
+            sources.append(f"{blasted} from the bomb blast")
+        if drilled:
+            sources.append(f"{drilled} from the drill")
+        if conquered:
+            sources.append(f"{conquered} from Conquistador")
+        plural = "s" if total != 1 else ""
+        detail = f" ({', '.join(sources)})" if sources else ""
+        self._set_shop_message(
+            f"Board expanded {total} square{plural}{detail}")
 
     def _board_unit_tile(self):
         """Screen rect of the shop's always-present Board Unit tile."""
@@ -2449,8 +2513,9 @@ class Game:
                     self.title_screen = True
                 continue
             elif self.marble_selecting:
-                # The marble-type screen accepts a marble card, the upgrade
-                # toggle, or the BACK button (or QUIT).
+                # The new-save screen accepts a difficulty button, a marble card
+                # (which begins the game with the chosen difficulty), the
+                # upgrade toggle, or the BACK button (or QUIT).
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                     if MARBLE_UPGRADES_TOGGLE_RECT.collidepoint(mouse_pos):
                         self.upgrades_enabled = not self.upgrades_enabled
@@ -2459,10 +2524,14 @@ class Game:
                         self.save_slot = None
                         self.title_screen = True
                     else:
-                        for i, mt in enumerate(MarbleType.ORDER):
-                            if self.marble_card_rect(i).collidepoint(mouse_pos):
-                                save_system.start_new_game_with_marble(self, mt)
-                                break
+                        level = self._difficulty_at(mouse_pos)
+                        if level is not None:
+                            self.difficulty = level
+                        else:
+                            for i, mt in enumerate(MarbleType.ORDER):
+                                if self.marble_card_rect(i).collidepoint(mouse_pos):
+                                    save_system.start_new_game_with_marble(self, mt)
+                                    break
                 continue
             elif self.upgrades_open:
                 # The UPGRADES tab accepts buying an upgrade card or the return
@@ -3169,7 +3238,7 @@ class Game:
             self.actions.append(item)
             self.cash -= price
             self._discover_action(item.value)
-            self._set_shop_message(f"Bought action: {item.name}")
+            self._set_shop_message(f"Bought action: {self._item_name(item)}")
             sounds.play_coin()
             return
         # A portal block is bought as a pair: two identical blocks that share a
@@ -3361,7 +3430,9 @@ class Game:
         Blocks are named by their parts: every real effect, then the shape,
         then the scorer, then "v<trigger limit>" — e.g. a slippery, fragile
         pipe that grants +chips twice per run reads "Slippery Fragile Pipe
-        +Chips v2".
+        +Chips v2". An upgraded (v2) action carries its version the same way,
+        so "Death v2" is what every message about it calls it; a plain v1
+        action stays just "Death".
         """
         if item is CASH_BREAKDOWN:
             return "Last run cash gained"
@@ -3372,6 +3443,9 @@ class Game:
             limit = getattr(item, "trigger_limit", 1)
             return f"{' '.join(parts)} v{limit}"
         name = getattr(item, "name", "")
+        if getattr(item, "kind", None) == "action" and name:
+            version = getattr(item, "version", 1)
+            return f"{name} v{version}" if version >= 2 else name
         if name:
             return name
         return f"{Shape.name(item.shape)} {Scorer.name(item.scorer)}"
@@ -4030,6 +4104,25 @@ class Game:
                 return block, "grid"
         return None, None
 
+    def _v2_shelf_note(self):
+        """Name any already-upgraded action a fresh shop has just shelved.
+
+        Every action the shop offers is rolled for its version (see
+        random_action_version), so roughly one in a hundred actions arrives
+        already upgraded — a straight saving of ACTION_UPGRADE_COST, and easy to
+        miss among the shop's other tiles. The shelf tile itself is gold-framed
+        and tagged (see ui.draw_action), and this appends the name to the reroll
+        message so a player who does not read the shelves is still told.
+        """
+        upgraded = [i for i in self.shop.items
+                    if getattr(i, "kind", None) == "action"
+                    and getattr(i, "version", 1) >= 2]
+        if not upgraded:
+            return ""
+        names = ", ".join(self._item_name(i) for i in upgraded)
+        return (f" — {names} already upgraded "
+                f"(a free ${self._inflated(ACTION_UPGRADE_COST)})")
+
     def _refresh_shop(self):
         """Reroll the shop — free while a Fresh reroll is banked, else for cash."""
         if self.free_rerolls > 0:
@@ -4038,7 +4131,8 @@ class Game:
             if self.trials_enabled and self.current_trial == Trial.SLIM_PICKINGS:
                 self._trim_shop_for_trial()
             left = f" ({self.free_rerolls} left)" if self.free_rerolls else ""
-            self._set_shop_message(f"Free reroll{left}{self._tesseract_reroll_note()}")
+            self._set_shop_message(f"Free reroll{left}{self._tesseract_reroll_note()}"
+                                   f"{self._v2_shelf_note()}")
             return
         cost = self._inflated(SHOP_REFRESH_COST)
         if self.cash < cost:
@@ -4048,7 +4142,9 @@ class Game:
         self.shop.refresh()
         if self.trials_enabled and self.current_trial == Trial.SLIM_PICKINGS:
             self._trim_shop_for_trial()
-        self._set_shop_message(f"Refreshed shop (${cost}){self._tesseract_reroll_note()}")
+        self._set_shop_message(f"Refreshed shop (${cost})"
+                               f"{self._tesseract_reroll_note()}"
+                               f"{self._v2_shelf_note()}")
 
     def _tesseract_reroll_note(self):
         """Grow the Tesseract bonus for this reroll; a note for the message.
@@ -4202,7 +4298,7 @@ class Game:
                           version=random_action_version())
         self.actions.append(item)
         self._discover_action(value)
-        self._set_shop_message(f"Converted an action: {item.name}")
+        self._set_shop_message(f"Converted an action: {self._item_name(item)}")
         sounds.play_coin()
         return True
 
@@ -4512,11 +4608,19 @@ class Game:
             ]
         if getattr(item, "kind", None) == "action":
             version = getattr(item, "version", 1)
+            # The version row is the whole point of an action's info box: v1
+            # still has the upgrade to buy, while a v2 (whether the player paid
+            # for it or the shop rolled it already upgraded — see
+            # random_action_version) has nothing left to spend on it.
+            if version >= 2:
+                version_text = "v2 — fully upgraded (the strongest version)"
+            else:
+                version_text = ("v1 — upgrade to v2 for "
+                                f"${self._inflated(ACTION_UPGRADE_COST)}")
             return [
                 (f"Action - {Action.name(item.value)}",
                  Action.description(item.value, version)),
-                ("Version", f"v{version}" + ("" if version >= 2
-                                             else f" — upgrade ${self._inflated(ACTION_UPGRADE_COST)}")),
+                ("Version", version_text),
                 ("Comment", Action.comment(item.value)),
             ]
         if item.kind == Component.SHAPE:
@@ -4857,7 +4961,14 @@ class Game:
         self.armed_quick.clear()
         self.card_cash_run_gain = 0
         # A fresh run starts with no cash earned by Cash/Lucky scorer blocks
-        # yet (it accumulates as the run's blocks trigger).
+        # yet (it accumulates as the run's blocks trigger) — but this run
+        # already PAID that cash into the wallet as it triggered, so the money
+        # comes back out along with the counter. Restarting the run (R),
+        # starting a fresh one (T), and editing the board mid-run all discard
+        # the run, so none of them may leave behind what the discarded run was
+        # paid. Money already spent is not clawed back: the wallet never goes
+        # below $0 (the same rule the Fresh rerolls below follow).
+        self.cash = max(0, self.cash - self.run_cash_gained)
         self.run_cash_gained = 0
         # Fresh run: no resource points earned yet (Shreds/Rubble/Ideas/Picky
         # only become banked rewards after a run; see _continue_run). Cleared
@@ -4866,8 +4977,14 @@ class Game:
         self.rubble_run_gain = 0
         self.idea_run_gain = 0
         self.option_run_gain = 0
-        # Fresh run: it has not granted any free rerolls yet (Fresh hits do,
-        # and a retry takes back exactly this run's count).
+        # Fresh run: it has not granted any free rerolls yet — and the rerolls
+        # THIS run's Fresh hits already banked come back off the bank, for the
+        # same reason the scorer cash above does: the discarded run did not
+        # earn them. A reroll already spent is not un-spent (the bank simply
+        # can't go below zero), and a run that was COMMITTED rather than
+        # restarted has its counter cleared by _continue_run, so this rollback
+        # only ever touches a run that is being thrown away.
+        self.free_rerolls = max(0, self.free_rerolls - self.free_rerolls_run_gain)
         self.free_rerolls_run_gain = 0
         # Cards grant their score effects at the start of each run (e.g. Joker
         # gives +4 mult), so they apply right after the mult resets to 1. A
@@ -4986,14 +5103,45 @@ class Game:
         y = CARD_AREA_COORDS[1] + GRID_SIZE // 2
         self._spawn_score_particle(x, y, text, color)
 
-    def _choose_trial(self):
-        """Choose the next run's trial (exactly one per run), before the run starts.
+    def _choose_trial(self, next_run=None):
+        """Set the trial the given run is played under, before the run starts.
 
-        Called at game start and when a run advances, so the info box can show
-        the trial during setup. Its effects are applied to the board when the
-        run actually begins (see _apply_trial).
+        ``next_run`` is the run being set up (the one after the finished run by
+        default). The difficulty decides how many of a round's runs play a
+        trial, and they are the round's LAST runs (see
+        Difficulty.TRIALS_PER_ROUND): difficulties 1-2 give only a round's
+        final run a trial, difficulty 3 its last two runs, and difficulty 4
+        every run of the round (the game's original balance). The trial itself
+        is drawn fresh per run, exactly as it always was. A run with no trial
+        is played clean — the display reads NO TRIAL — though the player can
+        still buy one onto it (see _click_trial_display). The shapes a trial
+        carries are applied to the board when the run begins (see _apply_trial).
         """
-        self.current_trial = random.choice(Trial.ORDER)
+        if next_run is None:
+            next_run = self.run_number + 1
+        if next_run % RUNS_PER_ROUND < self.trials_without_trial_runs:
+            self.current_trial = None
+        else:
+            self.current_trial = random.choice(Trial.ORDER)
+
+    @property
+    def trials_without_trial_runs(self):
+        """How many of a round's runs are played with no trial (Difficulty).
+
+        The trials land on the round's LAST runs, so a round with fewer trials
+        than runs opens with this many clean (trial-free) runs.
+        """
+        return max(0, RUNS_PER_ROUND - self.trials_per_round)
+
+    @property
+    def trials_per_round(self):
+        """How many of a round's last runs play a trial (Difficulty)."""
+        return Difficulty.trials_per_round(self.difficulty)
+
+    @property
+    def score_growth(self):
+        """The factor this save's required score grows by each run (Difficulty)."""
+        return Difficulty.score_growth(self.difficulty)
 
     def trial_options_available(self):
         """True while the trial display's two purchase options can be used.
@@ -6081,37 +6229,55 @@ class Game:
         # a run only; retrying discards them. These grants run
         # AFTER the card destruction above, so a freshly granted card survives.
         self._commit_resource_points()
+        # Bomb blocks touched this run detonate after a run: each unlocks its
+        # 1-cell radius (diagonals included) and destroys itself. The blast goes
+        # FIRST, before the Drill and Conquistador grants below, because it is a
+        # fixed shape while those grants PICK squares off the locked frontier
+        # (see _grant_locked_units): a drill granted first can have its squares
+        # land inside the radius the bomb was about to unlock anyway and be
+        # swallowed by it, so the board grows by fewer squares than the drill
+        # promised — and with the blast announced last its message buried the
+        # drill's, making the block look like it had done nothing at all.
+        blasted = self._detonate_bombs(announce=False)
         # Drill-scorer blocks touched this run unlock their locked board
         # squares after a run (retrying discards the pending
         # drills); the Conquistador card unlocks 4 more after every run. The
         # squares only land after a run, so retrying can't farm
         # board expansions.
+        drilled = 0
         if self.drill_run_units:
-            self._grant_locked_units(self.drill_run_units)
+            drilled = self._grant_locked_units(self.drill_run_units,
+                                               announce=False)
             self.drill_run_units = 0
-        if self._has_card(Card.CONQUISTADOR):
-            self._grant_locked_units(4)
+        conquered = (self._grant_locked_units(4, announce=False)
+                     if self._has_card(Card.CONQUISTADOR) else 0)
+        self._announce_board_expansion(blasted, drilled, conquered)
         # 1000-handed: after every run, its thousand hands fetch one random
         # action (the same grant the Ideas conversion gives; a full action area
         # refuses it, and the offer is simply withheld).
         if self._has_card(Card.THOUSAND_HANDED) and self._grant_random_action():
-            self._set_shop_message(f"1000-handed grants {self.actions[-1].name}")
+            self._set_shop_message(
+                f"1000-handed grants {self._item_name(self.actions[-1])}")
         # Spirit tokens spend a run of coverage; Satanic and Sharp tokens obey
         # their scorer's own destruction rules (see _advance_tokens).
         self._advance_tokens()
-        # Bomb blocks touched this run detonate after a run: each unlocks its
-        # 1-cell radius (diagonals included) and destroys itself.
-        self._detonate_bombs()
         self.awaiting_after_run = False
         self.run_complete = False
         self.run_cleared = False
+        # The finished run is COMMITTED now, so the free rerolls its Fresh hits
+        # banked are the player's to keep: clearing the per-run counter here
+        # (rather than leaving reset_run to do it) keeps that rollback from
+        # taking a committed run's rerolls back when the next run is built,
+        # started and restarted.
+        self.free_rerolls_run_gain = 0
         # Choose the next run's trial now, before the run starts, so the info
-        # box shows it during setup. The final boss run (run 24) has a boss
-        # instead of a trial.
+        # box shows it during setup (a new round draws its own trials here, see
+        # _choose_trial). The final boss run (run 24) has a boss instead of a
+        # trial.
         if self.run_number == TOTAL_RUNS - 2:
             self.current_trial = None
         else:
-            self._choose_trial()
+            self._choose_trial(self.run_number + 1)
         # The just-finished run's trial effects are spent: clear the state so
         # the next run's trial (chosen above) re-applies fresh when it starts.
         self.trial_maxed_blocks = set()
@@ -6151,10 +6317,13 @@ class Game:
                 self.game_perfect = False
                 self._award_defeat_dice()
         else:
-            # Advance to the next run with its (round-based) score target.
+            # Advance to the next run with its (round-based) score target,
+            # grown by the save's own difficulty (1.6x on difficulty 1, 2x on
+            # the rest — see Difficulty.SCORE_GROWTH).
             self.round_index = self.run_number // RUNS_PER_ROUND
             self.run_in_round = self.run_number % RUNS_PER_ROUND
-            self.required_score = get_next_required_score(self.run_number)
+            self.required_score = get_next_required_score(self.run_number,
+                                                          self.score_growth)
             # The 24th (last) run is the final boss run: pick a boss now so its
             # modifier applies when the run starts. Sky High triples the target
             # the player must beat.
@@ -6184,7 +6353,8 @@ class Game:
         self.final_boss = None
         self.round_index = self.run_number // RUNS_PER_ROUND
         self.run_in_round = self.run_number % RUNS_PER_ROUND
-        self.required_score = get_next_required_score(self.run_number)
+        self.required_score = get_next_required_score(self.run_number,
+                                                      self.score_growth)
 
     def _award_defeat_dice(self):
         """Award metagame dice for a defeat: (run number - 3) squared.
@@ -6295,6 +6465,27 @@ class Game:
         gap = 28
         x0 = (SCREEN_WIDTH - (3 * card_w + 2 * gap)) // 2
         return pygame.Rect(x0 + index * (card_w + gap), 250, card_w, card_h)
+
+    def _difficulty_at(self, pos):
+        """The difficulty level of the new-save screen's button at a position.
+
+        Returns a Difficulty id, or None when the position is off the picker.
+        """
+        for i, level in enumerate(Difficulty.ORDER):
+            if self.difficulty_button_rect(i).collidepoint(pos):
+                return level
+        return None
+
+    def difficulty_button_rect(self, index):
+        """The screen rect for a difficulty button (index into Difficulty.ORDER)
+        on the new-save screen.
+
+        The picker is a column down the LEFT margin of the screen: the marble
+        cards are centred and 520 wide, so they leave that margin free for the
+        four levels and the chosen level's description underneath.
+        """
+        button_w, button_h, gap = 280, 60, 10
+        return pygame.Rect(30, 280 + index * (button_h + gap), button_w, button_h)
 
     def marble_card_rect(self, index):
         """The screen rect for a marble-type card (index into MarbleType.ORDER)

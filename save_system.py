@@ -36,6 +36,8 @@ Block = _save_source.Block
 BlockItem = _save_source.BlockItem
 CardItem = _save_source.CardItem
 Component = _save_source.Component
+DEFAULT_DIFFICULTY = _save_source.DEFAULT_DIFFICULTY
+Difficulty = _save_source.Difficulty
 Effect = _save_source.Effect
 GREEN = _save_source.GREEN
 PORTAL_MAX_ACTIVATIONS = _save_source.PORTAL_MAX_ACTIVATIONS
@@ -266,6 +268,9 @@ def _save_data(game):
         "failed_runs": game.failed_runs,
         "current_trial": (int(game.current_trial)
                           if game.current_trial is not None else None),
+        # The save's difficulty (chosen when it was started): how many of a
+        # round's runs play a trial and the score growth per run.
+        "difficulty": int(game.difficulty),
         "final_boss": (int(game.final_boss)
                         if game.final_boss is not None else None),
         "cards": [_serialize_item(c) for c in game.cards],
@@ -406,6 +411,10 @@ def _load_save_data(game, data, slot):
     game.shop.bonus_slots = game.bonus_slots
     # The marble type chosen for this save (one per save).
     game.marble_type = data.get("marble_type", 0)
+    # The save's difficulty (see Difficulty): how many of a round's runs play a
+    # trial and how fast the required score grows. A save written before the
+    # difficulty existed reads as the game's original balance.
+    game.difficulty = data.get("difficulty", DEFAULT_DIFFICULTY)
     # Whether the permanent upgrade effects apply to this save's runs.
     game.upgrades_enabled = data.get("upgrades_enabled", True)
     # The trial's applied effects re-apply when a run starts.
@@ -461,8 +470,8 @@ def start_new_game_in_slot(game, slot):
 
 def begin_new_game_selection(game, slot):
     """Start a brand-new save in ``slot``: clear any existing save and open the
-    marble-type selection screen, where the player picks the save's marble and
-    whether permanent upgrade effects apply (on by default)."""
+    new-save screen, where the player picks the save's difficulty and marble
+    type and whether permanent upgrade effects apply (on by default)."""
     path = _slot_file_path(slot)
     if os.path.exists(path):
         os.remove(path)
@@ -471,19 +480,23 @@ def begin_new_game_selection(game, slot):
     game.title_screen = False
     game.marble_selecting = True
     game.upgrades_enabled = True  # a fresh save defaults to upgrades on
+    game.difficulty = DEFAULT_DIFFICULTY  # and to the picker's default level
 
 
 def start_new_game_with_marble(game, marble_type):
     """Start the pending fresh game (in ``game.save_slot``) using the marble type.
 
-    ``start_new_game_in_slot`` resets the game (which turns upgrades back on),
-    so the marble-choice screen's upgrade toggle is restored afterward.
+    ``start_new_game_in_slot`` resets the game (which turns upgrades back on and
+    the difficulty back to its default), so the new-save screen's upgrade
+    toggle and difficulty pick are restored afterward.
     """
     slot = game.save_slot if game.save_slot is not None else 1
     upgrades_enabled = game.upgrades_enabled
+    difficulty = game.difficulty
     start_new_game_in_slot(game, slot)
     game.marble_type = marble_type
     game.upgrades_enabled = upgrades_enabled
+    game.difficulty = difficulty
     game.marble_selecting = False
 
 
@@ -556,7 +569,8 @@ def _draw_slot_box(game, index, rect):
             True, (200, 200, 200))
         line2 = game.small_font.render(f"Cash ${data.get('cash', 0)}", True, GREEN)
         line3 = game.small_font.render(
-            f"Trial: {Trial.name(data['current_trial']) if data.get('current_trial') is not None else 'None'}",
+            f"Trial: {Trial.name(data['current_trial']) if data.get('current_trial') is not None else 'None'}"
+            f"  •  Diff {data.get('difficulty', DEFAULT_DIFFICULTY)}",
             True, (200, 200, 200))
         game.screen.blit(line1, (rect.x + 14, rect.y + 34))
         game.screen.blit(line2, (rect.x + 14, rect.y + 54))
@@ -580,12 +594,18 @@ def _draw_slot_confirm(game, index):
     if data is not None:
         trial_name = (Trial.name(data['current_trial'])
                       if data.get('current_trial') is not None else 'None')
+        # The difficulty line spells its two knobs out rather than the level's
+        # full description, which is too wide for the panel.
+        level = data.get('difficulty', DEFAULT_DIFFICULTY)
+        trials = Difficulty.trials_per_round(level)
         lines = [
             (f"Round {data.get('round_index', 0) + 1}/{ROUND_COUNT}  "
              f"Run {data.get('run_in_round', 0) + 1}/{RUNS_PER_ROUND}"),
             f"Cash ${data.get('cash', 0)}",
             f"Runs passed {data.get('runs_cleared', 0)}  •  failed {data.get('failed_runs', 0)}",
             f"Trial: {trial_name}",
+            (f"Difficulty {level}: {trials} trial{'' if trials == 1 else 's'} "
+             f"a round, {Difficulty.score_growth(level):g}x targets"),
         ]
         y = panel.top + 120
         for line in lines:

@@ -40,6 +40,7 @@ ACTION_UPGRADE_COST = _ui_source.ACTION_UPGRADE_COST
 ACTION_UPGRADE_RECT = _ui_source.ACTION_UPGRADE_RECT
 CARD_AREA_COORDS = _ui_source.CARD_AREA_COORDS
 CARD_COLOR = _ui_source.CARD_COLOR
+Difficulty = _ui_source.Difficulty
 GRAY = _ui_source.GRAY
 GREEN = _ui_source.GREEN
 GRID_HEIGHT = _ui_source.GRID_HEIGHT
@@ -181,14 +182,94 @@ def draw_marble_box(screen, x, y, w, h, border_color=(30, 30, 30)):
                          (x + width - 1, gy_y + bord), line_w)
 
 
+def _draw_locked_boundary(game):
+    """Outline the edge between the playable region and the locked squares.
+
+    Every side of an unlocked square that faces a LOCKED square is drawn as a
+    thick band in the board's own border colour and weight — the same border
+    the box's outer edge gets (both use BORD_WIDTH) — so the playable region
+    reads as one solid platform seated in the void instead of as tiles whose
+    edges the thin grid lines blur together. Only mixed unlocked/locked sides
+    are drawn (each boundary is visited from its unlocked side, so no band is
+    drawn twice).
+
+    The band sits ENTIRELY in the void just outside the playable region: its
+    inner edge is flush with the shared edge, so a block or a marble sitting on
+    the region's edge can never cover it — that is why the band starts a whole
+    BORD_WIDTH outside the square instead of straddling the shared edge (and
+    why it can be drawn with the board, under the blocks, at all). The outline
+    hugs the region the way the outer border hugs the box.
+
+    A band only runs past its own square at an end whose 6x6 corner square
+    belongs to a LOCKED square (``up_left`` and friends): that is a corner of
+    the region which the two bands meeting there have to fill between them, and
+    it is also the only end where running on cannot paint the border over a
+    square of the playable region. Everywhere else the bands of the neighbouring
+    squares already meet edge to edge, so the outline stays continuous without a
+    single pixel of it landing on the region.
+
+    The band is always the dark board border colour, NOT the ``border_color``
+    draw_board was handed: the all-finishes trial paints that one in the finish
+    scorer's colour to say "this edge scores a finish", and the walls against
+    the locked squares (see Game._board_wall_blocks) are invisible physics walls
+    that never finish anything, so they must not claim to.
+    """
+    def locked(cx, cy):
+        """True when that square exists and is still locked.
+
+        Squares outside the grid read False, so the box's own edges are left to
+        the outer border instead of collecting a band of their own.
+        """
+        return (0 <= cx < GRID_WIDTH and 0 <= cy < GRID_HEIGHT
+                and game.is_cell_locked(cx, cy))
+
+    x0, y0 = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
+    for gy in range(GRID_HEIGHT):
+        for gx in range(GRID_WIDTH):
+            if game.is_cell_locked(gx, gy):
+                continue
+            left = x0 + gx * GRID_SIZE
+            top = y0 + gy * GRID_SIZE
+            right = left + GRID_SIZE
+            bottom = top + GRID_SIZE
+            # The four squares diagonal to this one: a band covers the 6x6
+            # corner square at one of its ends only when that diagonal square
+            # is locked, so no band ever reaches onto the playable region.
+            over_up = BORD_WIDTH if locked(gx, gy - 1) else 0
+            over_down = BORD_WIDTH if locked(gx, gy + 1) else 0
+            over_left = BORD_WIDTH if locked(gx - 1, gy) else 0
+            over_right = BORD_WIDTH if locked(gx + 1, gy) else 0
+            up_left = BORD_WIDTH if locked(gx - 1, gy - 1) else 0
+            up_right = BORD_WIDTH if locked(gx + 1, gy - 1) else 0
+            down_left = BORD_WIDTH if locked(gx - 1, gy + 1) else 0
+            down_right = BORD_WIDTH if locked(gx + 1, gy + 1) else 0
+            bands = []
+            if over_left:
+                bands.append((left - BORD_WIDTH, top - up_left, BORD_WIDTH,
+                              GRID_SIZE + up_left + down_left))
+            if over_right:
+                bands.append((right, top - up_right, BORD_WIDTH,
+                              GRID_SIZE + up_right + down_right))
+            if over_up:
+                bands.append((left - up_left, top - BORD_WIDTH,
+                              GRID_SIZE + up_left + up_right, BORD_WIDTH))
+            if over_down:
+                bands.append((left - down_left, bottom,
+                              GRID_SIZE + down_left + down_right, BORD_WIDTH))
+            for band in bands:
+                pygame.draw.rect(game.screen, (30, 30, 30), band)
+
+
 def draw_board(game, border_color=(30, 30, 30)):
     """Draw the dynamic marble box (the board), same look as draw_marble_box.
 
     Unlocked squares get the normal board fill; LOCKED squares are painted the
     background color so they read as part of the red void. The original thin
     grid overlay stays across the whole 10x15 area — including over locked
-    squares — so the player can see every unit they can expand the board into,
-    and the thick outer border is drawn last exactly like draw_marble_box.
+    squares — so the player can see every unit they can expand the board into.
+    The boundary between the playable region and the locked squares gets a
+    thick border of its own (see _draw_locked_boundary), and the thick outer
+    border is drawn last exactly like draw_marble_box.
     """
     x, y = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
     width = GRID_SIZE * GRID_WIDTH
@@ -211,6 +292,12 @@ def draw_board(game, border_color=(30, 30, 30)):
     for gy in range(1, GRID_HEIGHT):
         gy_y = y + gy * GRID_SIZE
         pygame.draw.line(game.screen, (30, 30, 30), (x, gy_y), (x + width - 1, gy_y), 1)
+    # The locked squares make a wall around the playable region, outlined with
+    # the board's own thick border: it lies just outside the region, so the
+    # blocks, marbles and particles drawn after the board (see draw) can never
+    # cover it. Drawn over the thin lines above, under the outer border below.
+    if game.board_locked():
+        _draw_locked_boundary(game)
     # The thick outer border, drawn last so it sits in front of the inner
     # lines at the box's edges (mirrors draw_marble_box).
     for gx in (0, GRID_WIDTH):
@@ -726,7 +813,15 @@ def draw_card_back(screen, rect):
 
 
 def draw_action(screen, item, rect, selected=False):
-    """Draw an action as a mini card (colored face, icon, v1/v2 badge).
+    """Draw an action as a mini card (colored face, icon, v1/v2 tag).
+
+    A v2 action is gold-framed and gold-tagged, because it is either one the
+    player paid ACTION_UPGRADE_COST to upgrade or one of the rare ones the shop
+    rolled ALREADY upgraded (see random_action_version) — a windfall worth the
+    whole upgrade, and one the player has to be able to spot in a full shop. The
+    frame breathes between two golds so it catches the eye and the tag is a
+    solid gold plate with dark text; a v1 keeps the plain white frame and the
+    small gold "v1" label it always had.
 
     The center shows the action's own picture (a skull for Death, a loop for
     Deja Vu, ...); the old letter glyph is only a fallback for an action with
@@ -736,8 +831,16 @@ def draw_action(screen, item, rect, selected=False):
     color = Action.COLORS.get(value, (90, 60, 120))
     version = getattr(item, "version", 1)
     pygame.draw.rect(screen, color, rect, border_radius=6)
-    pygame.draw.rect(screen, WHITE, rect, 1, border_radius=6)
-    pygame.draw.rect(screen, WHITE, rect, 2, border_radius=6)
+    if version >= 2:
+        # The pulse only moves between two golds (a saturated gold and a paler
+        # one), so the tile stays gold on every frame while still drawing the
+        # eye to a rare already-upgraded action.
+        pulse = 0.5 + 0.5 * math.sin(pygame.time.get_ticks() / 260.0)
+        pygame.draw.rect(screen, (255, int(215 + 35 * pulse), int(140 * pulse)),
+                         rect, 3, border_radius=6)
+    else:
+        pygame.draw.rect(screen, WHITE, rect, 1, border_radius=6)
+        pygame.draw.rect(screen, WHITE, rect, 2, border_radius=6)
     if selected:
         pygame.draw.rect(screen, GREEN, rect, 3, border_radius=6)
     if not _draw_action_icon(screen, value, center=(rect.centerx, rect.centery + 2),
@@ -745,6 +848,32 @@ def draw_action(screen, item, rect, selected=False):
         glyph = pygame.font.Font(None, 22).render(
             Action.GLYPHS.get(value, "?"), True, WHITE)
         screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.centery + 2)))
+    _draw_version_tag(screen, rect, version)
+
+
+def action_version_tag_rect(rect):
+    """The corner plate a mini action card's version tag is drawn in.
+
+    Exposed (like difficulty_button_rect) so callers and tests can ask where
+    the v2 tag is without repeating the arithmetic.
+    """
+    return pygame.Rect(rect.right - 21, rect.top + 1, 20, 14)
+
+
+def _draw_version_tag(screen, rect, version):
+    """Draw the v1/v2 tag in a mini action card's top-right corner.
+
+    v2 is a solid gold plate with dark text, so an upgraded action reads as
+    upgraded at a glance wherever the card is drawn (shop, action area, info
+    box); v1 stays the small gold label it always was.
+    """
+    if version >= 2:
+        tag = action_version_tag_rect(rect)
+        pygame.draw.rect(screen, (255, 215, 0), tag, border_radius=4)
+        pygame.draw.rect(screen, (70, 45, 0), tag, 1, border_radius=4)
+        text = pygame.font.Font(None, 16).render("v2", True, (60, 38, 0))
+        screen.blit(text, text.get_rect(center=tag.center))
+        return
     badge = pygame.font.Font(None, 14).render(f"v{version}", True, (255, 215, 0))
     screen.blit(badge, (rect.right - badge.get_width() - 3, rect.top + 2))
 
@@ -2016,7 +2145,8 @@ def draw_tokens(game):
 def draw_action_area(game):
     """Draw the owned actions above the toolbox (max MAX_ACTIONS).
 
-    Owned actions render as mini cards with a v1/v2 badge; empty slots show a
+    Owned actions render as mini cards with a v1/v2 tag (a gold frame and a
+    gold plate for the upgraded ones — see draw_action); empty slots show a
     back. The selected action gets a green outline, and its upgrade button
     appears beside the area (v1 -> v2 for ACTION_UPGRADE_COST).
     """
@@ -2175,7 +2305,13 @@ def draw_shop(game):
         rect = pygame.Rect(shop.rect.x + item.col * GRID_SIZE, shop.rect.y + item.row * GRID_SIZE, GRID_SIZE, GRID_SIZE)
         draw_shop_item(game.screen, item, rect)
         # Show the effective price (component prices rise with each purchase).
-        price = game.small_font.render(f"${game._buy_price(item)}", True, WHITE)
+        # An already-upgraded action is sold at the normal action price but is
+        # worth ACTION_UPGRADE_COST more, so its price is drawn in the gold of
+        # its own frame to flag the bargain (see draw_action).
+        upgraded = (getattr(item, "kind", None) == "action"
+                    and getattr(item, "version", 1) >= 2)
+        price = game.small_font.render(f"${game._buy_price(item)}", True,
+                                       (255, 215, 0) if upgraded else WHITE)
         center_x = shop.rect.x + item.col * GRID_SIZE + GRID_SIZE // 2
         price_y = shop.rect.y + (item.row + 1) * GRID_SIZE + GRID_SIZE // 2
         game.screen.blit(price, price.get_rect(center=(center_x, price_y)))
@@ -2369,17 +2505,48 @@ def _draw_description_line(game, line, color, x, y, font=None):
         x += surface.get_width() + space
 
 
-def draw_marble_select(game):
-    """Draw the marble-type selection screen shown when starting a new save.
+def _draw_difficulty_picker(game):
+    """Draw the new-save screen's difficulty picker (a column of four levels).
 
-    The player picks exactly one marble type (persisted with the save); a
-    preview of each type sits beside its name and description.
+    The chosen level is outlined in gold and its own rules are spelled out
+    underneath, so the player can see what each level changes: how many trials
+    a round is played under and how fast the required score grows (see
+    Difficulty).
+    """
+    label = game.tiny_font.render("DIFFICULTY", True, WHITE)
+    game.screen.blit(label, label.get_rect(midtop=(170, 252)))
+    for i, level in enumerate(Difficulty.ORDER):
+        rect = game.difficulty_button_rect(i)
+        chosen = level == game.difficulty
+        pygame.draw.rect(game.screen, (30, 32, 46), rect, border_radius=10)
+        pygame.draw.rect(game.screen,
+                         (255, 215, 0) if chosen else (120, 120, 140),
+                         rect, 3 if chosen else 2, border_radius=10)
+        name = game.font.render(Difficulty.name(level), True,
+                                (255, 215, 0) if chosen else WHITE)
+        game.screen.blit(name, name.get_rect(center=rect.center))
+    y = game.difficulty_button_rect(len(Difficulty.ORDER) - 1).bottom + 12
+    for line in game._wrap_text(Difficulty.description(game.difficulty),
+                                game.tiny_font, 280):
+        surf = game.tiny_font.render(line, True, (220, 220, 220))
+        game.screen.blit(surf, (30, y))
+        y += 14
+
+
+def draw_marble_select(game):
+    """Draw the new-save screen: the difficulty picker and the marble types.
+
+    The player picks this save's difficulty (how many trials a round is played
+    under and how fast the required score grows — see Difficulty) and exactly
+    one marble type; both are persisted with the save. A preview of each marble
+    type sits beside its name and description.
     """
     game.screen.fill(BG_COLOR)
     heading = game.main_title_font.render("CHOOSE YOUR MARBLE", True, (255, 215, 0))
     game.screen.blit(heading, heading.get_rect(center=(SCREEN_WIDTH // 2, 90)))
-    sub = game.font.render("You can only pick one marble type for this save", True, WHITE)
+    sub = game.font.render("Pick a difficulty, then a marble type", True, WHITE)
     game.screen.blit(sub, sub.get_rect(center=(SCREEN_WIDTH // 2, 150)))
+    _draw_difficulty_picker(game)
     for i, mt in enumerate(MarbleType.ORDER):
         rect = game.marble_card_rect(i)
         pygame.draw.rect(game.screen, (30, 32, 46), rect, border_radius=14)

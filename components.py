@@ -515,6 +515,89 @@ class FinalBoss:
         return cls.ORDER[(idx + 1) % len(cls.ORDER)]
 
 
+class Difficulty:
+    """How hard a save's runs are, chosen when a new save begins.
+
+    A level sets two knobs: how many of a round's runs play a trial (the
+    round's LAST runs — see TRIALS_PER_ROUND, so difficulty 1-2 leave the
+    round's first two runs clean) and the factor a run's required score grows
+    by for the next run. The hardest level is the game's original balance —
+    every run of a round plays its own trial and the target doubles each run —
+    and each level below lightens one of those knobs, so difficulty 1 is the
+    gentlest (a trial on a round's last run only, and 1.6x targets) and
+    difficulty 4 is the game as it has always played.
+    """
+    LEVEL_1 = 1
+    LEVEL_2 = 2
+    LEVEL_3 = 3
+    LEVEL_4 = 4
+
+    ORDER: ClassVar[list[int]] = [LEVEL_1, LEVEL_2, LEVEL_3, LEVEL_4]
+
+    NAMES: ClassVar[dict[int, str]] = {
+        LEVEL_1: "Difficulty 1",
+        LEVEL_2: "Difficulty 2",
+        LEVEL_3: "Difficulty 3",
+        LEVEL_4: "Difficulty 4",
+    }
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        LEVEL_1: ("A trial on the last run of every round, and gentler "
+                  "targets: each run asks 1.6x the last run's required score."),
+        LEVEL_2: ("A trial on the last run of every round, with the required "
+                  "score doubling every run."),
+        LEVEL_3: ("The last two runs of every round each play a trial, with "
+                  "the required score doubling every run."),
+        LEVEL_4: ("Every run of every round plays a trial, with the required "
+                  "score doubling every run."),
+    }
+    # The factor a run's required score grows by each run (see
+    # main.get_next_required_score).
+    SCORE_GROWTH: ClassVar[dict[int, float]] = {
+        LEVEL_1: 1.6,
+        LEVEL_2: 2.0,
+        LEVEL_3: 2.0,
+        LEVEL_4: 2.0,
+    }
+    # How many of a round's LAST runs play a trial: 1 means only its final run
+    # has one, 3 means every run of the round does (see
+    # main.Game._choose_trial).
+    TRIALS_PER_ROUND: ClassVar[dict[int, int]] = {
+        LEVEL_1: 1,
+        LEVEL_2: 1,
+        LEVEL_3: 2,
+        LEVEL_4: 3,
+    }
+
+    @classmethod
+    def name(cls, level):
+        return cls.NAMES.get(level, "Unknown")
+
+    @classmethod
+    def description(cls, level):
+        return cls.DESCRIPTIONS.get(level, "Unknown difficulty.")
+
+    @classmethod
+    def score_growth(cls, level):
+        """The factor a level's required score grows by each run."""
+        return cls.SCORE_GROWTH.get(level, 2.0)
+
+    @classmethod
+    def trials_per_round(cls, level):
+        """How many of a level's round's LAST runs play a trial.
+
+        An unknown level falls back to the gentlest count (a round's last run
+        only), so an unrecognised difficulty in a save is playable rather than
+        broken.
+        """
+        return cls.TRIALS_PER_ROUND.get(level, 1)
+
+
+# The level a save starts on when it has no difficulty of its own — the game's
+# original balance (a trial per run, doubling targets), which is also how saves
+# written before the difficulty picker existed are read.
+DEFAULT_DIFFICULTY = Difficulty.LEVEL_4
+
+
 class MarbleType:
     """The marble the player picks when starting a new save (one per save).
 
@@ -867,7 +950,10 @@ class Action:
     Actions come in two versions: v1 (as bought) and v2 (upgraded for
     ACTION_UPGRADE_COST), with v2 being much stronger. v2 cannot be upgraded
     further. The player can hold up to MAX_ACTIONS at once, and uses an action
-    by selecting it, picking a block/card subject, and pressing S.
+    by selecting it, picking a block/card subject, and pressing S. A newly
+    created action is usually v1, but a rare one (ACTION_V2_CHANCE, see
+    ``random_action_version`` in main) is handed over already upgraded for
+    free — so v2 is both a purchase and an occasional windfall.
     """
     DEATH = 0
     RECOGNITION = 1

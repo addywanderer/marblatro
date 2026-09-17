@@ -861,6 +861,43 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(self.game.cash, 0)
         self.assertEqual(self.game.last_run_cash_gained, 0)
 
+    def test_restarting_a_run_takes_back_the_cash_its_blocks_paid(self):
+        # Cash/Lucky blocks pay into the wallet as they trigger, so restarting
+        # the run (R) has to take that cash back out with the run-scoped
+        # counter: otherwise resetting a run would be a way to print money.
+        self.game.cash = 0
+        self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
+        self.game.run_active = True
+        cash_block = main.Block(0, 0, scorer=main.Scorer.CASH)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [cash_block]
+        self.game._handle_block_contacts([cash_block])  # +$15
+        self.assertEqual(self.game.cash, 15)
+        self.assertEqual(self.game.run_cash_gained, 15)
+
+        self.assertTrue(self.game.reset_run())
+
+        self.assertEqual(self.game.run_cash_gained, 0)
+        self.assertEqual(self.game.cash, 0)
+
+    def test_restarting_cannot_push_the_wallet_below_zero(self):
+        # Cash the discarded run already SPENT is not clawed back — the same
+        # rule the free rerolls follow — so a restart never leaves the wallet
+        # negative.
+        self.game.cash = 0
+        self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
+        self.game.run_active = True
+        cash_block = main.Block(0, 0, scorer=main.Scorer.CASH)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [cash_block]
+        self.game._handle_block_contacts([cash_block])  # +$15
+        self.game.cash = 0  # already spent again on a shop purchase
+
+        self.assertTrue(self.game.reset_run())
+
+        self.assertEqual(self.game.cash, 0)
+        self.assertEqual(self.game.run_cash_gained, 0)
+
     def test_cash_breakdown_records_every_cash_source(self):
         # The breakdown splits a run's earnings into the flat base payment, the
         # interest on the cash held, the over-the-target score bonus, Cash
@@ -1401,18 +1438,42 @@ class RunScoringTests(unittest.TestCase):
         self.game._refresh_shop()
         self.assertEqual(self.game.cash, 60 - main.SHOP_REFRESH_COST)
 
-    def test_a_fresh_run_forgets_the_last_runs_reroll_gain(self):
-        # Each run counts only its own Fresh hits: the counter is cleared when
-        # the run starts, so a later retry can't take back an older run's
-        # rerolls.
-        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+    def test_a_committed_run_keeps_its_rerolls_through_the_next_reset(self):
+        # Each run counts only its own Fresh hits, and a run that has been
+        # CONTINUE'd is settled: its counter is cleared at the commit (see
+        # _continue_run), so building/starting the NEXT run cannot take that
+        # run's rerolls back. Only a RESTARTED run hands its own back (see
+        # test_restarting_a_run_takes_back_the_rerolls_its_blocks_granted).
         self.game.free_rerolls = 2
-        self.game.free_rerolls_run_gain = 5  # stale, from an earlier run
+        self.game.free_rerolls_run_gain = 3  # the run being continued
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+
+        self.game._continue_run()
+
+        self.assertEqual(self.game.free_rerolls_run_gain, 0)
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.free_rerolls, 2)
+
+    def test_restarting_a_run_takes_back_the_rerolls_its_blocks_granted(self):
+        # A Fresh hit banks its reroll the moment it triggers, so restarting
+        # the run hands that reroll back — while rerolls banked by earlier
+        # runs stay, and one already spent is simply not un-spent.
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.free_rerolls = 2  # banked by earlier runs
+        self.game.free_rerolls_run_gain = 0
+        self.game.run_active = True
+        block = main.Block(1, 1, scorer=main.Scorer.FRESH)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [block]
+        self.game._handle_block_contacts([block])
+        self.assertEqual(self.game.free_rerolls, 3)
 
         self.assertTrue(self.game.reset_run())
 
-        self.assertEqual(self.game.free_rerolls_run_gain, 0)
         self.assertEqual(self.game.free_rerolls, 2)
+        self.assertEqual(self.game.free_rerolls_run_gain, 0)
 
     def test_leaving_before_a_run_finishes_keeps_the_free_rerolls(self):
         # Same rule as the point banks: saving/quitting/menu while building has
@@ -7844,6 +7905,107 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(action.version, 2)
         self.assertEqual(self.game.cash, 1000)  # nothing to pay: already v2
 
+    def test_an_upgraded_action_is_gold_framed_and_gold_tagged(self):
+        # An upgraded action has to be recognisable at a glance on a full shelf:
+        # a v2 is drawn with a gold frame and a solid gold tag in its corner,
+        # while a v1 keeps the plain white frame and its small "v1" label.
+        gold = (255, 215, 0)
+        rect = pygame.Rect(0, 0, main.GRID_SIZE, main.GRID_SIZE)
+        canvas = pygame.Surface((main.GRID_SIZE, main.GRID_SIZE), pygame.SRCALPHA)
+        tag = main.ui.action_version_tag_rect(rect)
+
+        def draw(version):
+            canvas.fill((0, 0, 0, 0))
+            main.ui.draw_action(canvas, main.ActionItem(main.Action.DEATH, 24,
+                                                        version=version), rect)
+            return (canvas.get_at((rect.left, rect.centery))[:3],
+                    canvas.get_at((tag.left + 2, tag.centery))[:3])
+
+        v1_frame, v1_tag = draw(1)
+        self.assertEqual(v1_frame, main.WHITE)
+        self.assertNotEqual(v1_tag, gold)  # a small label, not a plate
+
+        v2_frame, v2_tag = draw(2)
+        self.assertEqual(v2_tag, gold)     # the plate is solid gold
+        self.assertNotEqual(v2_frame, main.WHITE)
+        # The frame pulses so it catches the eye, but only between two golds.
+        frames = set()
+        for ticks in (0, 130, 260, 390, 520):
+            with mock.patch("main.pygame.time.get_ticks", return_value=ticks):
+                frames.add(draw(2)[0])
+        self.assertGreater(len(frames), 1)
+        for frame in frames:
+            self.assertEqual(frame[0], 255)
+            self.assertLess(frame[2], 200)  # never pulses all the way to white
+
+    def test_a_v2_action_on_the_shelf_prices_in_gold(self):
+        # The shelf flag has to be readable without hovering: an already-upgraded
+        # action's price is drawn in the gold of its own frame, so the tile worth
+        # an extra ACTION_UPGRADE_COST stands out across the shop.
+        gold = (255, 215, 0)
+        self.game.trials_enabled = False  # no Slim pickings trim to shift items
+        self.game.shop_message = ""
+
+        def price_gold(version):
+            with mock.patch("main.random_action_version", return_value=version):
+                self.game.shop.refresh()
+            self.game.screen.fill(main.BLACK)
+            main.ui.draw_shop(self.game)
+            cells = []
+            for item in self.game.shop.items:
+                if getattr(item, "kind", None) != "action":
+                    continue
+                cx = (self.game.shop.rect.x + item.col * main.GRID_SIZE
+                      + main.GRID_SIZE // 2)
+                cy = (self.game.shop.rect.y + (item.row + 1) * main.GRID_SIZE
+                      + main.GRID_SIZE // 2)
+                cells.append(sum(
+                    self.game.screen.get_at((x, y))[:3] == gold
+                    for x in range(cx - 18, cx + 18)
+                    for y in range(cy - 8, cy + 9)))
+            return cells
+
+        plain = price_gold(1)
+        self.assertTrue(plain)
+        self.assertEqual(plain, [0] * len(plain))  # a plain shelf prices white
+        upgraded = price_gold(2)
+        self.assertEqual(len(upgraded), len(plain))
+        self.assertTrue(all(count > 0 for count in upgraded), upgraded)
+
+    def test_a_reroll_that_shelves_an_upgraded_action_says_so(self):
+        # The rare pre-upgraded action is named in the reroll message, so a
+        # player who never reads the shelves is still told about the windfall.
+        self.game.cash = 1000
+        self.game.free_rerolls = 0
+        self.game.trials_enabled = False
+
+        with mock.patch("main.random_action_version", return_value=2):
+            self.game._refresh_shop()
+        self.assertIn("Refreshed shop", self.game.shop_message)
+        self.assertIn("already upgraded", self.game.shop_message)
+        for item in self.game.shop.items:
+            if item.kind == "action":
+                self.assertIn(f"{item.name} v2", self.game.shop_message)
+
+        # A shelf of plain v1 actions gets the ordinary message back.
+        with mock.patch("main.random_action_version", return_value=1):
+            self.game._refresh_shop()
+        self.assertNotIn("already upgraded", self.game.shop_message)
+
+    def test_an_upgraded_action_says_so_in_its_name_and_info_box(self):
+        v1 = main.ActionItem(main.Action.DEATH, 24)
+        v2 = main.ActionItem(main.Action.DEATH, 24, version=2)
+        # Only the upgraded one carries its version in its name, so it reads as
+        # upgraded in the messages and the info box's title.
+        self.assertEqual(self.game._item_name(v1), "Death")
+        self.assertEqual(self.game._item_name(v2), "Death v2")
+        self.assertEqual(dict(self.game._describe_item(v1))["Version"],
+                         "v1 — upgrade to v2 for "
+                         f"${self.game._inflated(main.ACTION_UPGRADE_COST)}")
+        upgraded_row = dict(self.game._describe_item(v2))["Version"]
+        self.assertIn("v2", upgraded_row)
+        self.assertIn("fully upgraded", upgraded_row)
+
     def test_buying_action_adds_to_action_area_not_toolbox(self):
         self.game.cash = 1000
         action = main.ActionItem(main.Action.DEATH, 60)
@@ -8650,6 +8812,144 @@ class RunScoringTests(unittest.TestCase):
                                                  else seq[0])):
             self.game._continue_run()
         self.assertEqual(len(self.game.shop.items), before)
+
+    # --- Difficulty (chosen when a new save begins) -------------------------
+
+    def test_difficulty_levels_are_defined(self):
+        # Four levels, each naming itself and spelling its rules out, plus the
+        # two knobs the game reads: how many of a round's runs play a trial and
+        # the factor the required score grows by each run.
+        self.assertEqual(main.Difficulty.ORDER, [1, 2, 3, 4])
+        for level in main.Difficulty.ORDER:
+            with self.subTest(difficulty=level):
+                self.assertTrue(main.Difficulty.name(level))
+                self.assertTrue(main.Difficulty.description(level))
+                self.assertGreaterEqual(main.Difficulty.trials_per_round(level), 1)
+                self.assertLessEqual(main.Difficulty.trials_per_round(level),
+                                     main.RUNS_PER_ROUND)
+                self.assertGreater(main.Difficulty.score_growth(level), 1.0)
+        # The ladder the levels describe: 1.6x targets only on level 1, and a
+        # trial on the round's last run for 1-2, its last two for 3, and every
+        # run for 4.
+        self.assertAlmostEqual(main.Difficulty.score_growth(1), 1.6)
+        self.assertEqual([main.Difficulty.score_growth(level) for level in (2, 3, 4)],
+                         [2.0, 2.0, 2.0])
+        self.assertEqual([main.Difficulty.trials_per_round(level)
+                          for level in (1, 2, 3, 4)], [1, 1, 2, 3])
+        # A save with no difficulty of its own (an old save, a fresh game) is
+        # the game's original balance: a trial for every run, doubling targets.
+        self.assertEqual(main.DEFAULT_DIFFICULTY, main.Difficulty.LEVEL_4)
+
+    def test_the_difficulty_sets_how_fast_the_target_grows(self):
+        # Difficulty 1 asks 1.6x the last run's target, rounded down but never
+        # less than one more than the last (so it can't stall at 1); the other
+        # levels double it.
+        try:
+            main.REQUIRED_SCORES[:] = [1]
+            gentle = [main.get_next_required_score(run, 1.6) for run in range(6)]
+            main.REQUIRED_SCORES[:] = [1]
+            doubled = [main.get_next_required_score(run, 2.0) for run in range(5)]
+            # ...and a caller with no difficulty to hand still gets the 2x the
+            # rest of the game assumes.
+            main.REQUIRED_SCORES[:] = [1]
+            default = [main.get_next_required_score(run) for run in range(4)]
+        finally:
+            main.REQUIRED_SCORES[:] = [1]  # the tests that follow expect this
+
+        self.assertEqual(gentle, [1, 2, 3, 4, 6, 9])
+        self.assertEqual(doubled, [1, 2, 4, 8, 16])
+        self.assertEqual(default, [1, 2, 4, 8])
+
+    def test_a_round_gives_trials_to_its_last_runs(self):
+        # The difficulty decides how many of a round's runs play a trial, and
+        # they are the round's LAST runs: difficulties 1-2 give only the final
+        # run of a round a trial, difficulty 3 gives the last two, and
+        # difficulty 4 gives every run of the round one.
+        expected = {main.Difficulty.LEVEL_1: 1, main.Difficulty.LEVEL_2: 1,
+                    main.Difficulty.LEVEL_3: 2, main.Difficulty.LEVEL_4: 3}
+        for level, with_trial in expected.items():
+            with self.subTest(difficulty=level):
+                game = main.Game()
+                game.trials_enabled = True
+                game.difficulty = level
+                trials = []
+                for run in range(main.RUNS_PER_ROUND):
+                    game._choose_trial(run)  # the run being set up
+                    trials.append(game.current_trial)
+                self.assertEqual(sum(t is not None for t in trials), with_trial,
+                                 trials)
+                for run, trial in enumerate(trials):
+                    if run >= main.RUNS_PER_ROUND - with_trial:
+                        self.assertIn(trial, main.Trial.ORDER)
+                    else:
+                        self.assertIsNone(trial, f"run {run + 1} is trial-free")
+
+    def test_only_a_rounds_covered_runs_draw_a_trial(self):
+        # A run that plays a trial draws it fresh, run by run (exactly as the
+        # game always did), while a run that plays no trial draws nothing.
+        self.game.difficulty = main.Difficulty.LEVEL_3  # last two runs only
+        with mock.patch("main.random.choice",
+                        return_value=main.Trial.SPEEDRUN) as choice:
+            self.game._choose_trial(0)  # the round's first run: no trial
+            self.assertIsNone(self.game.current_trial)
+            self.game._choose_trial(1)
+            self.assertEqual(self.game.current_trial, main.Trial.SPEEDRUN)
+            self.game._choose_trial(2)
+            self.assertEqual(self.game.current_trial, main.Trial.SPEEDRUN)
+        self.assertEqual(choice.call_count, 2, "one draw per trial run")
+
+    def test_the_new_save_screen_picks_the_difficulty(self):
+        # The picker's buttons set the level of the save about to begin (the
+        # marble click then starts it with that level), and opening the screen
+        # for a new save starts from the default level.
+        old_saves = save_system.SAVES_DIR
+        save_system.SAVES_DIR = tempfile.mkdtemp()
+        try:
+            save_system.begin_new_game_selection(self.game, 3)
+            self.assertTrue(self.game.marble_selecting)
+            self.assertEqual(self.game.difficulty, main.DEFAULT_DIFFICULTY)
+
+            self._click(self.game.difficulty_button_rect(2).center)
+            self.assertEqual(self.game.difficulty, main.Difficulty.LEVEL_3)
+
+            # Picking the marble begins the save, and the chosen level (like
+            # the upgrade toggle) survives the game reset that does it.
+            save_system.start_new_game_with_marble(self.game, main.MarbleType.EIGHT_BALL)
+            self.assertFalse(self.game.marble_selecting)
+            self.assertEqual(self.game.difficulty, main.Difficulty.LEVEL_3)
+            self.assertEqual(self.game.marble_type, main.MarbleType.EIGHT_BALL)
+            self.assertEqual(self.game.save_slot, 3)
+        finally:
+            shutil.rmtree(save_system.SAVES_DIR, ignore_errors=True)
+            save_system.SAVES_DIR = old_saves
+
+    def test_the_difficulty_is_saved(self):
+        # The save carries the difficulty (the rules the save plays by), so a
+        # loaded game keeps them.
+        self.game.difficulty = main.Difficulty.LEVEL_3
+        self.game.current_trial = main.Trial.SPEEDRUN
+
+        data = save_system._save_data(self.game)
+
+        self.assertEqual(data["difficulty"], main.Difficulty.LEVEL_3)
+        fresh = main.Game()
+        save_system._load_save_data(fresh, data, 1)
+        self.assertEqual(fresh.difficulty, main.Difficulty.LEVEL_3)
+        self.assertEqual(fresh.current_trial, main.Trial.SPEEDRUN)
+        # ...and the rules that level stands for are the loaded game's own.
+        self.assertEqual(fresh.trials_per_round,
+                         main.Difficulty.trials_per_round(main.Difficulty.LEVEL_3))
+        self.assertEqual(fresh.score_growth,
+                         main.Difficulty.score_growth(main.Difficulty.LEVEL_3))
+
+        # A save written before the difficulty existed reads as the default
+        # level (the game's original balance).
+        legacy = dict(data)
+        legacy.pop("difficulty")
+        old = main.Game()
+        save_system._load_save_data(old, legacy, 1)
+        self.assertEqual(old.difficulty, main.DEFAULT_DIFFICULTY)
+        self.assertEqual(old.trials_per_round, main.RUNS_PER_ROUND)
 
     def test_long_run_doubles_ideal_time(self):
         # With Long run, the time factor peaks at double the ideal time and is
@@ -13572,6 +13872,100 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.bomb_cells, set())
         self.assertEqual(len(g.unlocked_cells), before)  # nothing unlocked
 
+    def test_a_bomb_blasts_before_the_drill_picks_its_squares(self):
+        # The drill picks its squares off the locked frontier, so a Bomb's blast
+        # has to resolve FIRST: blasted afterwards, it unlocks the radius the
+        # drill's squares can sit in, the board grows by fewer squares than the
+        # drill promised, and the block reads as broken whenever the two fire in
+        # the same run. The frontier is ordered here so the drill would pick the
+        # squares nearest the bomb first — exactly the overlap the ordering
+        # avoids.
+        g = self._start_locked_game()
+        before = set(g.unlocked_cells)
+        bomb = (5, 7)  # the start region's right-middle square
+        g.bomb_cells = {bomb}
+        g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
+        g.drill_run_units = 2
+
+        def nearest_first(candidates):
+            candidates.sort(key=lambda cell: abs(cell[0] - bomb[0])
+                            + abs(cell[1] - bomb[1]))
+
+        g.run_complete = True
+        g.awaiting_after_run = True
+        with mock.patch("main.random.shuffle", side_effect=nearest_first), \
+                mock.patch("main.random.random", return_value=0.9):
+            g._continue_run()
+
+        radius = {(bomb[0] + dx, bomb[1] + dy)
+                  for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
+        gained = g.unlocked_cells - before
+        # The whole radius the bomb could open is open...
+        self.assertEqual(gained & radius,
+                         {cell for cell in radius if cell not in before})
+        # ...and the drill's two squares are new ones ON TOP of it, none of them
+        # inside what the blast was going to cover anyway.
+        self.assertEqual(len(gained - radius), 2)
+        self.assertEqual(len(gained), len(gained & radius) + 2)
+        self.assertEqual(g.bomb_cells, set())
+        self.assertIn("from the bomb blast", g.shop_message)
+        self.assertIn("from the drill", g.shop_message)
+
+    def test_the_run_end_names_every_source_of_board_expansion(self):
+        # One message reports the finished run's whole expansion, naming each
+        # source that contributed: a blast used to be announced after the drill
+        # and replace its message, so a drill that had just expanded the board
+        # was never mentioned.
+        def run_end(g):
+            g.run_complete = True
+            g.awaiting_after_run = True
+            with mock.patch("main.random.random", return_value=0.9):
+                g._continue_run()
+
+        g = self._start_locked_game()
+        g.drill_run_units = 2
+        run_end(g)
+        self.assertEqual(g.shop_message,
+                         "Board expanded 2 squares (2 from the drill)")
+
+        g = self._start_locked_game()
+        g.cards.append(main.CardItem(main.Card.CONQUISTADOR, 56))
+        run_end(g)
+        self.assertEqual(g.shop_message,
+                         "Board expanded 4 squares (4 from Conquistador)")
+
+        # The bomb's radius around (5, 7) opens its three locked neighbours.
+        g = self._start_locked_game()
+        bomb = (5, 7)
+        g.bomb_cells = {bomb}
+        g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
+        run_end(g)
+        self.assertEqual(g.shop_message,
+                         "Board expanded 3 squares (3 from the bomb blast)")
+
+        # Both at once: the counts are listed side by side.
+        g = self._start_locked_game()
+        g.bomb_cells = {bomb}
+        g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
+        g.drill_run_units = 2
+        run_end(g)
+        self.assertEqual(
+            g.shop_message,
+            "Board expanded 5 squares (3 from the bomb blast, 2 from the drill)")
+
+        # Nothing unlocked by the run end leaves the message alone, and one
+        # square still reads in the singular.
+        g = self._start_locked_game()
+        g.shop_message = ""
+        g._announce_board_expansion(0, 0, 0)
+        self.assertEqual(g.shop_message, "")
+        g._announce_board_expansion(1, 0, 0)
+        self.assertEqual(g.shop_message,
+                         "Board expanded 1 square (1 from the bomb blast)")
+        g._announce_board_expansion(0, 0, 2)
+        self.assertEqual(g.shop_message,
+                         "Board expanded 2 squares (2 from Conquistador)")
+
     def test_draw_board_paints_locked_squares_as_background(self):
         g = self._start_locked_game()
         main.ui.draw_board(g)
@@ -13586,6 +13980,95 @@ class BoardTests(unittest.TestCase):
         line_x = main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE
         self.assertEqual(g.screen.get_at((line_x, self._cell_center(4, 7)[1]))[:3],
                          (30, 30, 30))
+
+    def test_draw_board_borders_the_playable_region_thickly(self):
+        # Every side of an unlocked square that faces a LOCKED one gets the
+        # board's own thick border (BORD_WIDTH thick, the outer border's own
+        # weight and colour), and the band lies ENTIRELY in the void just
+        # outside the playable region — flush with the shared edge — so a block
+        # or marble placed on the region's edge can never cover it.
+        g = self._start_locked_game()
+        main.ui.draw_board(g)
+        border = (30, 30, 30)
+        width = main.BORD_WIDTH
+        x0, y0 = main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1]
+        checked = 0
+        for gy in range(main.GRID_HEIGHT):
+            for gx in range(main.GRID_WIDTH):
+                if g.is_cell_locked(gx, gy):
+                    continue
+                left, top = x0 + gx * main.GRID_SIZE, y0 + gy * main.GRID_SIZE
+                right, bottom = left + main.GRID_SIZE, top + main.GRID_SIZE
+                cx = left + main.GRID_SIZE // 2
+                cy = top + main.GRID_SIZE // 2
+                sides = []
+                if gx > 0 and g.is_cell_locked(gx - 1, gy):
+                    sides.append([(left - step, cy) for step in range(1, width + 1)]
+                                 + [(left - width - 1, cy), (left + 1, cy)])
+                if gx < main.GRID_WIDTH - 1 and g.is_cell_locked(gx + 1, gy):
+                    sides.append([(right + step, cy) for step in range(width)]
+                                 + [(right + width, cy), (right - 1, cy)])
+                if gy > 0 and g.is_cell_locked(gx, gy - 1):
+                    sides.append([(cx, top - step) for step in range(1, width + 1)]
+                                 + [(cx, top - width - 1), (cx, top + 1)])
+                if gy < main.GRID_HEIGHT - 1 and g.is_cell_locked(gx, gy + 1):
+                    sides.append([(cx, bottom + step) for step in range(width)]
+                                 + [(cx, bottom + width), (cx, bottom - 1)])
+                for points in sides:
+                    checked += 1
+                    band, just_outside, inside = points[:-2], points[-2], points[-1]
+                    for point in band:
+                        self.assertEqual(g.screen.get_at(point)[:3], border,
+                                         (gx, gy, point))
+                    # ...one pixel further out is void again, and the square
+                    # itself is untouched right from its edge inwards.
+                    self.assertEqual(g.screen.get_at(just_outside)[:3],
+                                     main.BG_COLOR, (gx, gy))
+                    self.assertEqual(g.screen.get_at(inside)[:3],
+                                     main.MARBLE_BOX_COLOR, (gx, gy))
+        self.assertGreater(checked, 0)
+        # The overlay across the locked squares themselves stays thin: two
+        # squares away from the playable region only the line's own pixel is
+        # dark, and its neighbours are still the void colour (sampled mid-cell
+        # so the perpendicular grid line is not in the way).
+        far_x = x0 + 2 * main.GRID_SIZE
+        far_y = y0 + 2 * main.GRID_SIZE + 5
+        self.assertEqual(g.screen.get_at((far_x, far_y))[:3], border)
+        self.assertEqual(g.screen.get_at((far_x - 1, far_y))[:3], main.BG_COLOR)
+        self.assertEqual(g.screen.get_at((far_x + 1, far_y))[:3], main.BG_COLOR)
+
+    def test_the_locked_boundarys_corners_are_filled(self):
+        # Each band runs a full border width past both ends, so the outline's
+        # corners are solid instead of notched: the whole corner square just
+        # outside the start region's top-left corner is border.
+        g = self._start_locked_game()
+        main.ui.draw_board(g)
+        left = main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE
+        top = main.MARBLE_BOX_COORDS[1] + 6 * main.GRID_SIZE
+        for dx in range(1, main.BORD_WIDTH + 1):
+            for dy in range(1, main.BORD_WIDTH + 1):
+                self.assertEqual(g.screen.get_at((left - dx, top - dy))[:3],
+                                 (30, 30, 30), (dx, dy))
+
+    def test_the_all_finishes_trial_keeps_the_locked_boundary_dark(self):
+        # The all-finishes trial paints the box's OUTER border in the finish
+        # colour, because that is the edge a marble finishes on. The walls
+        # against the locked squares are invisible physics walls that never
+        # finish anything (see Game._board_wall_blocks), so the boundary between
+        # the playable region and the void stays the board's dark border colour.
+        g = self._start_locked_game()
+        finish = main.Scorer.color(main.Scorer.FINISH)
+        main.ui.draw_board(g, finish)
+        x0, y0 = main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1]
+        self.assertEqual(g.screen.get_at((x0 + 20, y0 - main.BORD_WIDTH // 2))[:3],
+                         finish)
+        left = x0 + 4 * main.GRID_SIZE
+        right = x0 + 6 * main.GRID_SIZE
+        cy = y0 + 6 * main.GRID_SIZE + 20
+        self.assertEqual(g.screen.get_at((left - 1, cy))[:3], (30, 30, 30))
+        self.assertEqual(g.screen.get_at((right + 1, cy))[:3], (30, 30, 30))
+        self.assertEqual(g.screen.get_at((left + 1, cy))[:3],
+                         main.MARBLE_BOX_COLOR)
 
     def test_draw_board_matches_plain_board_when_fully_unlocked(self):
         g = self.game  # a plain Game() has the whole board unlocked
