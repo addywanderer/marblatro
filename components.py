@@ -725,7 +725,7 @@ class Card:
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
         ERR_404: r"\marblatro\main.py, line 2339: 'self._return_card()' CardNotFoundError: Card was not found [FATAL]",
         BLUEPRINT: "Copies the function of the card to its immediate left in the card area",
-        SHOWMAN: "Allows you to buy more than one of the same card",
+        SHOWMAN: "Lets cards you already own show up in the shop again, so you can own more than one of the same card",
         GARDEN: "Seed blocks give +6 mult per seed on the board instead of +3",
         RIGGED_CASINO: "Random blocks give +xMult 3x more often and +chips 3x less often",
         CONQUISTADOR: "After each run, unlocks 4 random locked board squares adjacent to unlocked ones",

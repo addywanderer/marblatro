@@ -4,6 +4,7 @@ import random
 import numpy as np
 import pygame
 
+import crt
 from components import (
     CARD_SCORERS,
     COMPONENT_PRICES,
@@ -1340,7 +1341,7 @@ import ui
 
 class Shop:
     """A grid-based shop: two random blocks plus two of each component type."""
-    def __init__(self, rect):
+    def __init__(self, rect, game=None):
         self.rect = pygame.Rect(rect)
         self.cols = rect[2] // GRID_SIZE
         self.rows = rect[3] // GRID_SIZE
@@ -1348,7 +1349,31 @@ class Shop:
         # Extra offers added by the Picky scorer (one per banked slot). The
         # Game keeps the persistent count and sets this before refreshing.
         self.bonus_slots = 0
+        # The Game this shop belongs to, so the card slots can tell which cards
+        # the player already owns (and whether the Showman card lifts the
+        # one-copy rule). None when a shop is built on its own (in a test):
+        # no ownership, so every card is on offer.
+        self.game = game
         self.refresh()
+
+    def owned_cards(self):
+        """The card values the card slots must not offer again.
+
+        Empty while the player owns the Showman card: that card's whole point is
+        owning more than one copy of the same card, so with it the shop may
+        offer cards the player already has (and _buy_shop_item lets them be
+        bought). See Game._has_card for what owning means for a card the run's
+        trial has disabled.
+        """
+        game = self.game
+        # A shop built during Game.reset_game runs before the card area and the
+        # trial state exist; nothing is owned yet, so nothing is filtered.
+        if (game is None or not hasattr(game, "cards")
+                or not hasattr(game, "disabled_card")):
+            return set()
+        if game._has_card(Card.SHOWMAN):
+            return set()
+        return {card.value for card in game.cards}
 
     def refresh(self):
         """Reroll the shop's random selection of components and blocks.
@@ -1390,14 +1415,18 @@ class Shop:
         # of conditions and the indivisible whole cards (ERR 404 / Blueprint /
         # Showman); when a slot draws a condition, a random scorer is attached
         # so the offer is a full composed (condition x any scorer) card. The
-        # two offers are kept distinct.
+        # two offers are kept distinct, and neither may be a card the player
+        # already owns unless the Showman card lifts the one-copy rule — an
+        # offer that cannot be bought is a wasted slot, and a card the player
+        # owns should not come back around run after run (see owned_cards).
         card_col = 1
+        owned = self.owned_cards()
         offers = []
         tries = 0
         while len(offers) < 2 and tries < 24:
             tries += 1
             value = random_card_option_value()
-            if value is not None and value not in offers:
+            if value is not None and value not in offers and value not in owned:
                 offers.append(value)
         while len(offers) < 2:
             offers.append(random_card_option_value())
@@ -1706,7 +1735,13 @@ def _configure_marble_type(marble, marble_type):
 
 class Game:
     def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        # The window, and the off-screen surface every frame is drawn into.
+        # Drawing off-screen and presenting the finished frame in one blit (see
+        # _present) is what keeps the CRT filter from flickering: the filter
+        # rewrites the whole frame — it clears it and lays the warped bands back
+        # down — and those half-finished states must never reach the window.
+        self.display = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
+        self.screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
         pygame.display.set_caption("Marblatro")
         pygame.display.set_icon(make_icon())
         self.clock = pygame.time.Clock()
@@ -1726,6 +1761,10 @@ class Game:
         # The title screen shows first: the game's name, the 6 save slots the
         # player loads or starts a game from, and an ACHIEVEMENTS button.
         self.title_screen = True
+        # The CRT screen filter (see crt.py): on by default, toggled with F2,
+        # remembered per profile (metagame.json). It is a post-process over the
+        # finished frame, applied by _present below.
+        self.crt_filter = metagame.crt_filter()
         # The active save slot (1..6) chosen on the title screen; P saves to
         # it. None until the player picks one.
         self.save_slot = None
@@ -1928,7 +1967,7 @@ class Game:
         self.run_time = 0.0
         # Seconds marbles spent being pulled by black holes THIS RUN (astronaut).
         self.black_hole_time = 0.0
-        self.shop = Shop(SHOP_COORDS)
+        self.shop = Shop(SHOP_COORDS, self)
         # The shop shows this many extra Picky offers on every refresh.
         self.shop.bonus_slots = self.bonus_slots
         self.toolbox = Toolbox(TOOLBOX_COORDS)
@@ -2407,6 +2446,10 @@ class Game:
                     self._retry_run()
                     save_system.save_game(self)
                 self.running = False
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_F2:
+                # F2 works on every screen, and is handled before the per-screen
+                # branches so it never also counts as a "post-run" keypress.
+                self._toggle_crt_filter()
             elif self.title_screen:
                 # The title screen only accepts clicks on a save slot, the
                 # ACHIEVEMENTS / UPGRADES / COLLECTION buttons, the bottom-left
@@ -4254,11 +4297,22 @@ class Game:
         return True
 
     def _grant_random_card(self):
-        """Grant a random card to the card area."""
+        """Grant a random card to the card area.
+
+        Like the shop's card slots, the grant skips the cards the player already
+        owns (see Shop.owned_cards): a second copy is the Showman card's perk,
+        so without it this hands over a card the player can actually use. If
+        every candidate is somehow owned already, the plain pool is used — the
+        grant is always delivered.
+        """
         if len(self.cards) >= MAX_CARDS:
             self._set_shop_message("Card area is full — card withheld")
             return False
-        pool = [v for v in prebuilt_card_pool() if v != Card.ERR_404]
+        owned = self.shop.owned_cards()
+        pool = [v for v in prebuilt_card_pool()
+                if v != Card.ERR_404 and v not in owned]
+        if not pool:
+            pool = [v for v in prebuilt_card_pool() if v != Card.ERR_404]
         value = random.choice(pool)
         self.cards.append(make_card_item(value))
         self._discover_owned_card(value)
@@ -6560,11 +6614,34 @@ class Game:
                             FinalBoss.description(value) if d else "???", False, d))
         return entries
 
+    def _toggle_crt_filter(self):
+        """F2: switch the CRT screen filter on and off, and remember it."""
+        self.crt_filter = not self.crt_filter
+        metagame.set_crt_filter(self.crt_filter)
+        self._set_shop_message(
+            f"CRT filter {'on' if self.crt_filter else 'off'}")
+
+    def _present(self):
+        """Show the frame that has just been drawn (see run).
+
+        Every screen is drawn into the off-screen frame buffer (self.screen),
+        filtered there when the CRT filter is on (see crt.apply), and only then
+        blitted to the window in one go: the window never shows a half-filtered
+        frame, which is what used to make the picture strobe between filtered
+        and unfiltered. Nothing else in the game presents a frame, so this is
+        the only flip. F2 toggles the filter.
+        """
+        if self.crt_filter:
+            crt.apply(self.screen)
+        self.display.blit(self.screen, (0, 0))
+        pygame.display.flip()
+
     def run(self):
         while self.running:
             self.handle_events()
             self.update()
             ui.draw(self)
+            self._present()
             self.clock.tick(FPS)
         
         pygame.quit()

@@ -1,171 +1,24 @@
 {
   "version": 1,
-  "cash": 60,
-  "run_number": 0,
+  "cash": 24,
+  "run_number": 1,
   "round_index": 0,
-  "run_in_round": 0,
-  "required_score": 1,
+  "run_in_round": 1,
+  "required_score": 2,
   "required_scores": [
-    1
+    1,
+    2
   ],
-  "run_results": [],
-  "runs_cleared": 0,
+  "run_results": [
+    true
+  ],
+  "runs_cleared": 1,
   "failed_runs": 0,
-  "current_trial": 1,
+  "current_trial": 8,
   "difficulty": 4,
   "final_boss": null,
   "cards": [],
-  "actions": [],
-  "toolbox": [
-    {
-      "kind": "block",
-      "placed": false,
-      "col": 0,
-      "row": 0,
-      "shape": 0,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 4,
-      "scorer_amount": 0.0,
-      "price": 109,
-      "name": "Start Block",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0
-    },
-    {
-      "kind": "block",
-      "placed": false,
-      "col": 0,
-      "row": 1,
-      "shape": 0,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 5,
-      "scorer_amount": 0.0,
-      "price": 53,
-      "name": "Finish Block",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0
-    }
-  ],
-  "grid": [],
-  "shop": [
-    {
-      "kind": "shape",
-      "value": 12,
-      "amount": 0,
-      "price": 12,
-      "name": "Half Pipe",
-      "col": 1,
-      "row": 1
-    },
-    {
-      "kind": "shape",
-      "value": 18,
-      "amount": 0,
-      "price": 11,
-      "name": "Cradle",
-      "col": 2,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 3,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 2,
-      "amount": 20000.0,
-      "price": 25,
-      "name": "Accelerator",
-      "col": 4,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 6,
-      "amount": 0,
-      "price": 16,
-      "name": "Quick",
-      "col": 5,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 21,
-      "amount": 3.0,
-      "price": 22,
-      "name": "Seed",
-      "col": 6,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 22,
-      "amount": 1.8,
-      "price": 22,
-      "name": "Drill",
-      "col": 7,
-      "row": 1
-    },
-    {
-      "kind": "card",
-      "value": 83,
-      "price": 44,
-      "amount": 0,
-      "col": 1,
-      "row": 3,
-      "name": "Pedestal"
-    },
-    {
-      "kind": "card",
-      "value": 2377,
-      "price": 37,
-      "amount": 0,
-      "col": 2,
-      "row": 3,
-      "name": "Wrecking Ball card (Random)"
-    },
-    {
-      "kind": "condition",
-      "value": 120,
-      "amount": 0,
-      "price": 20,
-      "name": "Key",
-      "col": 3,
-      "row": 3
-    },
-    {
-      "kind": "condition",
-      "value": 155,
-      "amount": 0,
-      "price": 7,
-      "name": "Zipper",
-      "col": 4,
-      "row": 3
-    },
-    {
-      "kind": "action",
-      "value": 0,
-      "price": 24,
-      "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Death"
-    },
+  "actions": [
     {
       "kind": "action",
       "value": 2,
@@ -176,25 +29,194 @@
       "name": "Deja Vu"
     },
     {
+      "kind": "action",
+      "value": 2,
+      "price": 28,
+      "version": 2,
+      "col": 6,
+      "row": 3,
+      "name": "Deja Vu"
+    }
+  ],
+  "toolbox": [],
+  "grid": [
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 6,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 109
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 8,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 53
+    }
+  ],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 17,
+      "amount": 0,
+      "price": 11,
+      "name": "Sawtooth",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 12,
+      "amount": 0,
+      "price": 12,
+      "name": "Half Pipe",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 13,
+      "amount": 3000.0,
+      "price": 23,
+      "name": "Repulsor",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 14,
+      "amount": 180.0,
+      "price": 12,
+      "name": "Conveyor",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 2,
+      "amount": 3.6,
+      "price": 15,
+      "name": "+Mult",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 26,
+      "amount": 0,
+      "price": 34,
+      "name": "Echo",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 14,
+      "amount": 2.0,
+      "price": 27,
+      "name": "Effective",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "kind": "card",
+      "value": 2852,
+      "price": 45,
+      "amount": 2.4,
+      "col": 1,
+      "row": 3,
+      "name": "Pillar card (Drill)"
+    },
+    {
+      "kind": "card",
+      "value": 84,
+      "price": 50,
+      "amount": 0,
+      "col": 2,
+      "row": 3,
+      "name": "Inferno"
+    },
+    {
+      "kind": "condition",
+      "value": 107,
+      "amount": 0,
+      "price": 16,
+      "name": "Drain",
+      "col": 3,
+      "row": 3
+    },
+    {
+      "kind": "condition",
+      "value": 143,
+      "amount": 0,
+      "price": 4,
+      "name": "Piston",
+      "col": 4,
+      "row": 3
+    },
+    {
+      "kind": "action",
+      "value": 4,
+      "price": 28,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Strength"
+    },
+    {
+      "kind": "action",
+      "value": 2,
+      "price": 28,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Deja Vu"
+    },
+    {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 21,
-      "effects": [
-        3,
-        8,
-        6,
-        11,
-        17
-      ],
-      "effect_amounts": {
-        "3": 1500.0
-      },
-      "scorer": 12,
-      "scorer_amount": 0.6,
-      "price": 183,
-      "name": "Lock Ideas",
+      "shape": 17,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 0,
+      "scorer_amount": 0.0,
+      "price": 12,
+      "name": "Sawtooth None",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -205,15 +227,19 @@
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 0,
+      "shape": 7,
       "effects": [
-        9
+        10,
+        17,
+        14
       ],
-      "effect_amounts": {},
-      "scorer": 11,
-      "scorer_amount": 0.2,
-      "price": 21,
-      "name": "Rect Rubble",
+      "effect_amounts": {
+        "14": 390.0
+      },
+      "scorer": 3,
+      "scorer_amount": 1.8,
+      "price": 160,
+      "name": "Drain xMult",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -249,10 +275,17 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 1,
+  "score_chips": 61,
   "score_mult": 1,
-  "last_run_cash_gained": 0,
-  "last_run_cash_breakdown": {},
+  "last_run_cash_gained": 20,
+  "last_run_cash_breakdown": {
+    "base": 20,
+    "interest": 0,
+    "score": 0,
+    "cards": 0,
+    "scorers": 0,
+    "debt": false
+  },
   "unlocked_cells": [
     [
       5,

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": 173,
+  "cash": 74,
   "run_number": 5,
   "round_index": 1,
   "run_in_round": 2,
@@ -34,6 +34,15 @@
       "col": 0,
       "row": 0,
       "name": "Plane card (Debt)"
+    },
+    {
+      "kind": "card",
+      "value": 85,
+      "price": 46,
+      "amount": 0,
+      "col": 1,
+      "row": 3,
+      "name": "Doppelganger"
     }
   ],
   "actions": [],
@@ -91,7 +100,9 @@
       "x": 5,
       "y": 9,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 22,
       "scorer_amount": 2.2,
@@ -181,7 +192,9 @@
       "x": 4,
       "y": 8,
       "shape": 21,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 29,
       "scorer_amount": 0.0,
@@ -202,7 +215,9 @@
       "x": 5,
       "y": 8,
       "shape": 20,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 29,
       "scorer_amount": 0.0,
@@ -216,6 +231,27 @@
       "portal_uses_left": 0,
       "fragile_shape": null,
       "resale_price": 28
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 6,
+      "y": 11,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 30,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 22
     }
   ],
   "shop": [
@@ -342,7 +378,9 @@
       "col": 7,
       "row": 3,
       "shape": 3,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 12,
       "scorer_amount": 0.9,
@@ -405,7 +443,7 @@
     [
       "scorer",
       30,
-      1
+      2
     ],
     [
       "scorer",
@@ -448,15 +486,8 @@
   "continue_past_game_over": false,
   "score_chips": 1,
   "score_mult": 1,
-  "last_run_cash_gained": 64,
-  "last_run_cash_breakdown": {
-    "base": 20,
-    "interest": 0,
-    "score": 44,
-    "cards": 0,
-    "scorers": 0,
-    "debt": true
-  },
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       4,
@@ -473,6 +504,10 @@
     [
       4,
       9
+    ],
+    [
+      6,
+      11
     ],
     [
       6,

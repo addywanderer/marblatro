@@ -1838,8 +1838,6 @@ def draw(game):
     # last so they sit on top of the HUD.
     draw_popups(game)
 
-    pygame.display.flip()
-
 
 def draw_fire(game):
     """Draw the marble-box fire along its top edge (Balatro-style).
@@ -2578,9 +2576,6 @@ def draw_marble_select(game):
         f"UPGRADE EFFECTS: {'ON' if game.upgrades_enabled else 'OFF'}",
         True, WHITE)
     game.screen.blit(label, label.get_rect(center=toggle.center))
-    pygame.display.flip()
-
-
 def draw_upgrades(game):
     """Draw the UPGRADES tab: the dice balance and the three permanent
     run-start upgrades the player can spend dice on (click a card to buy)."""
@@ -2614,9 +2609,6 @@ def draw_upgrades(game):
     pygame.draw.rect(game.screen, WHITE, back, 2)
     text = game.font.render("RETURN TO MAIN MENU", True, WHITE)
     game.screen.blit(text, text.get_rect(center=back.center))
-    pygame.display.flip()
-
-
 def draw_collection_icon(game, kind, value, rect):
     """Draw an entry's icon (a mini card, a shape outline, an effect icon, or a
     scorer tile) into the given rect. Trials and the final boss have no icon."""
@@ -2720,9 +2712,6 @@ def draw_collection(game):
     pygame.draw.rect(game.screen, WHITE, back, 2)
     text = game.font.render("RETURN TO MAIN MENU", True, WHITE)
     game.screen.blit(text, text.get_rect(center=back.center))
-    pygame.display.flip()
-
-
 def profile_menu_geometry(names):
     """Rects for the expandable profile list stacked above the PROFILE button.
 
@@ -2981,9 +2970,6 @@ def draw_title_screen(game):
             _draw_profile_menu(game)
     if game.profile_naming:
         _draw_profile_name_prompt(game)
-    pygame.display.flip()
-
-
 def draw_achievements(game):
     """Draw the achievements tab: a grid of every achievement (name and
     description; secret descriptions hide as '???' until unlocked) with a
@@ -3027,9 +3013,6 @@ def draw_achievements(game):
     pygame.draw.rect(game.screen, WHITE, btn, 2)
     text = game.font.render("RETURN TO MAIN MENU", True, WHITE)
     game.screen.blit(text, text.get_rect(center=btn.center))
-    pygame.display.flip()
-
-
 def draw_popups(game):
     """Draw the compact bottom-of-screen popups (achievement unlocks,
     collection discoveries). The newest sits at the bottom touching the screen

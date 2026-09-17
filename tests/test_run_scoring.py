@@ -1,3 +1,4 @@
+import inspect
 import itertools
 import json
 import os
@@ -5539,7 +5540,8 @@ class RunScoringTests(unittest.TestCase):
             self.assertIn(value, main.Card.GLYPHS)
             self.assertIn(value, main.Card.COLORS)
         self.assertEqual(main.Card.description(main.Card.SHOWMAN),
-                         "Allows you to buy more than one of the same card")
+                         "Lets cards you already own show up in the shop again, "
+                         "so you can own more than one of the same card")
         # The three passive whole cards keep their exact descriptions.
         self.assertIn("+6 mult", main.Card.description(main.Card.GARDEN))
         self.assertIn("+xMult 3x more often",
@@ -7768,6 +7770,191 @@ class RunScoringTests(unittest.TestCase):
         self.game._buy_shop_item(main.CardItem(main.Card.JOKER, 40))
         self.assertEqual(len(self.game.cards), 3)  # Showman + 2 Jokers
         self.assertEqual(self.game.cash, 1000 - 40)
+
+    def test_the_shop_skips_cards_the_player_already_owns(self):
+        # An offer the player cannot buy is a wasted slot, and a card they own
+        # should not come back around refresh after refresh: the card slots skip
+        # the cards the player already owns.
+        self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
+        self.assertEqual(self.game.shop.owned_cards(), {main.Card.GARDEN})
+        for _ in range(200):
+            self.game.shop.refresh()
+            offered = [item for item in self.game.shop.items
+                       if item.kind == "card"]
+            self.assertEqual(len(offered), 2)  # both slots still fill
+            self.assertNotIn(main.Card.GARDEN, {item.value for item in offered})
+
+    def test_showman_lets_owned_cards_back_into_the_shop(self):
+        # The Showman card is exactly what allows more than one copy, so with it
+        # nothing is filtered: a card the player already owns can be offered
+        # again (and bought — see test_can_buy_duplicate_card_with_showman).
+        self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
+        self.game.cards.append(main.CardItem(main.Card.SHOWMAN, 48))
+        self.assertEqual(self.game.shop.owned_cards(), set())
+        with mock.patch("main.random_card_option_value",
+                        return_value=main.Card.GARDEN):
+            self.game.shop.refresh()
+        self.assertIn(main.Card.GARDEN,
+                      {item.value for item in self.game.shop.items
+                       if item.kind == "card"})
+        # A Showman the run's trial has disabled cannot lift the rule (the same
+        # rule the buy path follows): the owned cards are filtered out again.
+        self.game.disabled_card = self.game.cards[1]
+        self.assertEqual(self.game.shop.owned_cards(),
+                         {main.Card.GARDEN, main.Card.SHOWMAN})
+        self.game.disabled_card = None
+
+    def test_a_granted_card_is_not_one_the_player_already_owns(self):
+        # The Ideas conversion's random card follows the same rule as the shop:
+        # a second copy is the Showman card's perk, so the grant skips the cards
+        # the player already has.
+        self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
+        with mock.patch("main.prebuilt_card_pool",
+                        return_value=[main.Card.GARDEN, main.Card.COUPON]):
+            self.assertTrue(self.game._grant_random_card())
+        self.assertEqual(self.game.cards[-1].value, main.Card.COUPON)
+
+    # --- CRT screen filter (F2) -----------------------------------------
+
+    def test_the_crt_filter_bends_darkens_and_scanlines_the_frame(self):
+        # A flat frame makes the filter's own marks easy to read: the glass
+        # curves the picture, the scanlines thin every other row, and the
+        # vignette dims the sides and corners.
+        width, height = main.SCREEN_WIDTH, main.SCREEN_HEIGHT
+        surface = pygame.Surface((width, height))
+        surface.fill((200, 200, 200))
+        main.crt.apply(surface)
+        middle = (width // 2, height // 2)
+        # The middle keeps its colour, but on only one of two adjacent rows: the
+        # other is a scanline gap.
+        rows = [surface.get_at((middle[0], middle[1] + step))[0]
+                for step in (0, 1)]
+        self.assertGreater(max(rows), 190)
+        self.assertLess(min(rows), max(rows) - 20)
+        # The screen stays FILLED with the picture: curving the glass crops the
+        # picture's own outer part away instead of framing it in black, so not
+        # one pixel of the whole frame — corners and edges included — is dark.
+        pixels = pygame.surfarray.array3d(surface)
+        self.assertGreater(int(pixels.min()), 0)
+        # The corners and the top/bottom edges are dimmer than the middle (the
+        # vignette), but still clearly lit.
+        for point in ((2, 2), (width - 3, 2), (2, height - 3),
+                      (width // 2, 1), (width // 2, height - 2)):
+            lit = max(surface.get_at((point[0], point[1] + step))[0]
+                      for step in (0, 1))
+            self.assertGreater(lit, 60, point)
+            self.assertLess(lit, max(rows), point)
+        # ...and the sides are dimmed the same way.
+        side = max(surface.get_at((width - 30, middle[1] + step))[0]
+                   for step in (0, 1))
+        self.assertGreater(side, 0)
+        self.assertLess(side, max(rows))
+        # Running it again (a second frame) is harmless.
+        main.crt.apply(surface)
+
+    def test_the_crt_filter_magnifies_the_picture_to_fill_the_screen(self):
+        # Sampling inwards along the tube's curve magnifies the picture, so
+        # content close to an edge is pushed further out — past the edge, where
+        # the curve crops it away — rather than pulled inwards and shrunk.
+        width, height = main.SCREEN_WIDTH, main.SCREEN_HEIGHT
+        surface = pygame.Surface((width, height))
+        surface.fill((40, 40, 40))
+        surface.fill(main.WHITE, pygame.Rect(0, 30, width, 3))
+        main.crt.apply(surface)
+        bright = [y for y in range(60)
+                  if surface.get_at((width // 2, y))[:3][0] > 150]
+        self.assertTrue(bright)
+        # The line started at row 30 and has been pulled up the screen.
+        self.assertLess(max(bright), 30)
+        # Its mirror image near the bottom is pulled down the same way.
+        surface.fill((40, 40, 40))
+        surface.fill(main.WHITE, pygame.Rect(0, height - 33, width, 3))
+        main.crt.apply(surface)
+        bright = [y for y in range(height - 60, height)
+                  if surface.get_at((width // 2, y))[:3][0] > 150]
+        self.assertTrue(bright)
+        self.assertGreater(min(bright), height - 33)
+
+    def test_f2_toggles_the_crt_filter_and_remembers_it(self):
+        # F2 flips the filter on every screen and the choice is stored with the
+        # profile's other data, so it survives a relaunch.
+        old_path, old_flag = metagame.FILE_PATH, self.game.crt_filter
+        metagame.FILE_PATH = os.path.join(tempfile.mkdtemp(), "metagame.json")
+        metagame.reset()
+        try:
+            self._press(pygame.K_F2)
+            self.assertNotEqual(self.game.crt_filter, old_flag)
+            self.assertEqual(metagame.crt_filter(), self.game.crt_filter)
+            self.assertIn("CRT filter", self.game.shop_message)
+            # Persisted: a fresh load of the same file agrees.
+            metagame.reset()
+            self.assertEqual(metagame.crt_filter(), self.game.crt_filter)
+            self._press(pygame.K_F2)
+            self.assertEqual(self.game.crt_filter, old_flag)
+            metagame.reset()
+            self.assertEqual(metagame.crt_filter(), old_flag)
+        finally:
+            metagame.FILE_PATH = old_path
+            metagame.reset()
+            self.game.crt_filter = old_flag
+
+    def test_present_filters_the_frame_only_while_it_is_on(self):
+        # The filter is the last thing done to a finished frame, and only while
+        # it is switched on; the finished frame is then blitted to the window in
+        # one go, so the window never shows a half-filtered (or unfiltered)
+        # frame — that used to make the picture strobe.
+        old_flag = self.game.crt_filter
+        frame, display = self.game.screen, self.game.display
+        try:
+            # The game draws off-screen: the frame buffer is not the window.
+            self.assertIsNot(frame, display)
+            self.assertIs(display, pygame.display.get_surface())
+            self.assertEqual(frame.get_size(),
+                             (main.SCREEN_WIDTH, main.SCREEN_HEIGHT))
+            with mock.patch("main.crt.apply") as apply, \
+                    mock.patch("main.pygame.display.flip") as flip:
+                self.game.crt_filter = True
+                self.game._present()
+                apply.assert_called_once_with(frame)
+                self.assertTrue(flip.called)
+                apply.reset_mock()
+                self.game.crt_filter = False
+                self.game._present()
+                apply.assert_not_called()
+                self.assertTrue(flip.called)
+            # What the window shows is the FINISHED frame: with the filter off
+            # it is the frame as drawn, and with it on it is the filtered one
+            # (not the unfiltered one that was just drawn over).
+            self.game.crt_filter = False
+            frame.fill((10, 20, 30))
+            self.game._present()
+            self.assertEqual(display.get_at((5, 5))[:3], (10, 20, 30))
+            self.game.crt_filter = True
+            with mock.patch("main.crt.apply",
+                            side_effect=lambda surface: surface.fill((0, 200, 0))):
+                self.game._present()
+            self.assertEqual(display.get_at((5, 5))[:3], (0, 200, 0))
+        finally:
+            self.game.crt_filter = old_flag
+
+    def test_drawing_a_screen_does_not_present_it(self):
+        # Presenting is _present's job ALONE (see run): a screen's draw function
+        # that flipped the window itself would show its unfinished, unfiltered
+        # frame for a moment before the filtered one, which is the flicker.
+        old_title = self.game.title_screen
+        try:
+            with mock.patch("main.pygame.display.flip") as flip:
+                self.game.title_screen = False
+                main.ui.draw(self.game)
+                flip.assert_not_called()
+                self.game.title_screen = True
+                main.ui.draw(self.game)
+                flip.assert_not_called()
+        finally:
+            self.game.title_screen = old_title
+        # ...and no screen in ui presents at all (the ones that used to be able
+        # to are the menu screens).
+        self.assertNotIn("pygame.display.flip", inspect.getsource(main.ui))
 
     def test_shop_card_slots_combine_conditions_and_unsplittables_equally(self):
         # Each card slot draws equally from a combined pool of conditions and

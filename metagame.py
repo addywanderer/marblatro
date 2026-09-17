@@ -1,10 +1,11 @@
-"""Metagame persistence: the dice currency and permanent run-start upgrades.
+"""Metagame persistence: the dice currency, the permanent upgrades, settings.
 
 Dice are earned when a game ends in defeat (the square of the run number they
 were on minus 3), then spent on the title screen's UPGRADES tab for permanent
-bonuses that apply to the start of every run in every save of the current
+bonuses that apply at the start of every run in every save of the current
 profile. The metagame is not per save slot — it is stored per profile in
-``metagame.json`` inside the active profile's folder (see ``profiles``).
+``metagame.json`` inside the active profile's folder (see ``profiles``), along
+with the display options (the CRT screen filter), which are also per player.
 """
 
 import json
@@ -13,7 +14,8 @@ import os
 # Where the metagame state lives. Tests redirect this for isolation.
 FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "metagame.json")
 
-_DATA = None  # {"dice": int, "chip_level": int, "mult_level": int, "xmult_level": int}
+_DATA = None  # {"dice": int, "chip_level": int, "mult_level": int,
+#                "xmult_level": int, "crt": int}
 
 # The upgrades shown on the title screen's UPGRADES tab. Each upgrade's id is
 # also its "_level" key in the persisted data.
@@ -32,7 +34,8 @@ def _load():
     global _DATA
     if _DATA is not None:
         return
-    _DATA = {"dice": 0, "chip_level": 0, "mult_level": 0, "xmult_level": 0}
+    _DATA = {"dice": 0, "chip_level": 0, "mult_level": 0, "xmult_level": 0,
+             "crt": 1}
     try:
         with open(FILE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -52,6 +55,19 @@ def reset():
     """Forget the metagame (used by tests for isolation)."""
     global _DATA
     _DATA = None
+
+
+def crt_filter():
+    """True while the CRT screen filter is switched on (it starts on)."""
+    _load()
+    return bool(_DATA["crt"])
+
+
+def set_crt_filter(enabled):
+    """Switch the CRT screen filter on or off and persist the choice."""
+    _load()
+    _DATA["crt"] = 1 if enabled else 0
+    _save()
 
 
 def dice():
