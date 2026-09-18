@@ -13,6 +13,7 @@
   "runs_cleared": 1,
   "failed_runs": 0,
   "current_trial": 3,
+  "difficulty": 4,
   "final_boss": null,
   "cards": [],
   "actions": [],
@@ -26,11 +27,13 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 7,
       "scorer_amount": 15.0,
       "price": 10,
       "name": "Rect Cash",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     },
@@ -43,11 +46,13 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
       "price": 9,
       "name": "Rect Finish",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     }
@@ -62,16 +67,19 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -82,16 +90,19 @@
       "effects": [
         7
       ],
+      "effect_amounts": {},
       "scorer": 7,
       "scorer_amount": 15.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -102,16 +113,19 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 7,
       "scorer_amount": 15.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     }
   ],
   "shop": [
@@ -182,6 +196,7 @@
       "kind": "card",
       "value": 81,
       "price": 38,
+      "amount": 0,
       "col": 1,
       "row": 3,
       "name": "Rigged Casino"
@@ -190,9 +205,10 @@
       "kind": "card",
       "value": 2049,
       "price": 38,
+      "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "Joker card (Sharp)"
+      "name": "Conveyor card (Quick)"
     },
     {
       "kind": "condition",
@@ -240,11 +256,13 @@
         4,
         13
       ],
+      "effect_amounts": {},
       "scorer": 13,
       "scorer_amount": 0.0,
       "price": 56,
       "name": "Curved Slope Random",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     },
@@ -257,11 +275,13 @@
       "effects": [
         6
       ],
+      "effect_amounts": {},
       "scorer": 31,
       "scorer_amount": 4.0,
       "price": 47,
       "name": "Convex Slope Cluster",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     }
@@ -292,6 +312,8 @@
       1.0
     ]
   ],
+  "tesseract_bonus": 1.0,
+  "tokens": [],
   "shred_points": 0,
   "rubble_points": 0,
   "idea_points": 0,
@@ -304,9 +326,10 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 31,
+  "score_chips": 61,
   "score_mult": 1,
   "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       5,

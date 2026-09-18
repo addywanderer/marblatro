@@ -1,50 +1,37 @@
 {
   "version": 1,
-  "cash": 24,
-  "run_number": 1,
+  "cash": 31,
+  "run_number": 0,
   "round_index": 0,
-  "run_in_round": 1,
-  "required_score": 2,
+  "run_in_round": 0,
+  "required_score": 1,
   "required_scores": [
-    1,
-    2
+    1
   ],
-  "run_results": [
-    true
-  ],
-  "runs_cleared": 1,
+  "run_results": [],
+  "runs_cleared": 0,
   "failed_runs": 0,
-  "current_trial": 8,
+  "current_trial": 2,
   "difficulty": 4,
   "final_boss": null,
-  "cards": [],
-  "actions": [
+  "cards": [
     {
-      "kind": "action",
-      "value": 2,
-      "price": 28,
-      "version": 2,
-      "col": 6,
+      "kind": "card",
+      "value": 1140,
+      "price": 29,
+      "amount": 1.35,
+      "col": 1,
       "row": 3,
-      "name": "Deja Vu"
-    },
-    {
-      "kind": "action",
-      "value": 2,
-      "price": 28,
-      "version": 2,
-      "col": 6,
-      "row": 3,
-      "name": "Deja Vu"
+      "name": "Shrinking xMult"
     }
   ],
-  "toolbox": [],
-  "grid": [
+  "actions": [],
+  "toolbox": [
     {
       "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 6,
+      "placed": false,
+      "col": 0,
+      "row": 0,
       "shape": 0,
       "effects": [
         0
@@ -52,22 +39,18 @@
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
-      "angle": 0,
+      "price": 109,
+      "name": "Start Block",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 109
+      "trigger_paid": 0
     },
     {
       "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 8,
+      "placed": false,
+      "col": 0,
+      "row": 1,
       "shape": 0,
       "effects": [
         0
@@ -75,148 +58,152 @@
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
-      "angle": 0,
+      "price": 53,
+      "name": "Finish Block",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 53
+      "trigger_paid": 0
     }
   ],
+  "grid": [],
   "shop": [
     {
       "kind": "shape",
-      "value": 17,
+      "value": 4,
       "amount": 0,
-      "price": 11,
-      "name": "Sawtooth",
+      "price": 8,
+      "name": "Circle",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 12,
+      "value": 10,
       "amount": 0,
       "price": 12,
-      "name": "Half Pipe",
+      "name": "Flat Line",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 13,
-      "amount": 3000.0,
-      "price": 23,
-      "name": "Repulsor",
+      "value": 14,
+      "amount": 330.0,
+      "price": 22,
+      "name": "Conveyor",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 14,
-      "amount": 180.0,
-      "price": 12,
-      "name": "Conveyor",
+      "value": 7,
+      "amount": 990.0,
+      "price": 18,
+      "name": "Rotate",
       "col": 4,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 2,
-      "amount": 3.6,
-      "price": 15,
-      "name": "+Mult",
+      "value": 21,
+      "amount": 3.0,
+      "price": 22,
+      "name": "Seed",
       "col": 5,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 26,
+      "value": 6,
       "amount": 0,
-      "price": 34,
-      "name": "Echo",
+      "price": 16,
+      "name": "Quick",
       "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 14,
-      "amount": 2.0,
-      "price": 27,
-      "name": "Effective",
+      "value": 1,
+      "amount": 18.0,
+      "price": 7,
+      "name": "+Chips",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 2852,
-      "price": 45,
-      "amount": 2.4,
+      "value": 1140,
+      "price": 29,
+      "amount": 1.35,
       "col": 1,
       "row": 3,
-      "name": "Pillar card (Drill)"
+      "name": "Shrinking xMult"
     },
     {
       "kind": "card",
-      "value": 84,
-      "price": 50,
+      "value": 3104,
+      "price": 42,
       "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "Inferno"
+      "name": "Fragile card (Echo)"
     },
     {
       "kind": "condition",
-      "value": 107,
+      "value": 112,
       "amount": 0,
-      "price": 16,
-      "name": "Drain",
+      "price": 13,
+      "name": "Half Pipe",
       "col": 3,
       "row": 3
     },
     {
       "kind": "condition",
-      "value": 143,
+      "value": 150,
       "amount": 0,
-      "price": 4,
-      "name": "Piston",
+      "price": 7,
+      "name": "Growing",
       "col": 4,
       "row": 3
+    },
+    {
+      "kind": "action",
+      "value": 0,
+      "price": 24,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Death"
     },
     {
       "kind": "action",
       "value": 4,
       "price": 28,
       "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Strength"
-    },
-    {
-      "kind": "action",
-      "value": 2,
-      "price": 28,
-      "version": 1,
       "col": 6,
       "row": 3,
-      "name": "Deja Vu"
+      "name": "Strength"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 17,
-      "effects": [],
-      "effect_amounts": {},
-      "scorer": 0,
-      "scorer_amount": 0.0,
-      "price": 12,
-      "name": "Sawtooth None",
+      "shape": 5,
+      "effects": [
+        9,
+        17,
+        8,
+        12
+      ],
+      "effect_amounts": {
+        "12": 0.52
+      },
+      "scorer": 1,
+      "scorer_amount": 21.0,
+      "price": 153,
+      "name": "Curved Slope +Chips",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -227,19 +214,15 @@
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 7,
+      "shape": 0,
       "effects": [
-        10,
-        17,
-        14
+        0
       ],
-      "effect_amounts": {
-        "14": 390.0
-      },
-      "scorer": 3,
-      "scorer_amount": 1.8,
-      "price": 160,
-      "name": "Drain xMult",
+      "effect_amounts": {},
+      "scorer": 2,
+      "scorer_amount": 3.6,
+      "price": 15,
+      "name": "Rect +Mult",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -275,17 +258,10 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 61,
+  "score_chips": 1,
   "score_mult": 1,
-  "last_run_cash_gained": 20,
-  "last_run_cash_breakdown": {
-    "base": 20,
-    "interest": 0,
-    "score": 0,
-    "cards": 0,
-    "scorers": 0,
-    "debt": false
-  },
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       5,

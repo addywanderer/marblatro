@@ -50,7 +50,6 @@ MARBLE_BOX_COLOR = _ui_source.MARBLE_BOX_COLOR
 MARBLE_BOX_COORDS = _ui_source.MARBLE_BOX_COORDS
 MARBLE_RADIUS = _ui_source.MARBLE_RADIUS
 MAX_ACTIONS = _ui_source.MAX_ACTIONS
-MAX_CARDS = _ui_source.MAX_CARDS
 ORANGE = _ui_source.ORANGE
 PEG_RADIUS = _ui_source.PEG_RADIUS
 points_text = _ui_source.points_text
@@ -101,6 +100,32 @@ collection = _ui_source.collection
 metagame = _ui_source.metagame
 profiles = _ui_source.profiles
 save_system = _ui_source.save_system
+
+# ---------------------------------------------------------------------------
+# The shared fonts. Every font in the game is built ONCE, in Game.__init__,
+# which hands the table over here while it is still building itself. Most of
+# the drawing helpers below are handed a bare surface rather than the Game, so
+# they cannot read game.font: they used to build a throwaway embedded default
+# font on every frame instead (the marble "+" marker, the key/portal numbers,
+# the Spirit token labels, the 8 ball's digit, the letter glyphs an id with no
+# art falls back to) — a per-frame allocation in the wrong typeface.
+# ---------------------------------------------------------------------------
+FONTS = {}
+
+
+def bind_fonts(fonts):
+    """Adopt the Game's font table. Called once, from Game.__init__."""
+    FONTS.clear()
+    FONTS.update(fonts)
+
+
+def font(role):
+    """The shared font for a role (a key of main.FONT_SIZES, or "title")."""
+    if role not in FONTS:
+        raise KeyError(f"ui.font({role!r}) was asked for before the fonts were "
+                       "bound — a Game has to exist before anything draws")
+    return FONTS[role]
+
 
 # NOTE: ``_ui_source`` is kept (not deleted) so block_borders_on() can read
 # the LIVE toggle value below.
@@ -334,7 +359,7 @@ def draw_shop_item(screen, item, rect):
         # shape/effect (collision conditions) or letter glyph (named ones).
         pygame.draw.rect(screen, condition_color(item.value), rect)
         pygame.draw.rect(screen, WHITE, rect, 2)
-        _draw_condition_center(screen, item.value, rect, glyph_size=20)
+        _draw_condition_center(screen, item.value, rect)
     elif getattr(item, "kind", None) == "card":
         draw_card(screen, item, rect)
     elif getattr(item, "kind", None) == "action":
@@ -670,6 +695,30 @@ def _build_whole_card_art(card):
         r(13, 16, 14, 5)                    # broad shoulders
         p([(14, 21), (26, 21), (27, 31), (13, 31)])   # seated robed torso
         p([(9, 32), (31, 32), (27, 37), (13, 37)])    # lotus throne
+    elif card == Card.PROCRASTINATION:        # an hourglass, sand still falling
+        r(6, 3, 28, 4)                  # top frame
+        r(6, 33, 28, 4)                 # bottom frame
+        l(11, 7, 20, 20, 2)             # glass (top left wall)
+        l(29, 7, 20, 20, 2)             # glass (top right wall)
+        l(11, 33, 20, 20, 2)            # glass (bottom left wall)
+        l(29, 33, 20, 20, 2)            # glass (bottom right wall)
+        p([(14, 8), (26, 8), (20, 17)])          # sand left above
+        p([(15, 31), (25, 31), (20, 24)])        # sand piled below
+        c(20, 20, 1.5)                  # the grain falling now
+    elif card == Card.ESSENCE:                # a stoppered vial of distilled stuff
+        rr(14, 6, 12, 5, 2)             # the stopper
+        r(17, 10, 6, 3)                 # the neck
+        p([(13, 13), (27, 13), (30, 20), (10, 20)])     # shoulders
+        rr(11, 19, 18, 16, 4)           # the body
+        r(13, 26, 14, 7)                # the essence filling the lower half
+        c(20, 24, 1.5)                  # a bubble rising
+        c(24, 22, 1)                    # a smaller one
+    elif card == Card.CONCERT:                # a beamed pair of eighth notes
+        c(12, 30, 6)                    # the lower note head
+        c(27, 27, 6)                    # the higher one
+        r(16, 8, 3, 22)                 # its stem, up to the beam
+        r(31, 5, 3, 22)                 # the other stem
+        r(16, 8, 18, 4)                 # the beam joining them
     return art
 
 
@@ -732,7 +781,7 @@ def _draw_whole_card_icon(surface, card, center, size):
     return _blit_icon_art(surface, _whole_card_art(card), center, size)
 
 
-def _draw_condition_center(screen, condition, rect, glyph_size=18):
+def _draw_condition_center(screen, condition, rect):
     """A condition tile's center art: a mini image of the shape/effect a
     collision condition acts on, or a name-based icon for the named ones (the
     Joker's jester hat, the Pillar condition's pillar, ...)."""
@@ -745,8 +794,7 @@ def _draw_condition_center(screen, condition, rect, glyph_size=18):
                 screen, condition, center=rect.center,
                 size=max(6, int(rect.width * 0.66))):
             return
-        glyph = pygame.font.Font(None, glyph_size).render(
-            condition_glyph(condition), True, BLACK)
+        glyph = font("tile").render(condition_glyph(condition), True, BLACK)
         screen.blit(glyph, glyph.get_rect(center=rect.center))
         return
     _draw_condition_mini(screen, shape=shape, effect=effect,
@@ -758,9 +806,10 @@ def _draw_card_icon(screen, value, rect):
 
     A splittable card (a condition + scorer combo) shows its CONDITION's icon:
     a mini image of the shape/effect a collision condition acts on, or the
-    named condition's name-based icon (a jester hat for the Joker, ...). The
-    indivisible whole cards (ERR 404 / Blueprint / Showman / Garden / Rigged
-    Casino / Conquistador) each show their own name-based icon too.
+    named condition's name-based icon (a jester hat for the Joker, ...). Every
+    indivisible whole card (ERR 404, Blueprint, Showman, ... the Essence card's
+    stoppered vial) shows its own name-based icon too, and only an id with no
+    art at all falls back to its letter glyph.
     """
     pair = splittable_card_condition_scorer(value)
     if pair is not None:
@@ -782,7 +831,7 @@ def _draw_card_icon(screen, value, rect):
             center=(rect.centerx, rect.centery + 4),
             size=int(GRID_SIZE * 0.62)):
         return
-    glyph = pygame.font.Font(None, 22).render(
+    glyph = font("glyph").render(
         Card.GLYPHS.get(value, "?"), True, BLACK)
     screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.centery + 4)))
 
@@ -845,7 +894,7 @@ def draw_action(screen, item, rect, selected=False):
         pygame.draw.rect(screen, GREEN, rect, 3, border_radius=6)
     if not _draw_action_icon(screen, value, center=(rect.centerx, rect.centery + 2),
                              size=int(GRID_SIZE * 0.7)):
-        glyph = pygame.font.Font(None, 22).render(
+        glyph = font("glyph").render(
             Action.GLYPHS.get(value, "?"), True, WHITE)
         screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.centery + 2)))
     _draw_version_tag(screen, rect, version)
@@ -871,10 +920,10 @@ def _draw_version_tag(screen, rect, version):
         tag = action_version_tag_rect(rect)
         pygame.draw.rect(screen, (255, 215, 0), tag, border_radius=4)
         pygame.draw.rect(screen, (70, 45, 0), tag, 1, border_radius=4)
-        text = pygame.font.Font(None, 16).render("v2", True, (60, 38, 0))
+        text = font("tiny").render("v2", True, (60, 38, 0))
         screen.blit(text, text.get_rect(center=tag.center))
         return
-    badge = pygame.font.Font(None, 14).render(f"v{version}", True, (255, 215, 0))
+    badge = font("mini").render(f"v{version}", True, (255, 215, 0))
     screen.blit(badge, (rect.right - badge.get_width() - 3, rect.top + 2))
 
 
@@ -1112,7 +1161,7 @@ def _draw_block_pair_number(block, surface):
         return
     if not number:
         return
-    num = pygame.font.Font(None, 16).render(str(number), True, WHITE)
+    num = font("tiny").render(str(number), True, WHITE)
     # The number sits below the shape's art (the effect icon is at the center).
     surface.blit(num, num.get_rect(center=(block.rect.centerx, block.rect.centery + 16)))
 
@@ -1508,7 +1557,7 @@ def _draw_block_effect_icon(block, surface, alpha=255, color=None):
 
     # A "+" marks a block with more than one effect (bottom-right of the icon).
     if len(block.effects) > 1:
-        plus = pygame.font.Font(None, 16).render("+", True, WHITE)
+        plus = font("tiny").render("+", True, WHITE)
         surface.blit(plus, plus.get_rect(center=(cx + 10, cy + 10)))
 
 
@@ -1697,11 +1746,37 @@ def _blit_marble_rolling_feature(marble, screen, pos, r, md, sin_a, cos_a, patte
     screen.blit(surf, surf.get_rect(center=(px, py)))
 
 
+_DIGIT_ART_CACHE = {}
+
+
+def _eight_digit(nominal_size):
+    """The 8 ball's "8", at the size the old default font was asked for.
+
+    The digit is drawn into the marble's roll surface, whose size follows the
+    marble's own radius — Growing and Shrinking blocks change it — so the digit
+    needs a size of its own and the old code built a font per marble per frame
+    for it. Instead the glyph is rendered once from the shared font and scaled
+    here (cached per size, like the other icon art). ``nominal_size`` is what
+    that font used to be asked for, and the ink ends up half that tall, which
+    is what the default font's own ink measured (a 14px "8" was 7px tall).
+    """
+    art = _DIGIT_ART_CACHE.get(nominal_size)
+    if art is None:
+        source = font("glyph").render("8", True, BLACK)
+        ink = source.get_bounding_rect()
+        scale = max(3, round(nominal_size * 0.5)) / max(1, ink.height)
+        size = (max(1, round(source.get_width() * scale)),
+                max(1, round(source.get_height() * scale)))
+        art = pygame.transform.smoothscale(source, size)
+        _DIGIT_ART_CACHE[nominal_size] = art
+    return art
+
+
 def _draw_marble_eight_feature(marble, surf, cx, cy, size):
     """Paint the 8 ball's white circle with a black 8 (centered at cx, cy)."""
     wr = max(2, int(size * 0.28))
     pygame.draw.circle(surf, WHITE, (cx, cy), wr)
-    digit = pygame.font.Font(None, max(8, int(size * 0.4))).render("8", True, BLACK)
+    digit = _eight_digit(max(8, int(size * 0.4)))
     surf.blit(digit, digit.get_rect(center=(cx, cy)))
 
 
@@ -2069,16 +2144,19 @@ def draw_toolbox(game):
 
 
 def draw_cards(game):
-    """Draw the owned cards in the area above the toolbox (max MAX_CARDS).
+    """Draw the owned cards in the area above the toolbox (max game.max_cards).
 
     Owned cards render as mini playing cards; empty slots show a card back.
-    The card currently selected for selling gets a green outline.
+    The card currently selected for selling gets a green outline. The area is
+    one slot smaller while the Essence card is owned (see Game.max_cards), so
+    the tray and the slots both follow the game's own size.
     """
     x, y = CARD_AREA_COORDS[0], CARD_AREA_COORDS[1]
-    draw_marble_box(game.screen, x, y, MAX_CARDS, 1)
+    slots = game.max_cards
+    draw_marble_box(game.screen, x, y, slots, 1)
     title = game.small_font.render("CARDS", True, WHITE)
     game.screen.blit(title, (x + 8, y - 14))
-    for i in range(MAX_CARDS):
+    for i in range(slots):
         rect = pygame.Rect(x + i * GRID_SIZE, y, GRID_SIZE, GRID_SIZE)
         if i < len(game.cards):
             draw_card(game.screen, game.cards[i], rect,
@@ -2116,10 +2194,10 @@ def draw_token(screen, token, rect):
         outer = (center[0] + math.cos(angle) * (radius - 1),
                  center[1] + math.sin(angle) * (radius - 1))
         pygame.draw.line(screen, WHITE, inner, outer, 3)
-    label = pygame.font.Font(None, 14).render(Scorer.name(token.scorer), True, WHITE)
+    label = font("mini").render(Scorer.name(token.scorer), True, WHITE)
     screen.blit(label, label.get_rect(center=center))
     if token.runs_left is not None:
-        badge = pygame.font.Font(None, 14).render(str(token.runs_left), True, (255, 215, 0))
+        badge = font("mini").render(str(token.runs_left), True, (255, 215, 0))
         screen.blit(badge, (rect.right - badge.get_width() - 1, rect.top + 1))
 
 
@@ -2623,7 +2701,7 @@ def draw_collection_icon(game, kind, value, rect):
         # (collision conditions) or letter glyph (named ones).
         pygame.draw.rect(game.screen, condition_color(value), rect)
         pygame.draw.rect(game.screen, BLACK, rect, 2)
-        _draw_condition_center(game.screen, value, rect, glyph_size=18)
+        _draw_condition_center(game.screen, value, rect)
         return
     if kind == Component.SCORER:
         if value == Scorer.START:

@@ -1,0 +1,21 @@
+# Python bytecode and caches — never tracked (the code is the source of truth)
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local development junk
+.marker
+probe_*.png
+
+# Legacy saves/ folder at the repo root: the game keeps player data under
+# profiles/<profile>/saves now, so nothing here is ever read again.
+saves/
+
+# Local player data. Player data lives under profiles/ on purpose (it is the
+# game's own data home and is handy to keep backed up), so this line is only a
+# switch: uncomment it if you would rather keep your saves/progress out of git.
+# profiles/
+
+# A stray copy of the .git folder, kept as a manual backup
+Files/

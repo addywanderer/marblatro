@@ -1,6 +1,7 @@
 import inspect
 import itertools
 import json
+import math
 import os
 import random
 import re
@@ -90,8 +91,13 @@ class RunScoringTests(unittest.TestCase):
         self._old_collection_file = collection.FILE_PATH
         collection.FILE_PATH = os.path.join(self._ach_tmp, "collection.json")
         collection.reset()
+        # A few tests here save the game (P), so point the save slots at the
+        # throwaway folder as well: the suite must never write into a profile.
+        self._old_saves_dir = save_system.SAVES_DIR
+        save_system.SAVES_DIR = os.path.join(self._ach_tmp, "saves")
 
     def tearDown(self):
+        save_system.SAVES_DIR = self._old_saves_dir
         achievements.FILE_PATH = self._old_ach_file
         achievements.reset()
         metagame.FILE_PATH = self._old_meta_file
@@ -978,9 +984,12 @@ class RunScoringTests(unittest.TestCase):
         rows = self.game._describe_item(target)
         self.assertEqual([label for label, _ in rows],
                          ["Base cash", "Interest", "Beat the required score",
-                          "Cash cards", "Cash/Lucky scorers", "Total"])
+                          "Cash cards", "Cash/Lucky scorers", "Essence",
+                          "Total"])
         body = " ".join(text for _, text in rows)
-        for amount in ("$20", "$4", "$30", "$15", "$99"):
+        # The Essence line is always shown (a run without the card pays $0),
+        # and its prose names the flat amount the card itself would add.
+        for amount in ("$20", "$4", "$30", "$15", "$10", "$99"):
             self.assertIn(amount, body)
         # The box lays out and draws like any other hover box.
         width, height, name_lines, desc_lines, hint = self.game._info_layout(
@@ -2768,6 +2777,511 @@ class RunScoringTests(unittest.TestCase):
 
         self.assertEqual(self.game.run_first_blocks, [])
 
+    # --- Procrastination: the run's second chance ---------------------------
+
+    def _start_procrastination_run(self, own_card=True):
+        """Fly a one-column ladder run (Start -> scoring field -> Finish).
+
+        The marble falls the whole height of the box through a no-hitbox field
+        block and lands on the Finish block, so the run ends about half a second
+        in — short enough that a rewind reaches back to its very first frame.
+        Returns (marble, scoring block).
+        """
+        self.game.grid.clear()
+        self.game.grid[(5, 1)] = main.Block(5, 1, scorer=main.Scorer.START)
+        self.game.grid[(5, 5)] = main.Block(
+            5, 5, shape=main.Shape.NONE, scorer=main.Scorer.CHIPS_ADD,
+            scorer_amount=10)
+        self.game.grid[(5, 9)] = main.Block(5, 9, scorer=main.Scorer.FINISH)
+        if own_card:
+            self.game.cards = [main.CardItem(main.Card.PROCRASTINATION, 46)]
+        self.game.reset_run()
+        return self.game.marbles[0], self.game.grid[(5, 5)]
+
+    def test_procrastination_rewinds_the_run_instead_of_ending_it(self):
+        # The run's FIRST completion rewinds it: the marbles fly their last
+        # second again with every block trigger refilled, so the run carries on
+        # instead of ending.
+        marble, block = self._start_procrastination_run()
+        frames = 0
+        while not self.game.procrastination_used and frames < 300:
+            self.game.update()
+            frames += 1
+
+        self.assertTrue(self.game.procrastination_used)
+        self.assertTrue(self.game.run_active)          # still going
+        self.assertFalse(self.game.run_complete)
+        self.assertFalse(self.game.awaiting_after_run)
+        self.assertFalse(marble.finished)              # flying, not parked
+        self.assertEqual(block.triggers_left, block.trigger_limit)  # refilled
+        # The second that was rewound is gone: the replayed frames start over.
+        self.assertLess(len(marble.history),
+                        main.PROCRASTINATION_REWIND_FRAMES + 1)
+        # The refilled trigger pays again as the marble replays the fall...
+        chips_at_rewind = self.game.score_chips
+        frames = 0
+        while not self.game.run_complete and frames < 300:
+            self.game.update()
+            frames += 1
+        self.assertGreater(self.game.score_chips, chips_at_rewind)
+        # ...and the run really ends the second time (no second rewind).
+        self.assertTrue(self.game.run_complete)
+        self.assertFalse(self.game.run_active)
+        self.assertIn("Procrastination", self.game.shop_message)
+
+    def test_without_the_card_the_first_completion_ends_the_run(self):
+        marble, _block = self._start_procrastination_run(own_card=False)
+        frames = 0
+        while not self.game.run_complete and frames < 300:
+            self.game.update()
+            frames += 1
+
+        self.assertTrue(self.game.run_complete)
+        self.assertFalse(self.game.procrastination_used)
+
+    def test_the_rewind_puts_a_marble_back_one_second(self):
+        # The rewind is a state restore: the marble returns to the snapshot it
+        # took one second ago (the oldest in its history), and the second it
+        # left behind is dropped so it can never be replayed twice.
+        marble = main.Marble(100, 100)
+        marble.position = np.array([300.0, 400.0])
+        marble.velocity = np.array([10.0, 20.0])
+        marble.angular_velocity = 3.0
+        marble.history.append(marble.motion_state())
+        # ...then the last second happens, which the rewind undoes:
+        marble.position = np.array([500.0, 600.0])
+        marble.velocity = np.array([99.0, 99.0])
+        marble.sticky_timer = 0.5
+        marble.sticky_velocity = np.array([1.0, 1.0])
+        marble.history.append(marble.motion_state())
+        self.game.marbles = [marble]
+        self.game.cards = [main.CardItem(main.Card.PROCRASTINATION, 46)]
+
+        self.assertTrue(self.game._procrastination_rewind())
+
+        self.assertTrue(np.allclose(marble.position, [300.0, 400.0]))
+        self.assertTrue(np.allclose(marble.velocity, [10.0, 20.0]))
+        self.assertEqual(marble.angular_velocity, 3.0)
+        self.assertEqual(marble.sticky_timer, 0.0)      # the hold never happened
+        self.assertIsNone(marble.sticky_velocity)
+        self.assertEqual(list(marble.history), [])       # the future is gone
+        self.assertTrue(self.game.procrastination_used)
+
+    def test_the_rewind_history_is_exactly_one_second_deep(self):
+        # One snapshot per frame, so the oldest one a run keeps is exactly a
+        # second back — the rewind span — and never further.
+        self.assertAlmostEqual(main.PROCRASTINATION_REWIND_FRAMES * main.DT,
+                               main.PROCRASTINATION_REWIND_SECONDS)
+        # A run with no Finish block never ends, so it just keeps recording.
+        self.game.grid.clear()
+        self.game.grid[(5, 1)] = main.Block(5, 1, scorer=main.Scorer.START)
+        self.game.reset_run()
+        marble = self.game.marbles[0]
+        self.assertEqual(marble.history.maxlen,
+                         main.PROCRASTINATION_REWIND_FRAMES + 1)
+        for _ in range(main.PROCRASTINATION_REWIND_FRAMES + 20):
+            self.game.update()
+        self.assertFalse(self.game.run_complete)
+        self.assertEqual(len(marble.history), marble.history.maxlen)
+
+    def test_the_rewind_keeps_the_clock_and_the_measurements(self):
+        # Only the marbles' motion and the trigger counts go back: the run is
+        # simply one second longer, so its clock and its accumulated
+        # measurements keep the values they had when the run finished.
+        marble, _block = self._start_procrastination_run()
+        frames = 0
+        while not self.game.procrastination_used and frames < 300:
+            clock, travelled = self.game.run_time, marble.distance
+            self.game.update()
+            frames += 1
+
+        self.assertGreater(self.game.run_time, clock)
+        self.assertGreaterEqual(marble.distance, travelled)
+
+    def test_a_rewind_with_no_history_leaves_the_marble_alone(self):
+        # A marble released this frame has nothing behind it (and a new run's
+        # marbles start with an empty history, so a rewind can never reach into
+        # the previous run): it stays where it is.
+        marble = main.Marble(120, 340)
+        marble.velocity = np.array([7.0, 8.0])
+        self.game.marbles = [marble]
+        self.game.cards = [main.CardItem(main.Card.PROCRASTINATION, 46)]
+
+        self.assertTrue(self.game._procrastination_rewind())
+
+        self.assertTrue(np.allclose(marble.position, [120.0, 340.0]))
+        self.assertTrue(np.allclose(marble.velocity, [7.0, 8.0]))
+
+    def test_the_card_cutter_silences_the_rewind(self):
+        marble, block = self._start_procrastination_run()
+        self.game.disabled_card = self.game.cards[0]
+
+        self.assertFalse(self.game._procrastination_rewind())
+
+        self.assertFalse(self.game.procrastination_used)
+        block.triggers_left = 0
+        frames = 0
+        while not self.game.run_complete and frames < 300:
+            self.game.update()
+            frames += 1
+        self.assertTrue(self.game.run_complete)  # the run just ended as usual
+
+    # --- Essence: cash every run, a slot gone, tokens when sold --------------
+
+    def _card_fillers(self, count):
+        """Distinct whole cards to fill the card area with."""
+        values = [main.Card.SHOWMAN, main.Card.GARDEN, main.Card.COUPON,
+                  main.Card.MARKET, main.Card.MINESHAFT]
+        return [main.CardItem(value, 30) for value in values[:count]]
+
+    def test_essence_card_data(self):
+        self.assertIn(main.Card.ESSENCE, main.Card.ORDER)
+        self.assertEqual(main.Card.name(main.Card.ESSENCE), "Essence")
+        self.assertEqual(main.Card.PRICES[main.Card.ESSENCE], 48)
+        self.assertTrue(main.Card.comment(main.Card.ESSENCE))
+        self.assertIn(main.Card.ESSENCE, main.Card.COLORS)
+        self.assertIn(main.Card.ESSENCE, main.Card.GLYPHS)
+        description = main.Card.description(main.Card.ESSENCE)
+        for part in ("$10", "card slot", "2", "Spirit token"):
+            self.assertIn(part, description)
+        # Every whole card is indivisible: no (condition, scorer) rebuilds it.
+        self.assertFalse(components.is_splittable_card(main.Card.ESSENCE))
+
+    def test_essence_takes_a_card_slot_away(self):
+        # The area holds MAX_CARDS cards; Essence trades one away and its own
+        # slot counts, so it needs room for the SMALLER area to be bought.
+        self.assertEqual(self.game.max_cards, main.MAX_CARDS)
+        self.assertEqual(self.game._card_capacity_for(main.Card.ESSENCE),
+                         main.MAX_CARDS - 1)
+        self.game.cash = 1000
+        # At MAX_CARDS - 1 cards there is no room for it at all.
+        self.game.cards = self._card_fillers(main.MAX_CARDS - 1)
+        self.game._buy_shop_item(main.CardItem(main.Card.ESSENCE, 48))
+        self.assertEqual(len(self.game.cards), main.MAX_CARDS - 1)
+        self.assertTrue(self.game.shop_message)
+        # One slot free and it fits: the area is now a slot smaller.
+        self.game.cards = self._card_fillers(main.MAX_CARDS - 2)
+        self.game._buy_shop_item(main.CardItem(main.Card.ESSENCE, 48))
+        self.assertEqual(len(self.game.cards), main.MAX_CARDS - 1)
+        self.assertEqual(self.game.max_cards, main.MAX_CARDS - 1)
+        # ...so nothing else fits either, and the missing slot is not clickable.
+        self.game._buy_shop_item(self._card_fillers(1)[0])
+        self.assertEqual(len(self.game.cards), main.MAX_CARDS - 1)
+        self.assertIn(str(main.MAX_CARDS - 1), self.game.shop_message)
+        gone = pygame.Rect(main.CARD_AREA_COORDS[0] + (main.MAX_CARDS - 1) * main.GRID_SIZE,
+                           main.CARD_AREA_COORDS[1], main.GRID_SIZE, main.GRID_SIZE)
+        self.assertIsNone(self.game.card_area_item_at(gone.center))
+        self.assertEqual(self.game.card_area_item_at(
+            pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
+                        main.GRID_SIZE, main.GRID_SIZE).center),
+            self.game.cards[0])
+        # Selling it gives the slot back.
+        essence = next(c for c in self.game.cards
+                       if c.value == main.Card.ESSENCE)
+        self.game.selected_toolbox_item = essence
+        self.game._sell_selected_item()
+        self.assertEqual(self.game.max_cards, main.MAX_CARDS)
+
+    def test_essence_pays_ten_at_the_end_of_every_run(self):
+        # The $10 is part of the end-of-run cash award, with its own line in the
+        # breakdown (and a retry takes it back with the rest of the award).
+        self.game.grid[(5, 1)] = main.Block(5, 1, scorer=main.Scorer.START)
+        self.game.grid[(5, 9)] = main.Block(5, 9, scorer=main.Scorer.FINISH)
+        self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
+        self.game.cash = 100
+        self.game.reset_run()
+        frames = 0
+        while not self.game.run_complete and frames < 300:
+            self.game.update()
+            frames += 1
+
+        self.assertTrue(self.game.run_complete)
+        self.assertEqual(self.game.last_run_cash_breakdown["essence"],
+                         main.ESSENCE_RUN_CASH)
+        rows = dict(self.game._cash_breakdown_rows())
+        self.assertIn("Essence", rows)
+        self.assertIn(f"${main.ESSENCE_RUN_CASH}", rows["Essence"])
+        # 20 base + 10 interest + 10 essence.
+        self.assertEqual(self.game.cash, 100 + 20 + 10 + main.ESSENCE_RUN_CASH)
+        self.assertEqual(self.game.last_run_cash_gained, 20 + 10 + main.ESSENCE_RUN_CASH)
+
+        # Without the card the same run pays no essence line.
+        self.game.cards = []
+        self.game.awaiting_after_run = False
+        self.game.cash = 100
+        self.game.reset_run()
+        self.game.run_time = main.TIME_IDEAL
+        for _ in range(300):
+            self.game.update()
+            if self.game.run_complete:
+                break
+        self.assertEqual(self.game.last_run_cash_breakdown["essence"], 0)
+
+    def test_selling_essence_distils_two_permanent_tokens(self):
+        random.seed(11)
+        self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
+        self.game.selected_toolbox_item = self.game.cards[0]
+
+        self.game._sell_selected_item()
+
+        self.assertEqual(len(self.game.tokens), main.ESSENCE_TOKENS)
+        self.assertIn("Spirit token", self.game.shop_message)
+        # Random: the shop's scorers (never a run role, never the no-scorer
+        # NONE), each with its own rolled magnitude and like a random block.
+        shop_scorers = [s for s in main.Scorer.SHOP_ORDER
+                        if s not in (main.Scorer.START, main.Scorer.FINISH,
+                                     main.Scorer.NONE)]
+        for token in self.game.tokens:
+            self.assertIn(token.scorer, shop_scorers)
+            self.assertIsNone(token.runs_left)  # permanent
+            average = main.Scorer.DEFAULT_AMOUNT[token.scorer]
+            self.assertGreaterEqual(token.scorer_amount,
+                                    main.scorer_magnitude_floor(token.scorer))
+            self.assertLessEqual(token.scorer_amount,
+                                 average + main.magnitude_step(average)
+                                 * main.MAGNITUDE_MAX_STEPS)
+            self.assertTrue(set(token.effects) <= set(main.Effect.REAL_ORDER))
+        # A permanent token survives a run (its scorer's own self-destruction
+        # rules aside), so the distils really are for every run after this one.
+        keeper = [t for t in self.game.tokens
+                  if t.scorer not in (main.Scorer.SATANIC, main.Scorer.SHARP)]
+        self.assertTrue(keeper)
+        self.game.tokens = keeper
+        for token in self.game.tokens:
+            token.fired = True
+        self.game._advance_tokens()
+        self.assertEqual(len(self.game.tokens), len(keeper))
+        # The rolls are random: selling several Essences gives different keeps.
+        scorers = set()
+        for _ in range(6):
+            self.game.tokens = []
+            self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
+            self.game.selected_toolbox_item = self.game.cards[0]
+            self.game._sell_selected_item()
+            scorers.update(t.scorer for t in self.game.tokens)
+        self.assertGreater(len(scorers), 2)
+
+    def test_the_death_action_also_distils_essence(self):
+        # "Sold" covers every sale: the Death action goes through the same rule.
+        self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
+        action = main.ActionItem(main.Action.DEATH, 60)
+
+        self.assertTrue(self.game._action_death(action, self.game.cards[0]))
+
+        self.assertEqual(self.game.cards, [])
+        self.assertEqual(len(self.game.tokens), main.ESSENCE_TOKENS)
+        self.assertIn("Spirit token", self.game.shop_message)
+
+    def test_selling_essence_stops_at_a_full_token_column(self):
+        # Only the tokens that fit are distilled, and the sale says so.
+        self.game.tokens = [main.ScorerToken(main.Scorer.CASH, 15, runs_left=None)
+                            for _ in range(main.MAX_TOKENS - 1)]
+        self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
+        self.game.selected_toolbox_item = self.game.cards[0]
+
+        self.game._sell_selected_item()
+
+        self.assertEqual(len(self.game.tokens), main.MAX_TOKENS)
+        self.assertIn("1 permanent Spirit token", self.game.shop_message)
+        # A completely full column has no room at all, and the sale still works.
+        self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
+        self.game.selected_toolbox_item = self.game.cards[0]
+        self.game._sell_selected_item()
+
+        self.assertEqual(len(self.game.tokens), main.MAX_TOKENS)
+        self.assertEqual(self.game.cards, [])
+        self.assertIn("no room", self.game.shop_message)
+
+    # --- Concert: +1 trigger for the blocks with a shape, effect and scorer --
+
+    def _concert_block(self, shape=main.Shape.PIPE, effects=(main.Effect.BOUNCY,),
+                       scorer=main.Scorer.CHIPS_ADD, x=1, y=1):
+        """A block on the board built from the given parts (Concert's rule is
+        about exactly these three)."""
+        block = main.Block(x, y, shape=shape, scorer=scorer, scorer_amount=30,
+                           effects=list(effects))
+        self.game.grid[(x, y)] = block
+        return block
+
+    def test_concert_card_data(self):
+        self.assertIn(main.Card.CONCERT, main.Card.ORDER)
+        self.assertEqual(main.Card.name(main.Card.CONCERT), "Concert")
+        self.assertEqual(main.Card.PRICES[main.Card.CONCERT], 44)
+        self.assertTrue(main.Card.comment(main.Card.CONCERT))
+        self.assertIn(main.Card.CONCERT, main.Card.COLORS)
+        self.assertIn(main.Card.CONCERT, main.Card.GLYPHS)
+        description = main.Card.description(main.Card.CONCERT)
+        for part in ("rect", "effect", "scorer", "1 more time per run"):
+            self.assertIn(part, description)
+        # Every whole card is indivisible: no (condition, scorer) rebuilds it.
+        self.assertFalse(components.is_splittable_card(main.Card.CONCERT))
+        self.assertEqual(main.CONCERT_TRIGGER_BONUS, 1)
+
+    def test_concert_boosts_only_blocks_with_a_shape_an_effect_and_a_scorer(self):
+        # The rule is all three at once: a real shape (not a plain rect), a real
+        # effect, and a scorer. Without the card, none of them are boosted.
+        qualifies = self._concert_block()
+        rect = self._concert_block(shape=main.Shape.RECT, x=2, y=1)
+        bare = self._concert_block(effects=(main.Effect.NONE,), x=3, y=1)
+        scorerless = self._concert_block(scorer=main.Scorer.NONE, x=4, y=1)
+        for block in (qualifies, rect, bare, scorerless):
+            self.assertEqual(self.game._trigger_limit(block), 1)
+        self.assertFalse(self.game._concert_boosts(qualifies))
+
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+
+        self.assertEqual(self.game._trigger_limit(qualifies), 2)
+        self.assertEqual(self.game._trigger_limit(rect), 1)       # a plain rect
+        self.assertEqual(self.game._trigger_limit(bare), 1)       # no effect
+        self.assertEqual(self.game._trigger_limit(scorerless), 1)  # no scorer
+        # The bonus is visible wherever the block's limit is shown, and it is
+        # derived rather than written onto the block.
+        self.assertEqual(self.game._item_name(qualifies), "Bouncy Pipe +Chips v2")
+        self.assertEqual(qualifies.trigger_limit, 1)
+        rows = dict(self.game._describe_item(qualifies))
+        self.assertEqual(rows["Trigger"], "Scores 2 times per run (1 left)")
+        # ...and the toolbox copy of a qualifying block shows it too.
+        item = main.BlockItem(0, 0, main.Shape.PIPE, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 30, 20, "Pipe +Chips",
+                              effects=[main.Effect.BOUNCY])
+        self.assertEqual(self.game._trigger_limit(item), 2)
+        self.assertIn("Scores 2 times per run",
+                      dict(self.game._describe_item(item))["Trigger"])
+
+    def test_concert_hands_out_the_extra_trigger_when_triggers_are_dealt(self):
+        # A fresh run hands every block its limit, so a Concert block starts the
+        # run with one more trigger than its own limit.
+        block = self._concert_block()
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+        self.game.grid[(1, 5)] = main.Block(1, 5, scorer=main.Scorer.START)
+        self.game.grid[(1, 9)] = main.Block(1, 9, scorer=main.Scorer.FINISH)
+        block.triggers_left = 0  # spent in an earlier run
+
+        self.assertTrue(self.game.reset_run())
+
+        self.assertEqual(block.trigger_limit, 1)      # its own limit is untouched
+        self.assertEqual(block.triggers_left, 2)      # the card's extra one is dealt
+        # A Procrastination rewind hands them out again the same way.
+        self.game.cards.append(main.CardItem(main.Card.PROCRASTINATION, 46))
+        block.triggers_left = 0
+        self.assertTrue(self.game._procrastination_rewind())
+        self.assertEqual(block.triggers_left, 2)
+
+    def test_a_block_placed_under_concert_arrives_with_the_extra_trigger(self):
+        # Placing is where a block's triggers are dealt, so a qualifying block
+        # placed while Concert is owned arrives with the extra one already.
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+        self.game.toolbox.items.clear()
+        item = main.BlockItem(0, 0, main.Shape.PIPE, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 30, 20, "Pipe +Chips",
+                              effects=[main.Effect.BOUNCY])
+        self.game.toolbox.add(item)
+        self.game._equip_block(item)
+        self._click(self._grid_pos(1, 1))
+        self.game.drawing = False
+
+        placed = self.game.grid[(1, 1)]
+        self.assertEqual(placed.trigger_limit, 1)
+        self.assertEqual(placed.triggers_left, 2)
+
+    def test_buying_concert_mid_run_leaves_the_dealt_triggers_alone(self):
+        # The card raises the LIMIT; a trigger already dealt is not handed out
+        # again (the same rule the paid trigger upgrade follows). The next refill
+        # brings the extra one.
+        block = self._concert_block()
+        self.game.grid[(1, 5)] = main.Block(1, 5, scorer=main.Scorer.START)
+        self.game.grid[(1, 9)] = main.Block(1, 9, scorer=main.Scorer.FINISH)
+        self.game.reset_run()
+        self.assertEqual(block.triggers_left, 1)
+
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+
+        self.assertEqual(self.game._trigger_limit(block), 2)   # the limit moved
+        self.assertEqual(block.triggers_left, 1)               # the dealt one did not
+        self.game.reset_run()
+        self.assertEqual(block.triggers_left, 2)
+
+    def test_selling_or_cutting_concert_takes_the_extra_trigger_away(self):
+        block = self._concert_block()
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+        self.game.grid[(1, 5)] = main.Block(1, 5, scorer=main.Scorer.START)
+        self.game.grid[(1, 9)] = main.Block(1, 9, scorer=main.Scorer.FINISH)
+        self.game.reset_run()
+        self.assertEqual(block.triggers_left, 2)
+
+        # The Card cutter trial silences the card like any other passive card,
+        # so the blocks fall back to their own limit (nothing was written to
+        # them, so nothing has to be undone).
+        self.game.disabled_card = self.game.cards[0]
+        self.assertEqual(self.game._trigger_limit(block), 1)
+        self.assertEqual(self.game._item_name(block), "Bouncy Pipe +Chips v1")
+
+        self.game.disabled_card = None
+        self.assertEqual(self.game._trigger_limit(block), 2)
+        # Selling it does the same for good (and the trigger it already dealt
+        # stays for this run).
+        self.game.selected_toolbox_item = self.game.cards[0]
+        self.game._sell_selected_item()
+        self.assertEqual(self.game.cards, [])
+        self.assertEqual(self.game._trigger_limit(block), 1)
+        self.assertEqual(block.triggers_left, 2)
+
+    def test_concert_blocks_really_spend_both_triggers(self):
+        # End to end: the trigger Concert hands out is a real, spendable one, so
+        # a touch, a leave and a re-touch pays twice in the same run.
+        block = self._concert_block(shape=main.Shape.PIPE, scorer=main.Scorer.CHIPS_ADD)
+        block.scorer_amount = 10
+        self.game.grid[(1, 5)] = main.Block(1, 5, scorer=main.Scorer.START)
+        self.game.grid[(1, 9)] = main.Block(1, 9, scorer=main.Scorer.FINISH)
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+        self.assertTrue(self.game.reset_run())
+        marble = self.game.marbles[0]
+        self.assertEqual(block.triggers_left, 2)
+
+        paid = []
+        for this_tick, last_tick in (([block], []), ([], [block]), ([block], [])):
+            self.game.score_chips = 0
+            marble.collisions_this_tick = this_tick
+            marble.collisions_last_tick = last_tick
+            self.game._handle_block_contacts([block])
+            paid.append(self.game.score_chips)
+
+        self.assertEqual(paid, [10, 0, 10])   # the middle frame is a leave, not a touch
+        self.assertEqual(block.triggers_left, 0)   # both triggers are spent
+
+    def test_concert_stacks_with_a_paid_upgrade_and_deja_vu(self):
+        block = self._concert_block()
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+        self.game.cash = 1000
+        # A paid upgrade raises the block's OWN limit by one...
+        self.game.selected_toolbox_item = block
+        self.game._upgrade_trigger_limit()
+        self.assertEqual(block.trigger_limit, 2)
+        self.assertEqual(self.game._trigger_limit(block), 3)
+        self.assertIn("Trigger limit now 3", self.game.shop_message)
+        # ...and Deja Vu's +1 lands on top of both.
+        self.assertTrue(self.game._action_deja_vu(
+            main.ActionItem(main.Action.DEJA_VU, 24), block))
+        self.assertEqual(block.trigger_limit, 3)
+        self.assertEqual(self.game._trigger_limit(block), 4)
+        self.assertIn("(now 4)", self.game.shop_message)
+
+    def test_hands_tied_still_disables_a_concert_block(self):
+        # The trial's cap is applied after Concert's bonus, so a disabled block
+        # is not handed the extra trigger back.
+        block = self._concert_block()
+        self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
+        self.game.grid[(1, 5)] = main.Block(1, 5, scorer=main.Scorer.START)
+        self.game.grid[(1, 9)] = main.Block(1, 9, scorer=main.Scorer.FINISH)
+        self.game.trial_maxed_blocks = {block}
+
+        self.assertEqual(self.game._trigger_limit(block),
+                         main.TRIAL_MAX_TRIGGERS)
+        self.game.reset_run()
+
+        self.assertEqual(block.triggers_left, 0)
+        self.assertTrue(self.game._concert_boosts(block))  # still a Concert block
+
     # --- The Painting condition ---------------------------------------------
 
     def test_painting_condition_metadata(self):
@@ -2957,12 +3471,9 @@ class RunScoringTests(unittest.TestCase):
                         self.assertGreaterEqual(item.amount, floor)
                         self.assertLessEqual(item.amount,
                                              average + step * main.MAGNITUDE_MAX_STEPS)
-                        if item.amount != floor:
-                            self.assertAlmostEqual((item.amount - average) / step,
-                                                  round((item.amount - average) / step))
+                        self.assertEqual(item.amount, round(item.amount, 9))
                     seen.add(item.amount)
-                    self.assertEqual(item.price,
-                                     main.card_price_for(item.value, item.amount))
+                    self.assertEqual(item.price, main.card_price_for(item.value))
         # The rolls really vary (a flat average would give one value).
         self.assertGreater(len(seen), 1)
 
@@ -3005,9 +3516,10 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(self.game.score_mult, 1 + 9 + 9)  # both copies pay +9
 
     def test_a_card_built_from_a_component_keeps_the_pieces_magnitude(self):
-        # Building a card consumes the scorer piece, so the card pays the
+        # Building a card consumes the scorer piece, so the card PAYS the
         # strength that piece was bought at: no laundering a cheap roll into
-        # the average card (or the reverse).
+        # the average card (or the reverse). Its price is the catalog price
+        # either way — a roll is never part of what something costs.
         for amount, expected in ((45, 45), (15, 15)):
             with self.subTest(amount=amount):
                 self.game.toolbox.items.clear()
@@ -3024,23 +3536,25 @@ class RunScoringTests(unittest.TestCase):
 
                 card = self.game.cards[-1]
                 self.assertEqual(card.amount, amount)
-                self.assertEqual(card.price,
-                                 main.card_price_for(card.value, amount))
+                self.assertEqual(card.price, main.card_price_for(card.value))
                 self.game.score_chips = 0
                 self.game._apply_cards()
                 self.assertEqual(self.game.score_chips, expected)
 
-    def test_card_price_and_description_follow_the_magnitude(self):
+    def test_card_description_follows_the_magnitude_but_its_price_does_not(self):
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
         catalog = main.Card.PRICES[value]
         strong = main.make_card_item(value, amount=45)
         weak = main.make_card_item(value, amount=15)
 
-        self.assertGreater(strong.price, catalog)
-        self.assertLess(weak.price, catalog)
+        # The roll shows in what the card pays and says...
         rows = dict(self.game._describe_item(strong))
         text = rows[f"Card - {main.Card.name(value)}"]
         self.assertIn("+45 chips (+15)", text)
+        # ...but never in what it costs.
+        self.assertEqual(strong.price, catalog)
+        self.assertEqual(weak.price, catalog)
+        self.assertEqual(strong.price, main.card_price_for(value))
         # A whole card keeps its catalog text and price.
         coupon = main.make_card_item(main.Card.COUPON)
         self.assertEqual(coupon.amount, 0)
@@ -3103,7 +3617,7 @@ class RunScoringTests(unittest.TestCase):
         for card in composed:
             scorer = main.card_scorer(card.value)
             self.assertGreaterEqual(card.amount, main.scorer_magnitude_floor(scorer))
-            self.assertEqual(card.price, main.card_price_for(card.value, card.amount))
+            self.assertEqual(card.price, main.card_price_for(card.value))
 
     def test_a_cards_magnitude_round_trips_through_a_save(self):
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
@@ -3370,18 +3884,17 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(finish.name, "Finish Block")
 
         # An ordinary scorer is still offered as a scorer component, carrying
-        # its OWN rolled magnitude: a whole number of steps from the average.
+        # its OWN rolled magnitude: a continuous deviation from the average.
         chips = self.game.shop._scorer_offer(main.Scorer.CHIPS_ADD, 2, 1)
         self.assertEqual(chips.kind, main.Component.SCORER)
         self.assertEqual(chips.value, main.Scorer.CHIPS_ADD)
         average = main.Scorer.DEFAULT_AMOUNT[main.Scorer.CHIPS_ADD]
         step = main.magnitude_step(average)
-        self.assertAlmostEqual((chips.amount - average) / step,
-                              round((chips.amount - average) / step))
+        self.assertGreaterEqual(chips.amount, main.scorer_magnitude_floor(main.Scorer.CHIPS_ADD))
         self.assertLessEqual(abs(chips.amount - average),
                              step * main.MAGNITUDE_MAX_STEPS)
         self.assertEqual(chips.price,
-                         main.scorer_component_price(main.Scorer.CHIPS_ADD, chips.amount))
+                         main.scorer_component_price(main.Scorer.CHIPS_ADD))
 
     def test_shop_scorer_slots_offer_role_blocks(self):
         def fake_sample(options, weights, k):
@@ -4804,8 +5317,8 @@ class RunScoringTests(unittest.TestCase):
         # The block is worth 75% of its parts, and the +Chips piece is priced
         # for its OWN magnitude (10 chips, well below the 30 average, is a
         # cheap scorer).
-        self.assertEqual(blocks[0].price,
-                         int(main.scorer_component_price(main.Scorer.CHIPS_ADD, 10) * 0.75))
+        self.assertEqual(
+            blocks[0].price, int(main.scorer_component_price(main.Scorer.CHIPS_ADD) * 0.75))
 
     def test_assembling_partial_parts_defaults_the_rest(self):
         # A lone effect makes a Rect block with that effect and no scorer.
@@ -5531,7 +6044,8 @@ class RunScoringTests(unittest.TestCase):
                           main.Card.COMPOUND_INTEREST, main.Card.COUPON,
                           main.Card.FACTORY, main.Card.MINESHAFT, main.Card.MARKET,
                           main.Card.WATCH, main.Card.TESSERACT,
-                          main.Card.THOUSAND_HANDED])
+                          main.Card.THOUSAND_HANDED, main.Card.PROCRASTINATION,
+                          main.Card.ESSENCE, main.Card.CONCERT])
         for value in main.Card.ORDER:
             self.assertTrue(main.Card.name(value))
             self.assertTrue(main.Card.comment(value))
@@ -6713,21 +7227,24 @@ class RunScoringTests(unittest.TestCase):
             main.Scorer.VOYAGER]), 0.001)
         self.assertAlmostEqual(main.scorer_magnitude_floor(main.Scorer.VOYAGER), 0.001)
         rolls = [main.roll_scorer_amount(main.Scorer.VOYAGER) for _ in range(200)]
-        # 17 possible rates (the average +/- up to 8 steps), so a sample
-        # repeats; it must still cover a spread of them rather than one value.
+        # The roll is continuous, so a sample of these tiny rates spreads over
+        # far more than the 17 whole-step values the rolled grid used to hold.
         self.assertGreater(len(set(rolls)), 5, "rolls should vary")
-        self.assertLessEqual(len(set(rolls)), 17)
+        self.assertGreater(len(set(rolls)), 17)
         for amount in rolls:
             self.assertGreaterEqual(amount, 0.002)
             self.assertLessEqual(amount, 0.018)
-            self.assertAlmostEqual(round(amount / 0.001), amount / 0.001, places=6)
-        # A piece is priced for the rate it rolled (the table price is the
-        # average-rate price).
+            # A rate is written with five decimals (2% of its own average is
+            # finer than that), so a roll carries no arithmetic dust.
+            self.assertEqual(amount, round(amount, 5))
+        # A piece costs the catalog price whatever rate it rolled (the table
+        # price is the average-rate price): the roll is upside, not cost.
         base = main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.VOYAGER)]
         strong = main.Component.scorer_component(main.Scorer.VOYAGER, amount=0.018)
         weak = main.Component.scorer_component(main.Scorer.VOYAGER, amount=0.002)
-        self.assertGreater(strong.price, base)
-        self.assertLess(weak.price, base)
+        self.assertEqual(strong.price, base)
+        self.assertEqual(weak.price, base)
+        self.assertEqual((strong.amount, weak.amount), (0.018, 0.002))
         # The description names the rolled rate with its deviation token.
         desc = main.scorer_description(main.Scorer.VOYAGER, 0.018)
         self.assertIn("0.018 mult", desc)
@@ -7956,6 +8473,96 @@ class RunScoringTests(unittest.TestCase):
         # to are the menu screens).
         self.assertNotIn("pygame.display.flip", inspect.getsource(main.ui))
 
+    def test_every_font_is_the_shared_garet_heavy_one(self):
+        # ui's small labels used to build pygame's EMBEDDED default font inline
+        # (Font(None, n)), so they were the one part of the game not drawn in
+        # garet-heavy — and one Font per frame.
+        source = inspect.getsource(main)
+        self.assertEqual(source.count("Font(None"), 0)
+        for module in (main.ui, main.cards, main.save_system, main.profiles,
+                       main.achievements, main.collection, main.metagame, main.crt):
+            self.assertEqual(inspect.getsource(module).count("pygame.font"), 0)
+        # The only creation sites are the two lines of the table Game.__init__
+        # builds (the garet-heavy roles, then the title face).
+        self.assertEqual(source.count("pygame.font.Font"), 2)
+        self.assertEqual(source.count("pygame.font.Font"),
+                         inspect.getsource(main.Game.__init__).count(
+                             "pygame.font.Font"))
+
+        # Every role is bound to a garet-heavy font of the size it asks for...
+        for role, size in main.FONT_SIZES.items():
+            bound = main.ui.font(role)
+            self.assertIs(bound, main.ui.FONTS[role])
+            wanted = max(1, int(size * main.FONT_SCALE))
+            self.assertEqual(bound.size("Hxg1"),
+                             pygame.font.Font(main.GARET_FONT_PATH,
+                                              wanted).size("Hxg1"))
+            # ...which is not what the default font would have drawn for it.
+            self.assertNotEqual(bound.size("Hxg1"),
+                                pygame.font.Font(None, wanted).size("Hxg1"))
+        # The title face is its own typeface, and every named attribute is the
+        # very object in the table (so main's own screens and ui agree).
+        self.assertEqual(main.ui.FONTS["title"].size("Hxg1"),
+                         pygame.font.Font(main.TITLE_FONT_PATH, 90).size("Hxg1"))
+        self.assertIs(main.ui.FONTS["tiny"], self.game.tiny_font)
+        self.assertIs(main.ui.FONTS["small"], self.game.small_font)
+        self.assertIs(main.ui.FONTS["font"], self.game.font)
+        self.assertIs(main.ui.FONTS["required"], self.game.required_font)
+        self.assertIs(main.ui.FONTS["total"], self.game.total_font)
+        self.assertIs(main.ui.FONTS["title"], self.game.main_title_font)
+        # Asking for a role nobody bound is a clear error, not a silent
+        # fallback to some font built on the spot.
+        with self.assertRaises(KeyError):
+            main.ui.font("no-such-role")
+
+    def test_drawing_never_builds_a_font(self):
+        # The regression itself: each of these draws used to build a throwaway
+        # default font of its own — for an 8 ball, one per marble per frame.
+        screen = self.game.screen
+        rect = pygame.Rect(0, 0, main.GRID_SIZE, main.GRID_SIZE)
+        with mock.patch("main.pygame.font.Font") as build:
+            key = main.Block(2, 2, shape=main.Shape.KEY, scorer=main.Scorer.CASH,
+                             scorer_amount=15, origin=(80, 80))
+            key.key_number = 3
+            main.ui.draw_block(key, screen)
+            portal = main.Block(3, 2, scorer=main.Scorer.CASH, scorer_amount=15,
+                                origin=(120, 80),
+                                effects=[main.Effect.PORTAL, main.Effect.BOUNCY])
+            portal.portal_number = 2       # a pairing number AND the "+" mark
+            main.ui.draw_block(portal, screen)
+            main.ui.draw_token(screen, main.ScorerToken(main.Scorer.CASH, 15,
+                                                        runs_left=2), rect)
+            main.ui.draw_action(screen, main.ActionItem(main.Action.DEATH, 24,
+                                                        version=2), rect)
+            # Ids with no art at all fall back to a letter glyph, and a version
+            # tag rides on every action tile.
+            for item in (main.CardItem(0, 24), main.ActionItem(0, 24)):
+                main.ui.draw_card(screen, item, rect)
+                main.ui.draw_action(screen, item, rect)
+            main.ui._draw_condition_center(screen, 0, rect)
+            main.ui._draw_marble_eight_feature(
+                main.Marble(20, 20), pygame.Surface((40, 40), pygame.SRCALPHA),
+                20, 20, 2 * main.MARBLE_RADIUS)
+            build.assert_not_called()
+
+        # The 8 ball's digit is cached per size instead of rebuilt per frame,
+        # and a bigger marble gets a bigger digit.
+        self.assertIs(main.ui._eight_digit(10), main.ui._eight_digit(10))
+        self.assertGreater(main.ui._eight_digit(20).get_width(),
+                           main.ui._eight_digit(10).get_width())
+
+    def test_binding_hands_the_ui_the_live_games_fonts(self):
+        # The table follows whichever Game is running (a fresh Game rebinds it).
+        old = dict(main.ui.FONTS)
+        try:
+            fresh = main.Game()
+            self.assertIs(main.ui.font("tiny"), fresh.tiny_font)
+            self.assertIsNot(main.ui.font("tiny"), old["tiny"])
+            self.assertIs(main.ui.font("mini"), fresh.fonts["mini"])
+        finally:
+            main.ui.bind_fonts(old)
+        self.assertIs(main.ui.font("tiny"), self.game.tiny_font)
+
     def test_shop_card_slots_combine_conditions_and_unsplittables_equally(self):
         # Each card slot draws equally from a combined pool of conditions and
         # the indivisible whole cards; a condition draw gets a random scorer
@@ -8915,7 +9522,8 @@ class RunScoringTests(unittest.TestCase):
                    main.Card.CONQUISTADOR, main.Card.COMPOUND_INTEREST,
                    main.Card.INFERNO, main.Card.WATCH, main.Card.PEDESTAL,
                    main.Card.DOPPELGANGER, main.Card.TESSERACT,
-                   main.Card.THOUSAND_HANDED]
+                   main.Card.THOUSAND_HANDED, main.Card.PROCRASTINATION,
+                   main.Card.ESSENCE, main.Card.CONCERT]
         for value in passive:
             with self.subTest(card=main.Card.name(value)):
                 self.game.cards = [main.CardItem(value, 30),
@@ -9616,20 +10224,21 @@ class RunScoringTests(unittest.TestCase):
             self.assertIn(block.shape, main.Shape.ORDER)
             self.assertIn(block.effect, main.Effect.ORDER)
             self.assertIn(block.scorer, main.Scorer.ORDER)
-            # The scorer arrives with its own rolled magnitude: the average
-            # plus or minus a whole number of steps (and exactly the average
-            # for a scorer whose amount is not a magnitude at all).
+            # The scorer arrives with its own rolled magnitude: a continuous
+            # deviation from the average (and exactly the average for a scorer
+            # whose amount is not a magnitude at all).
             average = main.Scorer.DEFAULT_AMOUNT[block.scorer]
             step = main.magnitude_step(average)
             if not step:
                 self.assertEqual(block.scorer_amount, average)
             else:
-                floor = main.scorer_magnitude_floor(block.scorer)
-                if block.scorer_amount != floor:
-                    self.assertAlmostEqual((block.scorer_amount - average) / step,
-                                          round((block.scorer_amount - average) / step))
+                self.assertGreaterEqual(block.scorer_amount,
+                                        main.scorer_magnitude_floor(block.scorer))
                 self.assertLessEqual(abs(block.scorer_amount - average),
                                      step * main.MAGNITUDE_MAX_STEPS)
+                # ...and free of arithmetic noise, so a price and a description
+                # read the value the block actually pays.
+                self.assertEqual(block.scorer_amount, round(block.scorer_amount, 9))
             # A scaleable effect records its strength; an on/off one has none.
             for e in block.effects:
                 if e in main.Effect.MAGNITUDE:
@@ -10242,14 +10851,12 @@ class RunScoringTests(unittest.TestCase):
         self.assertTrue(all(item.price > 0 for item in components))
 
     def test_block_price_is_75_percent_of_component_sum(self):
-        # Every part is priced at the magnitude the block was built with, so a
-        # block with a fast piston and a big +Chips scorer costs more than the
-        # same block at the averages.
+        # Every part is priced at its CATALOG price, so the block's price never
+        # follows the magnitudes its parts rolled on the shelf.
         block = next(item for item in self.game.shop.items if item.kind == "block")
         total = (main.COMPONENT_PRICES[(main.Component.SHAPE, block.shape)]
-                 + sum(main.effect_component_price(e, block.effect_amounts.get(e))
-                       for e in block.effects)
-                 + main.scorer_component_price(block.scorer, block.scorer_amount))
+                 + sum(main.effect_component_price(e) for e in block.effects)
+                 + main.scorer_component_price(block.scorer))
 
         self.assertEqual(block.price, int(total * 0.75))
 
@@ -10589,9 +11196,38 @@ class RunScoringTests(unittest.TestCase):
         self.assertAlmostEqual(main.magnitude_step(0.4), 0.04)
         self.assertEqual(main.magnitude_step(0), 0)      # no average, no magnitude
 
-    def test_rolled_magnitudes_are_not_rounded(self):
-        # A roll is the exact average +/- 10% steps, so a small-average scorer
-        # lands on fractional magnitudes instead of snapping to whole numbers.
+    def test_magnitude_precision_is_scale_free(self):
+        # A rolled value is written with the decimals a deviation of its size
+        # can mean — two past the average's own scale — so a 0.01-average
+        # Voyager keeps its 0.00919 as exactly as a 30-chip scorer keeps 28.26,
+        # and no arithmetic dust ever reaches a price, a description or a save.
+        self.assertEqual(main.magnitude_precision(30), 2)
+        self.assertEqual(main.magnitude_precision(1500), 0)
+        self.assertEqual(main.magnitude_precision(4), 3)
+        self.assertEqual(main.magnitude_precision(0.75), 4)
+        self.assertEqual(main.magnitude_precision(0.01), 5)
+        self.assertEqual(main.magnitude_precision(0), 0)
+        for scorer in (main.Scorer.CHIPS_ADD, main.Scorer.MULT_ADD,
+                       main.Scorer.VOYAGER, main.Scorer.DRILL):
+            average = main.Scorer.DEFAULT_AMOUNT[scorer]
+            precision = main.magnitude_precision(average)
+            for _ in range(50):
+                amount = main.roll_scorer_amount(scorer)
+                self.assertEqual(amount, round(amount, precision),
+                                 main.Scorer.name(scorer))
+                # The deviation token beside a magnitude is that same rounded
+                # difference, so the two always add up on screen.
+                token = components.magnitude_deviation(average, amount)
+                if not token:
+                    continue
+                shown = float(token.strip(" ()").replace("+", ""))
+                self.assertEqual(shown, round(amount - average, precision))
+
+    def test_rolled_magnitudes_are_continuous(self):
+        # A roll is the average plus a CONTINUOUS deviation, so a magnitude is
+        # not confined to whole 10% steps: a whole-average scorer rolls onto
+        # fractional amounts too, and a value a roll can land on is not one of
+        # a handful of fixed points.
         for scorer in (main.Scorer.MULT_ADD, main.Scorer.SUMMIT,
                        main.Scorer.AIRBALL, main.Scorer.DRILL):
             average = main.Scorer.DEFAULT_AMOUNT[scorer]
@@ -10600,16 +11236,15 @@ class RunScoringTests(unittest.TestCase):
             fractional = [r for r in rolls if not float(r).is_integer()]
             self.assertTrue(fractional, main.Scorer.name(scorer))
             for amount in rolls:
-                # On the step grid, and free of arithmetic noise.
-                self.assertAlmostEqual((amount - average) / step,
-                                       round((amount - average) / step), places=6)
+                # Inside the widest deviation, and free of arithmetic noise.
+                self.assertLessEqual(abs(amount - average),
+                                     step * main.MAGNITUDE_MAX_STEPS)
                 self.assertEqual(amount, round(amount, 9))
-        # A whole average with a whole step still lands on whole values (the
-        # arithmetic stays exact rather than noisy).
-        for _ in range(100):
-            amount = main.roll_scorer_amount(main.Scorer.CHIPS_ADD)
-            self.assertTrue(float(amount).is_integer())
-            self.assertEqual(amount % 3, 0)
+        # A whole average with a whole step is no longer pinned to whole values
+        # (and far more than the 17 values the stepped roll could produce).
+        chips = [main.roll_scorer_amount(main.Scorer.CHIPS_ADD) for _ in range(200)]
+        self.assertTrue(any(not float(c).is_integer() for c in chips))
+        self.assertGreater(len(set(chips)), 100)
         # A drill counts whole squares even though its magnitude is fractional.
         self.assertEqual(main.scorer_magnitude_floor(main.Scorer.DRILL), 0.2)
 
@@ -10631,16 +11266,19 @@ class RunScoringTests(unittest.TestCase):
                 average = main.Scorer.DEFAULT_AMOUNT[scorer]
                 step = main.magnitude_step(average)
                 floor = main.scorer_magnitude_floor(scorer)
-                for _ in range(500):
-                    amount = main.roll_scorer_amount(scorer)
+                amounts = [main.roll_scorer_amount(scorer) for _ in range(500)]
+                for amount in amounts:
                     self.assertGreaterEqual(amount, floor)
                     self.assertLessEqual(amount, average + step * main.MAGNITUDE_MAX_STEPS)
-                    # Every roll lands on a step (except where the floor clamps
-                    # it, which is the floor's whole job).
-                    if amount == floor:
-                        continue
-                    self.assertAlmostEqual((amount - average) / step,
-                                          round((amount - average) / step))
+                    self.assertEqual(amount, round(amount, 9))
+                # The deviations are continuous: they do not snap to whole
+                # steps of 10% (the floor-clamped rolls are the exception,
+                # which is the floor's whole job).
+                off_step = [(a - average) / step for a in amounts
+                            if a != floor
+                            and abs((a - average) / step
+                                    - round((a - average) / step)) > 1e-6]
+                self.assertTrue(off_step, main.Scorer.name(scorer))
         # A scorer with no magnitude is left exactly alone.
         for scorer in (main.Scorer.NONE, main.Scorer.START, main.Scorer.LUCKY):
             self.assertEqual(main.roll_scorer_amount(scorer), 0)
@@ -10649,27 +11287,51 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(main.roll_effect_amounts([main.Effect.FRAGILE]), {})
 
     def test_rolls_follow_the_inverse_square_distribution(self):
-        # P(x) is proportional to 1/(x^2 + 1), so the average is about a third
-        # of rolls, one step off about a sixth, and two steps off about a
-        # sixteenth. Sampled generously so the tolerance never flakes.
+        # The deviation is continuous with density proportional to
+        # 1/(x^2 + MAGNITUDE_SPREAD) over +/- MAGNITUDE_MAX_STEPS steps: a roll
+        # lands right on the average about 0.18 of the time, one step off about
+        # 0.15, two steps off about 0.10. The shape is a Cauchy distribution
+        # truncated to the cap, so the chance of landing in the step-wide
+        # bucket around x is the SCALED arc tangent swept across it, over the
+        # whole range — this asserts the spread really is the one in the
+        # density, which is the dial on how wild rolls get. Sampled generously
+        # so the tolerance never flakes.
+        self.assertEqual(components.MAGNITUDE_SPREAD, 4)
+        self.assertAlmostEqual(main.MAGNITUDE_SCALE, math.sqrt(components.MAGNITUDE_SPREAD))
         samples = 30000
         average, step = 30, 3
         counts = {}
         for _ in range(samples):
-            x = round((main.roll_magnitude(average) - average) / step)
-            counts[x] = counts.get(x, 0) + 1
+            x = (main.roll_magnitude(average) - average) / step
+            # Half-up bucketing: a deviation that lands exactly on a boundary
+            # counts as the upper bucket, as the density integral does.
+            bucket = int(math.floor(x + 0.5))
+            counts[bucket] = counts.get(bucket, 0) + 1
         total = sum(counts.values())
-        norm = sum(1.0 / (x * x + 1) for x in range(-main.MAGNITUDE_MAX_STEPS,
-                                                    main.MAGNITUDE_MAX_STEPS + 1))
-        for x in (0, 1, -1, 2, -2, 3):
-            expected = (1.0 / (x * x + 1)) / norm
-            self.assertAlmostEqual(counts.get(x, 0) / total, expected, delta=0.015)
+        span = 2 * main.MAGNITUDE_ATAN_LIMIT
+        scale = main.MAGNITUDE_SCALE
+
+        def density_mass(x):
+            return (math.atan((x + 0.5) / scale)
+                    - math.atan((x - 0.5) / scale)) / span
+
+        for x in (0, 1, -1, 2, -2, 3, 4):
+            self.assertAlmostEqual(counts.get(x, 0) / total, density_mass(x),
+                                   delta=0.015)
         # The shape of the curve: nearer the average is always likelier.
         self.assertGreater(counts[0], counts[1])
         self.assertGreater(counts[1], counts[2])
-        self.assertAlmostEqual(counts[1] / counts[2], 2.5, delta=0.35)  # (2^2+1)/(1^2+1)
-        # Every deviation stays inside the cap.
+        self.assertAlmostEqual(counts[1] / counts[2],
+                               (2 ** 2 + components.MAGNITUDE_SPREAD)
+                               / (1 ** 2 + components.MAGNITUDE_SPREAD), delta=0.2)
+        # Every deviation stays inside the cap...
         self.assertTrue(all(abs(x) <= main.MAGNITUDE_MAX_STEPS for x in counts))
+        # ...and the rolls are continuous, not a 17-point grid of whole steps.
+        deviations = [round((main.roll_magnitude(average) - average) / step, 3)
+                      for _ in range(2000)]
+        self.assertTrue(any(d != round(d) for d in deviations))
+        self.assertGreater(len(set(deviations)), 200)
+        self.assertTrue(all(abs(d) <= main.MAGNITUDE_MAX_STEPS for d in deviations))
 
     def test_scorer_descriptions_state_the_deviation_inline(self):
         # The deviation sits right after the magnitude it belongs to, as a bare
@@ -10731,11 +11393,8 @@ class RunScoringTests(unittest.TestCase):
                 magnitude = item.effect_magnitude
                 self.assertGreaterEqual(magnitude, main.effect_magnitude_floor(item.value))
                 self.assertLessEqual(magnitude, average + step * main.MAGNITUDE_MAX_STEPS)
-                if magnitude != main.effect_magnitude_floor(item.value):
-                    self.assertAlmostEqual((magnitude - average) / step,
-                                          round((magnitude - average) / step))
                 self.assertEqual(item.price,
-                                 main.effect_component_price(item.value, magnitude))
+                                 main.effect_component_price(item.value))
                 # ...and the sidebar never claims a zero strength.
                 text = dict(self.game._describe_item(item))["Effect - "
                                                             f"{main.Effect.name(item.value)}"]
@@ -10785,42 +11444,46 @@ class RunScoringTests(unittest.TestCase):
                       if getattr(i, "kind", None) == main.Component.EFFECT)
         self.assertEqual(piston.value, main.Effect.PISTON)
         self.assertEqual(piston.effect_magnitude, 2100)
-        self.assertEqual(piston.price, main.effect_component_price(main.Effect.PISTON, 2100))
+        self.assertEqual(piston.price, main.effect_component_price(main.Effect.PISTON))
         scorer = next(i for i in self.game.toolbox.items
                       if getattr(i, "kind", None) == main.Component.SCORER)
         self.assertEqual(scorer.amount, 45)  # the scorer keeps its amount too
 
-    def test_component_prices_follow_the_magnitude(self):
-        # A piece is priced proportionally to its own magnitude: a strong one
-        # costs more, a weak one less, and the average pays the table price.
+    def test_component_prices_ignore_the_rolled_magnitude(self):
+        # A piece costs its catalog price whatever it rolled: a strong roll is
+        # free upside to hunt for, never a bigger bill.
         chips = main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.CHIPS_ADD)]
-        self.assertEqual(main.scorer_component_price(main.Scorer.CHIPS_ADD, 30), chips)
-        self.assertGreater(main.scorer_component_price(main.Scorer.CHIPS_ADD, 45), chips)
-        self.assertLess(main.scorer_component_price(main.Scorer.CHIPS_ADD, 15), chips)
-        self.assertEqual(main.scorer_component_price(main.Scorer.CHIPS_ADD, 45),
-                         round(chips * 1.5))
-        # A scorer with no magnitude is never scaled (roles stay $109/$53).
-        self.assertEqual(main.scorer_component_price(main.Scorer.START, 0), 140)
+        for amount in (6, 15, 30, 45, 54):
+            with self.subTest(amount=amount):
+                self.assertEqual(main.scorer_component_price(main.Scorer.CHIPS_ADD),
+                                 chips)
+        # Roles and magnitude-less scorers are priced by the same table.
+        self.assertEqual(main.scorer_component_price(main.Scorer.START), 140)
         piston = main.COMPONENT_PRICES[(main.Component.EFFECT, main.Effect.PISTON)]
-        self.assertEqual(main.effect_component_price(main.Effect.PISTON, 1500), piston)
-        self.assertGreater(main.effect_component_price(main.Effect.PISTON, 1800), piston)
-        self.assertEqual(main.effect_component_price(main.Effect.FRAGILE, None),
+        self.assertEqual(main.effect_component_price(main.Effect.PISTON), piston)
+        self.assertEqual(main.effect_component_price(main.Effect.FRAGILE),
                          main.COMPONENT_PRICES[(main.Component.EFFECT, main.Effect.FRAGILE)])
+        # The piece itself still CARRIES the strength it rolled.
+        strong = main.Component.scorer_component(main.Scorer.CHIPS_ADD, amount=45)
+        weak = main.Component.scorer_component(main.Scorer.CHIPS_ADD, amount=15)
+        self.assertEqual((strong.amount, weak.amount), (45, 15))
+        self.assertEqual(strong.price, weak.price)
 
-    def test_block_price_uses_each_parts_own_magnitude(self):
+    def test_block_price_ignores_the_rolled_magnitudes(self):
+        # Two blocks with the same parts cost the same however they rolled.
         average = main.block_price_for(main.Shape.RECT, [main.Effect.PISTON],
                                        main.Scorer.CHIPS_ADD)
-        strong = main.block_price_for(main.Shape.RECT, [main.Effect.PISTON],
-                                      main.Scorer.CHIPS_ADD, 45,
-                                      {main.Effect.PISTON: 1800})
-        weak = main.block_price_for(main.Shape.RECT, [main.Effect.PISTON],
-                                    main.Scorer.CHIPS_ADD, 15,
-                                    {main.Effect.PISTON: 900})
-        self.assertGreater(strong, average)
-        self.assertLess(weak, average)
-        # A role block is never scaled: it is the same good wherever it came from.
+        strong = main.Component.effect_component(main.Effect.PISTON, magnitude=1800)
+        weak = main.Component.effect_component(main.Effect.PISTON, magnitude=900)
+        self.assertEqual(strong.price, weak.price)
+        self.assertNotEqual(strong.effect_magnitude, weak.effect_magnitude)
+        # A role block is priced from the same table as everything else.
         self.assertEqual(main.block_price_for(main.Shape.RECT, [], main.Scorer.START), 109)
         self.assertEqual(main.block_price_for(main.Shape.RECT, [], main.Scorer.FINISH), 53)
+        # The roll is nowhere in the sum either.
+        self.assertEqual(average,
+                         main.block_price_for(main.Shape.RECT, [main.Effect.PISTON],
+                                              main.Scorer.CHIPS_ADD))
 
     def test_a_bought_block_keeps_its_own_effects_and_scorer(self):
         # A shop block's components carry their own rolled magnitudes, and the
@@ -10865,7 +11528,7 @@ class RunScoringTests(unittest.TestCase):
         block = next(i for i in self.game.toolbox.items if i.kind == "block")
         self.assertEqual(block.effect_magnitude(main.Effect.PISTON), 1800)
         self.assertEqual(block.price, int(main.effect_component_price(
-            main.Effect.PISTON, 1800) * 0.75))
+            main.Effect.PISTON) * 0.75))
 
     def test_anointment_rolls_a_magnitude_for_each_new_effect(self):
         random.seed(99)
@@ -10887,18 +11550,16 @@ class RunScoringTests(unittest.TestCase):
                 if e not in main.Effect.MAGNITUDE:
                     self.assertNotIn(e, block.effect_amounts)
                     continue
-                # Each blessed effect carries its own roll, on the step grid.
+                # Each blessed effect carries its own rolled magnitude.
                 magnitude = block.effect_amounts[e]
                 average = main.Effect.MAGNITUDE[e]
                 step = main.magnitude_step(average)
-                if magnitude != main.effect_magnitude_floor(e):
-                    self.assertAlmostEqual((magnitude - average) / step,
-                                          round((magnitude - average) / step))
+                self.assertGreaterEqual(magnitude, main.effect_magnitude_floor(e))
                 self.assertLessEqual(magnitude, average + step * main.MAGNITUDE_MAX_STEPS)
 
     def test_parts_and_rubble_grants_roll_magnitudes(self):
         # The reward paths roll magnitudes exactly like the shop does, so a
-        # granted piece is never a flat average and always stays on the grid.
+        # granted piece is never a flat average and always inside the range.
         random.seed(4242)
         amounts = set()
         self.game.toolbox.items.clear()
@@ -10917,7 +11578,7 @@ class RunScoringTests(unittest.TestCase):
                                  main.Scorer.DEFAULT_AMOUNT[item.value]
                                  + step * main.MAGNITUDE_MAX_STEPS)
             self.assertEqual(item.price,
-                             main.scorer_component_price(item.value, item.amount))
+                             main.scorer_component_price(item.value))
         self.assertGreater(len(amounts), 1)  # 80 grants never all roll alike
 
         # A Rubble block carries a magnitude for each scaleable effect.
@@ -11211,10 +11872,9 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(len(set(block.effects)), 2)
         self.assertNotIn(main.Effect.PORTAL, block.effects)
         # The two new effects are paid for in the block's price, so a sale,
-        # Death and Painting all see the block's real worth — at the magnitude
-        # each new effect was rolled with.
-        added = sum(main.effect_component_price(e, block.effect_amounts.get(e))
-                    for e in block.effects)
+        # Death and Painting all see the block's real worth — at the catalog
+        # price of each new effect, never for the magnitude it rolled.
+        added = sum(main.effect_component_price(e) for e in block.effects)
         self.assertEqual(block.price, 20 + added)
 
     def test_anointment_never_hands_out_a_lone_portal(self):
@@ -11572,8 +12232,7 @@ class RunScoringTests(unittest.TestCase):
         self.assertEqual(placed.resale_price, 7)
         self.assertEqual(main.block_resale_price(placed), 7)
         self.assertNotEqual(
-            main.block_price_for(placed.shape, placed.effects, placed.scorer,
-                                 placed.scorer_amount, placed.effect_amounts), 7)
+            main.block_price_for(placed.shape, placed.effects, placed.scorer), 7)
 
     def test_death_and_recognition_use_the_placed_blocks_stored_price(self):
         # Death pays 1.5x the price the block was placed with, and Recognition
@@ -11602,6 +12261,80 @@ class RunScoringTests(unittest.TestCase):
 
         self.game._erase_block_at(3, 3)
         self.assertEqual(self.game.toolbox.items[-1].price, 7)
+
+    def test_place_block_at_places_the_armed_block_without_any_clicks(self):
+        # Placement is its own method: a direct call builds the block from the
+        # armed parts, stamps the item's price on it, hands out its triggers,
+        # consumes the item and clears the selection — no mouse events needed.
+        self.game.toolbox.items.clear()
+        item = main.BlockItem(0, 0, main.Shape.PIPE, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 30, 21, "Pipe +Chips",
+                              effects=[main.Effect.BOUNCY],
+                              effect_amounts={main.Effect.BOUNCY: 55})
+        self.game.toolbox.add(item)
+        self.game._equip_block(item)
+
+        self.assertTrue(self.game._place_block_at(2, 3))
+
+        placed = self.game.grid[(2, 3)]
+        self.assertEqual((placed.x, placed.y), (2, 3))
+        self.assertEqual(placed.shape, main.Shape.PIPE)
+        self.assertEqual(placed.effects, [main.Effect.BOUNCY])
+        self.assertEqual(placed.effect_magnitude(main.Effect.BOUNCY), 55)
+        self.assertEqual(placed.scorer, main.Scorer.CHIPS_ADD)
+        self.assertEqual(placed.resale_price, 21)
+        self.assertEqual(placed.triggers_left, 1)
+        self.assertNotIn(item, self.game.toolbox.items)  # consumed on placement
+        self.assertFalse(self.game.has_selected)
+        self.assertIsNone(self.game.selected_toolbox_item)
+
+    def test_place_block_at_refuses_locked_cells_and_empty_hands(self):
+        # Nothing selected: no block, no exception.
+        self.game._clear_toolbox_selection()
+        self.assertFalse(self.game._place_block_at(2, 2))
+        self.assertIsNone(self.game.grid.get((2, 2)))
+
+        item = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 30, 20, "Rect +Chips")
+        self.game.toolbox.add(item)
+        self.game._equip_block(item)
+        self.game.unlocked_cells.discard((2, 2))
+
+        self.assertFalse(self.game._place_block_at(2, 2))  # a locked square
+        self.assertIsNone(self.game.grid.get((2, 2)))
+        # Out-of-bounds cells never place either.
+        self.assertFalse(self.game._place_block_at(-1, 0))
+        self.assertFalse(self.game._place_block_at(main.GRID_WIDTH, 0))
+        self.assertFalse(self.game._place_block_at(0, main.GRID_HEIGHT))
+
+    def test_place_block_at_swaps_out_whatever_stood_in_the_cell(self):
+        old = self._place_priced_block(1, 1, 40)  # a $40 block already standing
+        self.game.cash = 0
+        item = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 30, 9, "Rect +Chips")
+        self.game.toolbox.add(item)
+        self.game._equip_block(item)
+
+        self.assertTrue(self.game._place_block_at(1, 1))
+
+        placed = self.game.grid[(1, 1)]
+        self.assertIsNot(placed, old)
+        self.assertEqual(placed.resale_price, 9)
+        # The block it displaced came back to the toolbox at ITS own price.
+        self.assertTrue(any(getattr(i, "price", None) == 40
+                            for i in self.game.toolbox.items))
+
+    def test_place_block_at_moves_a_placed_block_out_of_its_old_cell(self):
+        placed = self._place_priced_block(1, 1, 7)
+        self.game._select_placed_block(placed)
+
+        self.assertTrue(self.game._place_block_at(3, 3))
+
+        self.assertNotIn((1, 1), self.game.grid)
+        moved = self.game.grid[(3, 3)]
+        self.assertEqual(moved.scorer, placed.scorer)
+        self.assertEqual(moved.resale_price, 7)  # the price travels with it
+        self.assertNotIn(placed, self.game.toolbox.items)  # not also refunded
 
     def test_placed_block_price_survives_a_save_round_trip(self):
         placed = self._place_priced_block(1, 1, 7)
@@ -11632,8 +12365,7 @@ class RunScoringTests(unittest.TestCase):
         price = main.block_resale_price(block)
         self.assertEqual(price,
                          main.block_price_for(block.shape, block.effects,
-                                              block.scorer, block.scorer_amount,
-                                              block.effect_amounts))
+                                              block.scorer))
         self.assertEqual(block.resale_price, price)
         self.assertEqual(main.block_resale_price(block), price)
 
@@ -11646,8 +12378,7 @@ class RunScoringTests(unittest.TestCase):
         block.shape = main.Shape.NONE
         self.assertEqual(main.block_resale_price(block),
                          main.block_price_for(main.Shape.RECT, block.effects,
-                                              block.scorer, block.scorer_amount,
-                                              block.effect_amounts))
+                                              block.scorer))
 
     def test_upgraded_block_scores_multiple_times_per_run(self):
         block = main.Block(0, 0, shape=main.Shape.RECT, effect=main.Effect.NONE,
@@ -12524,6 +13255,123 @@ class SaveSystemTests(unittest.TestCase):
         self.assertNotIn((0, 0), wall_cells)
         self.assertIn((4, 5), wall_cells)
 
+    def test_a_loaded_save_keeps_its_pairing_numbers_out_of_new_pairs(self):
+        # A pairing number is handed out by a counter that lives in the running
+        # game while the numbers themselves live in the save, so a pair built
+        # after a reload used to be given a number the loaded board already had:
+        # one key then opened the locks of BOTH pairs (and, as the collisions
+        # piled up over reloads, every key opened every lock).
+        self.game.toolbox.items.clear()
+        self.game.grid[(1, 1)] = main.Block(1, 1, shape=main.Shape.KEY,
+                                            key_number=1)
+        self.game.grid[(2, 1)] = main.Block(2, 1, shape=main.Shape.LOCK,
+                                            key_number=1)
+        self.game.grid[(3, 1)] = main.Block(
+            3, 1, effect=main.Effect.PORTAL, portal_number=1,
+            effects=[main.Effect.PORTAL])
+        self.game.save_slot = 5
+        save_system.save_game(self.game)
+
+        main._next_key_number = 0     # what a brand-new process starts from
+        main._next_portal_number = 0  # ...for portals too
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 5)
+
+        # The loaded board has claimed its numbers, so the next pair (and the
+        # next portal pair) is given fresh ones.
+        fresh.toolbox.items.clear()
+        fresh.cash = 1000
+        fresh._buy_shop_item(main.BlockItem(0, 0, main.Shape.KEY, main.Effect.NONE,
+                                            main.Scorer.NONE, 0, 10, "Key Block"))
+        halves = [i for i in fresh.toolbox.items
+                  if main.paired_shape(i.shape) is not None]
+        self.assertEqual(len(halves), 2)
+        self.assertGreater(halves[0].key_number, 1)
+        self.assertGreater(main.next_portal_number(), 1)
+
+        # So passing through the new key leaves the loaded lock shut.
+        number = halves[0].key_number
+        new_key = main.Block(5, 5, shape=main.Shape.KEY, key_number=number)
+        new_lock = main.Block(5, 7, shape=main.Shape.LOCK, key_number=number)
+        fresh.grid[(5, 5)] = new_key
+        fresh.grid[(5, 7)] = new_lock
+        fresh.run_active = True
+        marble = main.Marble(new_key.rect.centerx, new_key.rect.centery)
+        fresh.marbles = [marble]
+        marble.collisions_this_tick = [new_key]
+        fresh._handle_block_contacts([new_key])
+
+        self.assertFalse(new_lock.locked)          # its own lock opened
+        self.assertTrue(fresh.grid[(2, 1)].locked)  # the loaded one did not
+
+    def test_loading_a_board_whose_pairs_share_a_number_splits_them(self):
+        # The symptom the collision above produces in a real save: two keys and
+        # two locks all numbered 1, so any key opened every lock. Loading such a
+        # board re-pairs it — one key and one lock keep the old number, the rest
+        # are given numbers of their own.
+        self.game.toolbox.items.clear()
+        self.game.grid.clear()
+        for x in (1, 3):
+            self.game.grid[(x, 1)] = main.Block(x, 1, shape=main.Shape.KEY,
+                                                key_number=1)
+            self.game.grid[(x, 2)] = main.Block(x, 2, shape=main.Shape.LOCK,
+                                                key_number=1)
+        self.game.save_slot = 5
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 5)
+
+        keys = [fresh.grid[(x, 1)] for x in (1, 3)]
+        locks = [fresh.grid[(x, 2)] for x in (1, 3)]
+        # One key and one lock per number, and the pair that keeps the original
+        # number is the one nearest the board's top-left (so the split is the
+        # same every load).
+        self.assertEqual(sorted(k.key_number for k in keys),
+                         sorted(l.key_number for l in locks))
+        self.assertEqual(len({k.key_number for k in keys}), 2)
+        self.assertEqual(keys[0].key_number, 1)
+        self.assertEqual(locks[0].key_number, 1)
+        self.assertGreater(keys[1].key_number, 1)
+
+        # Touching the key that kept the old number now opens only its own lock.
+        fresh.run_active = True
+        marble = main.Marble(keys[0].rect.centerx, keys[0].rect.centery)
+        fresh.marbles = [marble]
+        marble.collisions_this_tick = [keys[0]]
+        fresh._handle_block_contacts([keys[0]])
+
+        self.assertFalse(locks[0].locked)
+        self.assertTrue(locks[1].locked)
+
+    def test_a_duplicated_half_keeps_its_pair_number_on_load(self):
+        # Recognition deliberately duplicates a half and the copy keeps its
+        # number — two keys for one door, or one key that opens two doors. That
+        # is not a collision, so loading the board leaves the number alone.
+        for extra_shape in (main.Shape.KEY, main.Shape.LOCK):
+            self.game.grid.clear()
+            self.game.grid[(1, 1)] = main.Block(1, 1, shape=main.Shape.KEY,
+                                                key_number=1)
+            self.game.grid[(2, 1)] = main.Block(2, 1, shape=main.Shape.LOCK,
+                                                key_number=1)
+            self.game.grid[(3, 1)] = main.Block(3, 1, shape=extra_shape,
+                                                key_number=1)
+            fresh = main.Game()
+            fresh.title_screen = False
+            fresh.trials_enabled = False
+
+            save_system._load_save_data(
+                fresh, save_system._save_data(self.game), 5)
+
+            self.assertEqual({fresh.grid[cell].key_number
+                              for cell in ((1, 1), (2, 1), (3, 1))}, {1},
+                             extra_shape)
+
     def test_actions_save_and_load(self):
         # Owned actions (with their v1/v2 version) persist with the save.
         self.game.save_slot = 3
@@ -13212,8 +14060,10 @@ class SaveSystemTests(unittest.TestCase):
 
     def test_undiscovered_entries_show_question_marks(self):
         # Locked collection entries show "???" for name and description. Only
-        # the two run-role scorers (Start/Finish) are auto-unlocked at game
-        # start; everything else stays hidden on a fresh game.
+        # the two run-role scorers (Start/Finish) are revealed to begin with —
+        # they are reported as known without being written to the file, since
+        # every game hands the player those two blocks; everything else stays
+        # hidden on a fresh game.
         entries = self.game._collection_entries()
         self.assertTrue(entries)  # every card/component/trial is listed
         self.assertTrue(all(name == "???" and desc == "???"
@@ -13241,6 +14091,59 @@ class SaveSystemTests(unittest.TestCase):
         collection.discover_card(main.Card.JOKER)
         collection.reset()  # drop the in-memory cache
         self.assertTrue(collection.is_card_discovered(main.Card.JOKER))
+
+
+class PlayerDataPathTests(unittest.TestCase):
+    """Player data belongs inside profiles/ — never beside main.py."""
+
+    def test_no_player_data_defaults_to_the_game_folder(self):
+        # A stray collection.json used to appear in the game folder every time
+        # the suite ran: the modules defaulted to paths beside main.py, and
+        # building a Game (which the tests do constantly) wrote to them before
+        # any profile was active. Every default must live under profiles/.
+        profiles_root = profiles.PROFILES_DIR + os.sep
+        for label, path in (("achievements", achievements.FILE_PATH),
+                            ("collection", collection.FILE_PATH),
+                            ("metagame", metagame.FILE_PATH),
+                            ("saves", save_system.SAVES_DIR)):
+            self.assertTrue(path.startswith(profiles_root), (label, path))
+            self.assertEqual(os.path.dirname(path),
+                             os.path.join(profiles_root, profiles.DEFAULT_PROFILE),
+                             label)
+
+    def test_building_a_game_writes_no_player_json(self):
+        # Constructing a Game is not a player action, so it must not write the
+        # collection/achievements/metagame files (it only creates the empty
+        # save-slot placeholders, and those live in profiles/ too).
+        tmp = tempfile.mkdtemp()
+        old_files = (achievements.FILE_PATH, collection.FILE_PATH,
+                     metagame.FILE_PATH, save_system.SAVES_DIR)
+        try:
+            achievements.FILE_PATH = os.path.join(tmp, "achievements.json")
+            collection.FILE_PATH = os.path.join(tmp, "collection.json")
+            metagame.FILE_PATH = os.path.join(tmp, "metagame.json")
+            save_system.SAVES_DIR = os.path.join(tmp, "saves")
+            achievements.reset()
+            collection.reset()
+            metagame.reset()
+
+            main.Game()
+
+            written = os.listdir(tmp)
+            self.assertEqual([name for name in written if name.endswith(".json")],
+                             [])
+            # ...and the run roles still read as known, with no write needed.
+            self.assertTrue(collection.is_component_discovered(
+                main.Component.SCORER, main.Scorer.START))
+            self.assertTrue(collection.is_component_discovered(
+                main.Component.SCORER, main.Scorer.FINISH))
+        finally:
+            (achievements.FILE_PATH, collection.FILE_PATH,
+             metagame.FILE_PATH, save_system.SAVES_DIR) = old_files
+            achievements.reset()
+            collection.reset()
+            metagame.reset()
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 class ProfileTests(unittest.TestCase):
@@ -13710,8 +14613,13 @@ class BoardTests(unittest.TestCase):
         self._old_collection_file = collection.FILE_PATH
         collection.FILE_PATH = os.path.join(self._ach_tmp, "collection.json")
         collection.reset()
+        # Building a Game also creates the empty save-slot placeholders, so
+        # point the slots at the throwaway folder too.
+        self._old_saves_dir = save_system.SAVES_DIR
+        save_system.SAVES_DIR = os.path.join(self._ach_tmp, "saves")
 
     def tearDown(self):
+        save_system.SAVES_DIR = self._old_saves_dir
         achievements.FILE_PATH = self._old_ach_file
         achievements.reset()
         metagame.FILE_PATH = self._old_meta_file

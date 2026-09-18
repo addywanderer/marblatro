@@ -30,10 +30,10 @@ import pygame
 # How far the frame's edges bow inwards (0 = a flat screen). 0.05 is a visible
 # but gentle tube: the picture is magnified about 5% at the sides and 10% in the
 # corners to keep the screen filled as the glass curves away.
-CURVATURE = 0.05
+CURVATURE = 0.02
 # How much darker every other row is (the scanline thinning), 0..1. Kept
 # gentle: the game's labels are small and have to stay readable.
-SCANLINE = 0.16
+SCANLINE = 0.25
 # How much darker the corners are than the middle.
 VIGNETTE = 0.25
 # Rows per warp band. Smaller bands follow the curve more closely and cost one

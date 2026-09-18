@@ -19,6 +19,7 @@ Game logic (``Block``, ``Marble``, the shop, the toolbox, the assembler, etc.)
 lives in ``main.py`` and imports these names from here.
 """
 
+import math
 from typing import ClassVar
 
 # --- Colors used by the component metadata (scorer colors) ---
@@ -678,9 +679,12 @@ class Card:
     MARKET = 90  # selling refunds 75% of the price instead of 50%
     WATCH = 91  # the run ends at the ideal time; only the first 5 blocks score
     # The newest whole cards. Their ids continue the shared band upward past
-    # Painting (93); the free ids left in that band are 11..77 and 96..99.
+    # Painting (93); the free ids left in that band are 11..77 and 99.
     TESSERACT = 94  # permanently +0.1 xMult for every shop reroll
     THOUSAND_HANDED = 95  # creates a random action after every run
+    PROCRASTINATION = 96  # ends the run a second late: rewinds it once and refills triggers
+    ESSENCE = 97  # $10 a run, one card slot fewer, 2 permanent tokens when sold
+    CONCERT = 98  # +1 trigger per run for every block that is not a plain rect
 
     NAMES: ClassVar[dict[int, str]] = {
         ERR_404: "[ERR 404: CARD NOT FOUND]",
@@ -700,6 +704,9 @@ class Card:
         WATCH: "Watch",
         TESSERACT: "Tesseract",
         THOUSAND_HANDED: "1000-handed",
+        PROCRASTINATION: "Procrastination",
+        ESSENCE: "Essence",
+        CONCERT: "Concert",
     }
     # Short flavor lines, one per whole card.
     COMMENTS: ClassVar[dict[int, str]] = {
@@ -720,6 +727,9 @@ class Card:
         WATCH: "Time is money.",
         TESSERACT: "A cube in a cube.",
         THOUSAND_HANDED: "A thousand hands, all helping.",
+        PROCRASTINATION: "I'll do it in a second.",
+        ESSENCE: "Distilled to the last drop.",
+        CONCERT: "Turn it up to eleven.",
     }
     # What each whole card does.
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
@@ -740,6 +750,9 @@ class Card:
         WATCH: "The run ends automatically at the ideal finish time, but only the first 5 blocks the marble touches contribute to score",
         TESSERACT: "Every shop reroll permanently adds +0.1 xMult, applied at the start of each run",
         THOUSAND_HANDED: "Creates a random action after every run",
+        PROCRASTINATION: "The first time every marble has finished a run, the run rewinds 1 second instead of ending: every block gets its triggers back and the marbles fly their last second again",
+        ESSENCE: "Gives $10 at the end of every run, but takes a card slot away — selling it leaves 2 random permanent Spirit tokens",
+        CONCERT: "Every block that is not a plain rect and has both an effect and a scorer can score 1 more time per run",
     }
     # All whole-card prices are 20% lower (rounded down): 24->19, 42->33,
     # 60->48, 46->36, 48->38, 56->44. The nine utility cards are priced by how
@@ -751,7 +764,9 @@ class Card:
                                         COMPOUND_INTEREST: 36, COUPON: 46,
                                         FACTORY: 44, MINESHAFT: 28,
                                         MARKET: 26, WATCH: 40, TESSERACT: 44,
-                                        THOUSAND_HANDED: 42}
+                                        THOUSAND_HANDED: 42,
+                                        PROCRASTINATION: 46, ESSENCE: 48,
+                                        CONCERT: 44}
     # Face colors and center glyphs for the mini-card look (one per card).
     COLORS: ClassVar[dict[int, tuple]] = {
         ERR_404: (150, 40, 50),     # error red
@@ -771,6 +786,9 @@ class Card:
         WATCH: (170, 175, 185),     # watch steel
         TESSERACT: (45, 65, 155),   # hypercube indigo
         THOUSAND_HANDED: (205, 130, 30),  # saffron robe
+        PROCRASTINATION: (125, 115, 160),  # sleepy lavender
+        ESSENCE: (60, 150, 175),    # distilled cyan
+        CONCERT: (185, 75, 150),    # stage magenta
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         ERR_404: "4", BLUEPRINT: "B", SHOWMAN: "!",
@@ -779,13 +797,17 @@ class Card:
         COMPOUND_INTEREST: "%", COUPON: "C", FACTORY: "F",
         MINESHAFT: "M", MARKET: "S", WATCH: "W",
         TESSERACT: "T", THOUSAND_HANDED: "H",
+        PROCRASTINATION: "Z",
+        ESSENCE: "E",
+        CONCERT: "N",
     }
     ORDER: ClassVar[list[int]] = [ERR_404, BLUEPRINT, SHOWMAN, GARDEN,
                                   RIGGED_CASINO, CONQUISTADOR,
                                   PEDESTAL, INFERNO, DOPPELGANGER,
                                   COMPOUND_INTEREST, COUPON, FACTORY,
                                   MINESHAFT, MARKET, WATCH, TESSERACT,
-                                  THOUSAND_HANDED]
+                                  THOUSAND_HANDED, PROCRASTINATION, ESSENCE,
+                                  CONCERT]
 
     @classmethod
     def name(cls, card):
@@ -1044,18 +1066,35 @@ class Action:
 
 # --- Magnitudes -------------------------------------------------------------
 # Every scalable value in the game (a scorer's amount, a piston's launch speed)
-# is a MAGNITUDE rolled around its average when the item is created. The
-# deviation x from the average is an integer with probability 1/(x^2 + 1), so
-# the average comes up about a third of the time (1/3.15), one step off about
-# a sixth, two steps off a sixteenth, and a wild outlier once in a blue moon
-# (|x| <= 8 is 1/65 as likely as the average). One step is 10% of the average,
-# so a magnitude always moves in proportion to itself.
+# is a MAGNITUDE rolled around its average when the item is created. One STEP is
+# 10% of the average, so a magnitude always moves in proportion to itself, and
+# the deviation x from the average is CONTINUOUS — any real number of steps, not
+# a whole one — with probability falling off as 1/(x^2 + MAGNITUDE_SPREAD): a
+# roll lands within half a step of the average about 0.18 of the time, within
+# one step 0.35, within two 0.59, within four 0.84, and the widest roll
+# (|x| <= MAGNITUDE_MAX_STEPS, i.e. +/- 80% of the average) is roughly 1/17 as
+# likely as being right on it. The shape is a Cauchy distribution (whose scale
+# is the SQUARE ROOT of the spread) truncated to the cap, so it is sampled
+# exactly rather than by rejection (see main.roll_magnitude). A bigger spread
+# flattens the middle and thickens the tail — more rolls land far from the
+# average — while the cap still holds every deviation to MAGNITUDE_MAX_STEPS.
 MAGNITUDE_STEP_FRACTION = 0.1
 MAGNITUDE_STEP_DIVISOR = 10  # 1 / MAGNITUDE_STEP_FRACTION, as a whole number
                              # for exact step arithmetic (average / 10)
 MAGNITUDE_MAX_STEPS = 8
-MAGNITUDE_WEIGHTS = [1.0 / (x * x + 1)
-                     for x in range(-MAGNITUDE_MAX_STEPS, MAGNITUDE_MAX_STEPS + 1)]
+# The "spread" in the deviation's 1/(x^2 + spread) falloff, and the Cauchy
+# scale it implies (the scale is its square root: 4 -> 2). This is the one dial
+# on how wild the rolls are: at a spread of 1 the widest roll is about 1/65 as
+# likely as landing right on the average, at 4 it is 1/17, so the extremes that
+# used to be near-impossible now come up routinely.
+MAGNITUDE_SPREAD = 4
+MAGNITUDE_SCALE = math.sqrt(MAGNITUDE_SPREAD)
+# The widest deviation as an ANGLE: drawing one uniformly in +/- this, scaling it
+# by MAGNITUDE_SCALE and taking the tangent lands a deviation on the
+# 1/(x^2 + MAGNITUDE_SPREAD) curve above, because the scaled tangent is that
+# distribution's inverse. Public so the sampler (main.py) and the distribution's
+# tests share one definition of the range.
+MAGNITUDE_ATAN_LIMIT = math.atan(MAGNITUDE_MAX_STEPS / MAGNITUDE_SCALE)
 
 
 def magnitude_step(average):
@@ -1075,6 +1114,22 @@ def magnitude_step(average):
     return average / MAGNITUDE_STEP_DIVISOR
 
 
+def magnitude_precision(average):
+    """The decimals a rolled value of this average is written with.
+
+    A magnitude's deviation moves in a tenth of a step (1% of the average), so
+    two significant digits past the average's own scale are all a roll can
+    mean. Rounding there is SCALE-FREE — it keeps 0.0137 for a 0.01-average
+    Voyager exactly as it keeps 36.6 for a 30-chip scorer — and it strips the
+    float dust of the (10 + x)/10 arithmetic, so a rolled value prints, prices
+    and saves as the clean number it is meant to be rather than as
+    36.60000000000001.
+    """
+    if not average:
+        return 0
+    return max(0, 3 - math.floor(math.log10(abs(average))))
+
+
 def magnitude_floor(average, step, multiplier=False):
     """The lowest magnitude a roll may land on (never zero or negative).
 
@@ -1088,17 +1143,24 @@ def magnitude_floor(average, step, multiplier=False):
     return step
 
 
-def magnitude_deviation(average, magnitude):
+def magnitude_deviation(average, magnitude, precision=None):
     """The "(+2)" / "(-1)" / "(0)" a magnitude is described with, or "".
 
     Written RIGHT AFTER the magnitude it belongs to ("Adds +6 mult (+2) when
     touched") instead of at the end of the sentence, and the sidebar colours it
     (green above average, red below, grey for exactly average — see
-    ui.draw_item_info). A value with no average has no deviation to show.
+    ui.draw_item_info). It is rounded to the same precision the number it sits
+    next to is written with — a magnitude's own (see magnitude_precision), or
+    the ``precision`` a caller passes for a number it formats itself (a
+    resource-point count prints three decimals, see points_text) — so the token
+    always adds up with the value beside it. A value with no average has no
+    deviation to show.
     """
     if not average or magnitude is None:
         return ""
-    diff = round(magnitude - average, 3)
+    if precision is None:
+        precision = magnitude_precision(average)
+    diff = round(magnitude - average, precision)
     return f" ({diff:+g})" if diff else " (0)"
 
 
@@ -1143,7 +1205,10 @@ def resource_points_deviation(scorer, amount=None):
     average = resource_points_for(scorer, Scorer.DEFAULT_AMOUNT.get(scorer, 0))
     if not average or not amount:
         return ""
-    return magnitude_deviation(average, resource_points_for(scorer, amount))
+    # The count is written with points_text's three decimals, so the token is
+    # rounded to the same three: they have to add up on screen.
+    return magnitude_deviation(average, resource_points_for(scorer, amount),
+                               precision=3)
 
 
 def scorer_magnitude_deviation(scorer, amount):
@@ -1430,20 +1495,20 @@ class Component:
 
     @classmethod
     def effect_component(cls, value, price=None, name="", col=0, row=0, magnitude=None):
-        """An effect piece. ``magnitude`` is its own rolled strength (see
-        effect_component_price): a stronger piston costs more and a weaker one
-        less, so the piece's price always follows what it actually does."""
+        """An effect piece. ``magnitude`` is its own rolled strength, which the
+        piece CARRIES (its payoff and its description) but never pays for: the
+        piece costs the catalog price however strongly it rolled."""
         if price is None:
-            price = effect_component_price(value, magnitude)
+            price = effect_component_price(value)
         return cls(cls.EFFECT, value, amount=magnitude or 0, price=price,
                    name=name or Effect.name(value), col=col, row=row)
 
     @classmethod
     def scorer_component(cls, value, amount=0, price=None, name="", col=0, row=0):
-        """A scorer piece. ``amount`` is its own rolled magnitude (see
-        scorer_component_price), which sets both its payoff and its price."""
+        """A scorer piece. ``amount`` is its own rolled magnitude: it sets the
+        piece's payoff, but never its price (see scorer_component_price)."""
         if price is None:
-            price = scorer_component_price(value, amount)
+            price = scorer_component_price(value)
         return cls(cls.SCORER, value, amount=amount, price=price,
                    name=name or Scorer.name(value), col=col, row=row)
 
@@ -1584,50 +1649,42 @@ for _i, _e in enumerate(Effect.ORDER):
         _condition_price_for(COMPONENT_PRICES.get((Component.EFFECT, _e), 8))
 
 
-def scorer_component_price(scorer, amount=None):
-    """A scorer piece's price for its OWN magnitude (proportional to value).
+def scorer_component_price(scorer):
+    """A scorer piece's price. A rolled amount NEVER changes it.
 
-    The table price is the average-magnitude price, so a scorer rolled above
-    its average costs proportionally more (a +Chips piece averaging $12 costs
-    $13 at 33 chips, $15 at 39) and one rolled below costs less. A scorer with
-    no magnitude at all (Start, Lucky, ...) is never scaled.
+    The price is the catalog row for that scorer at its AVERAGE magnitude, and
+    it stays there however the piece rolled: a +Chips piece costs the same $12
+    whether it rolled 6 chips or 54. So a good roll is a straight upgrade worth
+    hunting for in the shop rather than a bigger bill (the same reason the
+    rarity weights are built from this table — see main.component_weight). A
+    scorer with no magnitude at all (Start, Lucky, ...) has nothing to roll and
+    is priced by the table like everything else.
     """
-    base = COMPONENT_PRICES.get((Component.SCORER, scorer), 0)
-    average = Scorer.DEFAULT_AMOUNT.get(scorer, 0)
-    if not amount or not average:
-        return base
-    return max(1, round(base * amount / average))
+    return COMPONENT_PRICES.get((Component.SCORER, scorer), 0)
 
 
-def effect_component_price(effect, magnitude=None):
-    """An effect piece's price for its OWN magnitude (proportional to value).
+def effect_component_price(effect):
+    """An effect piece's price. A rolled strength NEVER changes it.
 
-    Like scorers: the table price is the average-magnitude price, so a piston
-    rolled to 1800 px/s costs a fifth more than one at the 1500 px/s average.
+    Like a scorer: a piston that rolled 1800 px/s costs exactly what one at the
+    1500 px/s average costs, so the roll is upside rather than a premium.
     """
-    base = COMPONENT_PRICES.get((Component.EFFECT, effect), 0)
-    average = Effect.MAGNITUDE.get(effect, 0)
-    if not magnitude or not average:
-        return base
-    return max(1, round(base * magnitude / average))
+    return COMPONENT_PRICES.get((Component.EFFECT, effect), 0)
 
 
-def block_price_for(shape, effects, scorer, amount=None, effect_amounts=None):
-    """A block's price is 75% of the sum of its components' prices.
+def block_price_for(shape, effects, scorer):
+    """A block's price is 75% of the sum of its parts' CATALOG prices.
 
-    Each component is priced at ITS OWN magnitude when one is given (a block
-    with a 1800 px/s piston and a 33-chip scorer is worth more than the same
-    block at the averages), and at the average price otherwise — so every
-    caller that has the item's magnitudes should pass them, and a plain
-    shape/scorer/scorer lookup still prices the average block.
+    Deliberately blind to the rolled magnitudes: two blocks built from the same
+    shape, effects and scorer cost the same whether the scorer rolled 6 chips
+    or 54 and the piston 900 px/s or 1800, so buying is about WHICH parts to
+    buy and the roll on the shelf is free upside (see scorer_component_price).
+    A plain shape/scorer lookup still prices the bare block, and the free
+    defaults (Rect shape, no effect, no scorer) add nothing.
     """
-    effects = list(effects)
-    amounts = effect_amounts or {}
-    total = (
-        COMPONENT_PRICES.get((Component.SHAPE, shape), 0)
-        + sum(effect_component_price(e, amounts.get(e)) for e in effects)
-        + scorer_component_price(scorer, amount)
-    )
+    total = (COMPONENT_PRICES.get((Component.SHAPE, shape), 0)
+             + sum(effect_component_price(e) for e in effects)
+             + scorer_component_price(scorer))
     return int(total * 0.75)
 
 
@@ -2261,22 +2318,20 @@ def card_scorer(value):
     return parts[1] if parts is not None else None
 
 
-def card_price_for(card, amount=None):
-    """A composed card's price for its scorer half's OWN magnitude.
+def card_price_for(card):
+    """A composed card's price: its condition's plus its scorer half's.
 
-    A card's catalog price is condition + scorer at the averages, so only the
-    SCORER half scales: the condition costs the same whoever carries it, and a
-    +Chips half rolled to 45 makes the card dearer by exactly what that piece is
-    worth (see scorer_component_price). A whole card, or a card with no
-    magnitude, keeps its catalog price.
+    The scorer half's rolled magnitude is NOT part of the price, exactly as it
+    is not for a bought scorer piece or a block: a +Chips card costs what it
+    costs however well that half rolled (see scorer_component_price). A whole
+    card, and a card whose scorer half has no magnitude (Lucky, Quick, ...),
+    keeps its catalog price.
     """
     base = Card.PRICES.get(card, 20)
     parts = splittable_card_condition_scorer(card)
-    if parts is None or not amount:
+    if parts is None:
         return base
     condition, scorer = parts
-    if not Scorer.DEFAULT_AMOUNT.get(scorer, 0):
-        return base  # a scorer with no magnitude (Lucky, Quick, ...) never scales
     return max(1, COMPONENT_PRICES.get((Component.CONDITION, condition), 0)
-               + scorer_component_price(scorer, amount))
+               + scorer_component_price(scorer))
 

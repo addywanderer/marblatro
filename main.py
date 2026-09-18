@@ -1,5 +1,6 @@
 import math
 import random
+from collections import deque
 
 import numpy as np
 import pygame
@@ -10,9 +11,10 @@ from components import (
     COMPONENT_PRICES,
     CONDITION_ORDER,
     DEFAULT_DIFFICULTY,
+    MAGNITUDE_ATAN_LIMIT,
     MAGNITUDE_MAX_STEPS,
+    MAGNITUDE_SCALE,
     MAGNITUDE_STEP_DIVISOR,
-    MAGNITUDE_WEIGHTS,
     RESOURCE_THRESHOLD,
     Action,
     Card,
@@ -36,6 +38,7 @@ from components import (
     effect_description,
     effect_magnitude_floor,
     generic_card_meta,
+    magnitude_precision,
     magnitude_step,
     paired_shape,
     points_text,
@@ -67,6 +70,25 @@ BG_COLOR = (255, 50, 50)
 MARBLE_BOX_COORDS = (180, 150, 400, 600)  # board: 180..580 x, 150..750 y
 MARBLE_BOX_COLOR = (255, 100, 100)
 FONT_SCALE = 0.7
+GARET_FONT_PATH = "fonts/garet-heavy.otf"
+TITLE_FONT_PATH = "fonts/MARBLERUN.ttf"
+# The nominal size behind every font in the game, keyed by the role that draws
+# with it: Game.__init__ builds one Font per entry, ONCE, and hands the table
+# to ui (see ui.bind_fonts). The numbers are the sizes the ui's own small text
+# used to be built at through pygame's EMBEDDED default font — garet-heavy's
+# glyphs are a good deal taller than that font's at the same nominal size (an
+# 11px garet-heavy "Chips" is as tall as a 16px default-font one), so
+# FONT_SCALE is what brings a role's ink back to the size it already had.
+FONT_SIZES = {
+    "mini": 14,      # a Spirit token's label and badge, the "v1" tag
+    "tiny": 16,      # key/portal numbers, the "+" marker, the "v2" tag
+    "small": 18,     # the sidebar's text
+    "tile": 20,      # a condition tile's letter glyph (an unknown condition)
+    "glyph": 22,     # a card/action letter glyph, and the 8 ball's digit
+    "font": 24,      # the standard text
+    "required": 34,  # the required score
+    "total": 52,     # score totals
+}
 BORD_WIDTH = 6
 REQUIRED_SCORES = [1]
 # Total-score exponent: total = (chips * mult) ** exponent, where the exponent
@@ -98,6 +120,9 @@ TRAIL_RADIUS_SCALE = 0.5
 # Trials: exactly one run-wide modifier per run. Hands tied set the
 # trigger limit to 0 for a random 1/4 of the marble-box blocks.
 TRIAL_MAX_TRIGGERS = 0
+# The Concert whole card hands every block that is not a plain rect AND has both
+# an effect and a scorer one extra trigger per run (see Game._trigger_limit).
+CONCERT_TRIGGER_BONUS = 1
 GRID_SIZE = 40  # Size of each grid cell in pixels
 SHOP_COORDS = (620, 510, 400, 240)  # x, y, width, height of the shop
 TRIAL_BOX_COORDS = (620, 50, 200, 80)  # trial box above the cards (top-left stack)
@@ -248,10 +273,23 @@ TESSERACT_REROLL_XMULT = 0.1
 # The Doppelganger whole card's extra marble leaves the Start block with this
 # sideways drift (px/s), so the two marbles separate instead of overlapping.
 DOPPELGANGER_START_VX = 1.0
+# The Essence whole card: $10 at the end of every run, one card slot fewer in
+# the area while it is owned, and this many random permanent Spirit tokens when
+# it is sold (see Game._card_sold_message / _grant_permanent_tokens).
+ESSENCE_RUN_CASH = 10
+ESSENCE_TOKENS = 2
 BOARD_UNIT_ROW = 1  # the shop's top (components) item row
 BOARD_UNIT_COL = SHOP_GRID_COLS - 2  # the row's rightmost cell
 FPS = 60
 DT = 1.0 / FPS
+# The Procrastination whole card sends a finished run back in time: when every
+# marble has finished, each one returns to the motion state it had this many
+# seconds ago and flies again with every block trigger refilled (see
+# Game._procrastination_rewind). One snapshot is kept per frame, so this also
+# sets how much history a run carries: a marble's oldest snapshot is exactly
+# this far back.
+PROCRASTINATION_REWIND_SECONDS = 1.0
+PROCRASTINATION_REWIND_FRAMES = max(1, round(PROCRASTINATION_REWIND_SECONDS / DT))
 
 # Physics constants
 MAX_MARBLE_RECURSION = 3
@@ -949,35 +987,57 @@ def random_effect_count():
     return count
 
 
+def roll_magnitude_deviation():
+    """A magnitude's deviation from the average, in steps (see roll_magnitude).
+
+    CONTINUOUS: any real number of steps in [-MAGNITUDE_MAX_STEPS,
+    MAGNITUDE_MAX_STEPS] whose probability falls off as
+    1/(x^2 + MAGNITUDE_SPREAD) — a Cauchy distribution truncated to the cap,
+    whose inverse distribution function is a tangent scaled by the
+    distribution's own scale (MAGNITUDE_SCALE, the square root of the spread).
+    So drawing one uniform angle, scaling it and taking its tangent IS an exact
+    draw of it: no rejection loop, no lookup table, and no grid of steps. The
+    spread is the dial on how wild rolls get — at 4 the middle is flatter and
+    the tail much fatter than the 1 it started at, so a roll far from the
+    average is routine rather than a near-impossible outlier. The rolled VALUE
+    is what gets rounded, to the precision a magnitude of its size can mean
+    (see components.magnitude_precision), so the draw stays as fine as the
+    arithmetic allows while descriptions and saves stay tidy.
+    """
+    angle = random.uniform(-MAGNITUDE_ATAN_LIMIT, MAGNITUDE_ATAN_LIMIT)
+    deviation = MAGNITUDE_SCALE * math.tan(angle)
+    # Float noise at the extreme angle could step a hair outside the range the
+    # game documents, so the cap is re-applied to the draw itself.
+    return max(-MAGNITUDE_MAX_STEPS, min(MAGNITUDE_MAX_STEPS, deviation))
+
+
 def roll_magnitude(average, floor=None):
     """Roll an item's OWN magnitude around the average it is built from.
 
-    The deviation x from the average is an integer with probability
-    1/(x^2 + 1) — the average itself about a third of the time, one step off
-    about a sixth, two steps off a sixteenth, and (with |x| <= 8) a wild
-    outlier once in 65 rolls. One step is 10% of the average (see
-    components.magnitude_step): a +Chips piece averages 30 chips and steps by
-    3, a +Mult piece averages 4 and steps by 0.4, a piston averages 1500 px/s
-    and steps by 150. A value with no average to speak of (a scorer whose
-    amount is unused) is returned untouched, and ``floor`` is the lowest value
-    a roll may land on.
+    The deviation is continuous: any real number of steps with density
+    1/(x^2 + MAGNITUDE_SPREAD), so a +Chips piece averaging 30 chips comes out
+    at 31.1 or 27.4 as readily as at a whole number — the 10% grid it used to
+    snap to is gone (see roll_magnitude_deviation for the draw). One step is
+    still 10% of the average, so a +Mult piece (average 4) steps by 0.4, a
+    piston (average 1500 px/s) by 150, and a wide roll stays within +/- 80% of
+    the average. A value with no average to speak of (a scorer whose amount is
+    unused) is returned untouched, and ``floor`` is the lowest value a roll may
+    land on. Nothing about the roll reaches the item's PRICE (see
+    components.block_price_for): the roll is upside, not cost.
     """
     step = magnitude_step(average)
     if not step:
         return average
-    deviation = random.choices(
-        range(-MAGNITUDE_MAX_STEPS, MAGNITUDE_MAX_STEPS + 1),
-        weights=MAGNITUDE_WEIGHTS, k=1)[0]
-    # The roll is NEVER rounded, because rounding snaps a small magnitude onto
-    # a coarser grid than the 10% it is supposed to move in: a +Mult scorer
-    # (average 4, step 0.4) would land on whole hundreds of percent — its
-    # spread becomes +/- 8 whole mult instead of the designed +/- 7.2. The
-    # arithmetic multiplies by the step divisor and divides back, which is the
-    # exact decimal (average * 0.1 would carry float noise where average / 10
-    # is exact), so a whole answer stays whole and a fractional one carries no
-    # arithmetic dust into prices and descriptions.
+    deviation = roll_magnitude_deviation()
+    # Scaling by (10 + x)/10 is never rounded to a whole number, because
+    # rounding snaps a small magnitude onto a coarser grid than the step it is
+    # supposed to move in: a +Mult scorer (average 4, step 0.4) would land on
+    # whole mult, losing most of its spread. The result is rounded to the
+    # precision a deviation of this size can mean (see magnitude_precision),
+    # which strips the arithmetic's float dust without touching the resolution.
     value = (average * (MAGNITUDE_STEP_DIVISOR + deviation)
              / MAGNITUDE_STEP_DIVISOR)
+    value = round(value, magnitude_precision(average))
     if floor is not None and value < floor:
         value = floor
     return value
@@ -1069,7 +1129,7 @@ def block_resale_price(block):
     block's parts instead drifts away from what the player actually paid: a
     placed role block is recorded with effects=[NONE] and sums to $114 while
     the identical toolbox item is $109, and an effect added by Anointment is
-    priced per roll.
+    worth its catalog price rather than whatever the block was bought for.
 
     The part-sum is only a last resort for a block that never got a stored
     price (a hand-built block, a save written before the price was persisted);
@@ -1082,9 +1142,7 @@ def block_resale_price(block):
         return price
     shape = (block._fragile_shape
              if getattr(block, "_fragile_shape", None) is not None else block.shape)
-    price = block_price_for(shape, block.effects, block.scorer,
-                            block.scorer_amount,
-                            getattr(block, "effect_amounts", None))
+    price = block_price_for(shape, block.effects, block.scorer)
     block.resale_price = price
     return price
 
@@ -1160,7 +1218,7 @@ def make_card_item(value, col=0, row=0, amount=None):
     scorer = card_scorer(value)
     if amount is None:
         amount = roll_scorer_amount(scorer) if scorer else 0
-    return CardItem(value, card_price_for(value, amount), col=col, row=row,
+    return CardItem(value, card_price_for(value), col=col, row=row,
                     amount=amount or 0)
 
 
@@ -1194,6 +1252,96 @@ def block_shape(block):
     """
     original = getattr(block, "_fragile_shape", None)
     return original if original is not None else block.shape
+
+
+def reserve_pairing_numbers(items):
+    """Advance the pairing counters past every number these items already use.
+
+    A pairing number (see next_key_number / next_portal_number) is handed out by
+    a counter that lives in the running game, while the numbers themselves live
+    in the save — so a game that has just loaded a board holding pair #1 must
+    not hand #1 to the next pair it builds. Without this, the loaded pair and the
+    new one share a number and touching the new pair's Key opens the loaded
+    pair's Lock too (and, as the collisions pile up over reloads, every key
+    opens every lock). See adopt_pairing_numbers.
+    """
+    global _next_key_number, _next_portal_number
+    for item in items:
+        _next_key_number = max(
+            _next_key_number, int(getattr(item, "key_number", 0) or 0))
+        _next_portal_number = max(
+            _next_portal_number, int(getattr(item, "portal_number", 0) or 0))
+
+
+def pairing_position(item):
+    """A sort key placing the board's blocks before a toolbox half.
+
+    Used to keep the re-pairing below (see _split_shared_key_numbers) the same
+    on every load: halves are paired up in board order, and an unplaced half —
+    one waiting in the toolbox, which has no board cell — sorts before the
+    board.
+    """
+    if isinstance(item, Block):
+        return (item.y, item.x)
+    return (0, 0)
+
+
+def adopt_pairing_numbers(items):
+    """Make these items' pairing numbers the game's own, then repair collisions.
+
+    A pairing number (Key/Lock and Portal) is handed out by a counter that lives
+    in the RUNNING GAME while the numbers themselves live in a SAVE, so a game
+    that has just loaded a board is in two places at once about what is free:
+
+    1. The counters are advanced past every number these items already use, so
+       the next pair built is not handed a number the loaded board has. Without
+       this the loaded pair and the new one share a number, and touching either
+       Key opens the Lock of BOTH pairs — with a few reloads, every key opens
+       every lock.
+    2. A number shared by more than one Key AND more than one Lock is split into
+       separate pairs. Step 1 stops new collisions, but a save written before it
+       can still hold one, and such a group is otherwise unfixable in play: any
+       of its keys opens all of its locks. Two blocks sharing a number are one
+       pair, and a duplicated half (Recognition) keeps its number on purpose —
+       two keys for one door, or one key opening two doors — so only the
+       ambiguous two-and-two case is touched.
+
+    Returns the number of pairs that had to be split.
+    """
+    reserve_pairing_numbers(items)
+    return _split_shared_key_numbers(items)
+
+
+def _split_shared_key_numbers(items):
+    """Re-pair numbers shared by two Keys AND two Locks (see above).
+
+    The first key and the first lock of such a group keep the number (the
+    counters are already clear of it, so the rest get numbers of their own).
+    Halves are paired up in board order, so which pair keeps the number is the
+    same on every load.
+    """
+    groups = {}
+    for item in items:
+        shape = getattr(item, "shape", None)
+        if shape not in (Shape.KEY, Shape.LOCK):
+            continue
+        number = int(getattr(item, "key_number", 0) or 0)
+        if not number:
+            continue
+        group = groups.setdefault(number, {"keys": [], "locks": []})
+        group["keys" if shape == Shape.KEY else "locks"].append(item)
+    split = 0
+    for number in sorted(groups):
+        keys = sorted(groups[number]["keys"], key=pairing_position)
+        locks = sorted(groups[number]["locks"], key=pairing_position)
+        if len(keys) < 2 or len(locks) < 2:
+            continue  # a duplicated half is a legitimate one-number group
+        for index in range(1, min(len(keys), len(locks))):
+            fresh = next_key_number()
+            keys[index].key_number = fresh
+            locks[index].key_number = fresh
+            split += 1
+    return split
 
 
 def get_next_required_score(run, growth=None):
@@ -1474,7 +1622,7 @@ class Shop:
             amounts = roll_effect_amounts(effects)
             name = role_block_name(scorer, shape)
             self.items.append(BlockItem(block_col, 3, shape, Effect.NONE, scorer, amount,
-                                        block_price_for(shape, effects, scorer, amount, amounts),
+                                        block_price_for(shape, effects, scorer),
                                         name, effects=effects, effect_amounts=amounts))
             block_col += 1
         # Picky bonus slots: each banked slot adds one extra random offer to
@@ -1503,7 +1651,7 @@ class Shop:
             shape, effects = role_block_parts(scorer, Shape.RECT, [])
             name = role_block_name(scorer, shape)
             return BlockItem(col, row, shape, Effect.NONE, scorer, amount,
-                             block_price_for(shape, effects, scorer, amount), name,
+                             block_price_for(shape, effects, scorer), name,
                              effects=effects)
         amount = roll_scorer_amount(scorer)
         return Component.scorer_component(scorer, amount=amount, col=col, row=row)
@@ -1532,7 +1680,7 @@ class Shop:
             amounts = roll_effect_amounts(effects)
             name = role_block_name(scorer, shape)
             return BlockItem(col, row, shape, Effect.NONE, scorer, amount,
-                             block_price_for(shape, effects, scorer, amount, amounts),
+                             block_price_for(shape, effects, scorer),
                              name, effects=effects, effect_amounts=amounts)
         if kind == "card":
             value = random_card_option_value()
@@ -1705,6 +1853,56 @@ class Marble:
         # pair is skipped, so other portal pairs work independently.
         self.last_portal_cells = None
         self.physics = PhysicsEngine()
+        # The marble's last second of motion state, one snapshot per frame:
+        # oldest first, and a full deque is exactly PROCRASTINATION_REWIND_FRAMES
+        # frames — one second — deep (see motion_state / Game._procrastination_rewind).
+        self.history = deque(maxlen=PROCRASTINATION_REWIND_FRAMES + 1)
+
+    def motion_state(self):
+        """The marble's motion state, as one Procrastination snapshot.
+
+        Covers everything the physics engine moves the marble by: position,
+        velocity, spin (angle and rate), size and mass, the sticky hold, the
+        phase effect, and the flags effects set for the frame. Measurements the
+        run accumulates (distance travelled, airborne streak, the decaying
+        recent speed) and the run's clock are deliberately NOT here — the
+        rewound second is played on top of them rather than replacing them, so
+        a replay never un-earns progress.
+        """
+        sticky_velocity = self.sticky_velocity
+        return (self.position.copy(), self.velocity.copy(), self.radius,
+                self.mass, self.angular_velocity, self.spin_angle,
+                self._move_dir.copy(), self.sticky_timer,
+                None if sticky_velocity is None else sticky_velocity.copy(),
+                self.phase_timer, self.phase_block, self.grounded,
+                self.on_slope, self.under_black_hole)
+
+    def restore_motion_state(self, state):
+        """Put this marble back into a state captured by motion_state."""
+        (position, velocity, radius, mass, angular_velocity, spin_angle,
+         move_dir, sticky_timer, sticky_velocity, phase_timer, phase_block,
+         grounded, on_slope, under_black_hole) = state
+        self.position = position.copy()
+        self.velocity = velocity.copy()
+        self.radius = radius
+        self.mass = mass
+        self.angular_velocity = angular_velocity
+        self.spin_angle = spin_angle
+        self._move_dir = move_dir.copy()
+        self.sticky_timer = sticky_timer
+        self.sticky_velocity = (None if sticky_velocity is None
+                                else sticky_velocity.copy())
+        self.phase_timer = phase_timer
+        self.phase_block = phase_block
+        self.grounded = grounded
+        self.on_slope = on_slope
+        self.under_black_hole = under_black_hole
+        # The mid-frame collision bookkeeping is rebuilt by the next physics
+        # step, and the previous frame's contacts are gone with the rewound
+        # second (a stale one would read as "still touching" on arrival).
+        self._pre_move_position = None
+        self.collisions_last_tick = []
+        self.collisions_this_tick = []
 
 
 def _configure_marble_type(marble, marble_type):
@@ -1742,17 +1940,32 @@ class Game:
         # down — and those half-finished states must never reach the window.
         self.display = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
         self.screen = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+
+        # Every font the game draws with, built ONCE here (see FONT_SIZES). The
+        # ui's drawing helpers are handed a bare surface rather than the Game,
+        # so they adopt this same table through ui.bind_fonts below instead of
+        # building a font of their own: they used to build a throwaway embedded
+        # default font on every frame — the marble "+" marker, the key/portal
+        # numbers, the Spirit token labels, the 8 ball's digit and the letter
+        # glyph an id with no art falls back to — a per-frame allocation in the
+        # wrong typeface.
+        self.fonts = {role: pygame.font.Font(GARET_FONT_PATH,
+                                             max(1, int(size * FONT_SCALE)))
+                      for role, size in FONT_SIZES.items()}
+        # The title screens' display face is its own typeface, unscaled.
+        self.fonts["title"] = pygame.font.Font(TITLE_FONT_PATH, 90)
+        self.tiny_font = self.fonts["tiny"]
+        self.small_font = self.fonts["small"]
+        self.font = self.fonts["font"]
+        self.required_font = self.fonts["required"]
+        self.total_font = self.fonts["total"]
+        self.main_title_font = self.fonts["title"]
+        ui.bind_fonts(self.fonts)
+
         pygame.display.set_caption("Marblatro")
         pygame.display.set_icon(make_icon())
         self.clock = pygame.time.Clock()
         self.running = True
-
-        self.tiny_font = pygame.font.Font("fonts/garet-heavy.otf", int(16 * FONT_SCALE))
-        self.small_font = pygame.font.Font("fonts/garet-heavy.otf", int(18 * FONT_SCALE))
-        self.font = pygame.font.Font("fonts/garet-heavy.otf", int(24 * FONT_SCALE))
-        self.required_font = pygame.font.Font("fonts/garet-heavy.otf", int(34 * FONT_SCALE))
-        self.total_font = pygame.font.Font("fonts/garet-heavy.otf", int(52 * FONT_SCALE))
-        self.main_title_font = pygame.font.Font("fonts/MARBLERUN.ttf", 90)
 
         self.reset_game()
         # Every save slot's file exists from the start (empty placeholders);
@@ -1929,6 +2142,10 @@ class Game:
         # True once a Debt block has triggered THIS RUN: the run then pays no
         # interest (see _award_cash). Reset at the start of every run.
         self.debt_run_triggered = False
+        # True once the Procrastination whole card has rewound THIS RUN: it
+        # rewinds the run's first completion only, so the run can still end (see
+        # _procrastination_rewind). Reset at the start of every run.
+        self.procrastination_used = False
         # Fresh block contacts THIS RUN (Rally): every fresh non-role block
         # touch counts (re-touches count); a Rally block subtracts its own.
         self.run_fresh_touches = 0
@@ -2044,11 +2261,12 @@ class Game:
         self.toolbox.add(BlockItem(0, 1, Shape.RECT, Effect.NONE, Scorer.FINISH, 0,
                                    block_price_for(Shape.RECT, [], Scorer.FINISH),
                                    "Finish Block", effects=[]))
-        # The Start and Finish run-role scorers are unlocked automatically:
-        # every player owns those two toolbox blocks, so their collection
-        # entries are revealed from the very first game.
-        collection.discover_component(Component.SCORER, Scorer.START)
-        collection.discover_component(Component.SCORER, Scorer.FINISH)
+        # The Start and Finish run-role scorers need no entry in the player's
+        # collection: every game hands the player those two toolbox blocks, so
+        # collection.is_component_discovered reports them as known by itself
+        # (see collection.ALWAYS_DISCOVERED_COMPONENTS). Building a Game used to
+        # record them on disk instead, which wrote a stray collection.json
+        # beside main.py whenever a Game was built without an active profile.
         self.shop_message = ""
         self.shop_message_timer = 0
 
@@ -2815,63 +3033,89 @@ class Game:
             # Blocks can only be placed (or moved into) unlocked squares.
             if (self.drawing and self.has_selected
                     and not self.is_cell_locked(grid_x, grid_y)):
-                item = self.selected_toolbox_item
-                moving_placed = isinstance(item, Block)
-                old = self.grid.get((grid_x, grid_y))
-                if old is not None and not (moving_placed and old is item):
-                    self._refund_block(old)
-                self.grid[(grid_x, grid_y)] = Block(
-                    grid_x,
-                    grid_y,
-                    shape=self.selected_shape,
-                    effect=self.selected_effect,
-                    scorer=self.selected_scorer,
-                    scorer_amount=self.selected_scorer_amount,
-                    angle=self.current_block_angle,
-                    portal_number=getattr(item, "portal_number", 0),
-                    key_number=getattr(item, "key_number", 0),
-                    trigger_limit=getattr(item, "trigger_limit", 1),
-                    trigger_paid=getattr(item, "trigger_paid", 0),
-                    effects=getattr(item, "effects", None),
-                    effect_amounts=self.selected_effect_amounts,
-                )
-                # The placed block keeps its resale value, so erasing/refunding
-                # it later returns the same price (a free, assembled-from-nothing
-                # wall is worth $0, not the sum of its default parts), and every
-                # later read (Death, Recognition, Painting) sees what the player
-                # actually paid instead of re-summing the parts.
-                placed = self.grid[(grid_x, grid_y)]
-                placed.resale_price = getattr(
-                    item, "resale_price", getattr(item, "price", None))
-                if placed.resale_price is None:
-                    # A block with no stored price of its own (hand-built) gets
-                    # one materialized once, so it never drifts afterwards.
-                    block_resale_price(placed)
-                # A placed portal inherits its partner's trigger count so the
-                # pair stays in lockstep (e.g. both exhausted after one use).
-                self._sync_portal_pair_triggers(self.grid[(grid_x, grid_y)], list(self.grid.values()))
-                sounds.play_plop()
-                # A bought block is consumed on placement; an assembled block already
-                # consumed its components. Either way, the selection is cleared.
-                if item is not None and getattr(item, "kind", None) == "block" and item in self.toolbox.items:
-                    self.toolbox.items.remove(item)
-                # Moving a placed block removes it from its original cell.
-                if moving_placed and (item.x, item.y) != (grid_x, grid_y):
-                    self.grid.pop((item.x, item.y), None)
-                self.has_selected = False
-                self.selected_toolbox_item = None
-                self.selected_toolbox_index = None
-                self.selected_shape = None
-                self.selected_effect = None
-                self.selected_scorer = None
-                self.selected_scorer_amount = None
-                self.selected_effect_amounts = {}
+                self._place_block_at(grid_x, grid_y)
             elif self.erasing:
                 self._erase_block_at(grid_x, grid_y)
             if (self.drawing or self.erasing):
                 # Building/editing the board keeps the current run's trial.
                 self.reset_run(False)
                 self.run_active = False
+
+    def _place_block_at(self, gx, gy):
+        """Place (or move) the selected block onto the grid cell (gx, gy).
+
+        Returns True when a block was placed. The click handler decides WHEN a
+        drag means "place" (see _handle_mouse); this is the placement itself,
+        kept a plain method so it can be called — and tested — directly.
+
+        It: swaps out whatever stood in the cell (refunding it), builds the
+        block from the armed parts, stamps it with the price of the item it
+        came FROM (so a sale, Death and Painting read what the player actually
+        paid rather than a re-summed part total), hands out its triggers (the
+        Concert card's bonus included), keeps a portal in step with its
+        partner, consumes a bought block from the toolbox, unsets the old cell
+        when an already-placed block is moved, and clears the selection. It
+        refuses a locked cell or nothing selected, so a direct call can never
+        place a block where a click could not.
+        """
+        if not (0 <= gx < GRID_WIDTH and 0 <= gy < GRID_HEIGHT):
+            return False
+        if not self.has_selected or self.is_cell_locked(gx, gy):
+            return False
+        item = self.selected_toolbox_item
+        moving_placed = isinstance(item, Block)
+        old = self.grid.get((gx, gy))
+        if old is not None and not (moving_placed and old is item):
+            self._refund_block(old)
+        self.grid[(gx, gy)] = Block(
+            gx,
+            gy,
+            shape=self.selected_shape,
+            effect=self.selected_effect,
+            scorer=self.selected_scorer,
+            scorer_amount=self.selected_scorer_amount,
+            angle=self.current_block_angle,
+            portal_number=getattr(item, "portal_number", 0),
+            key_number=getattr(item, "key_number", 0),
+            trigger_limit=getattr(item, "trigger_limit", 1),
+            trigger_paid=getattr(item, "trigger_paid", 0),
+            effects=getattr(item, "effects", None),
+            effect_amounts=self.selected_effect_amounts,
+        )
+        # The placed block keeps its resale value, so erasing/refunding it later
+        # returns the same price (a free, assembled-from-nothing wall is worth
+        # $0, not the sum of its default parts).
+        placed = self.grid[(gx, gy)]
+        placed.resale_price = getattr(item, "resale_price", getattr(item, "price", None))
+        if placed.resale_price is None:
+            # A block with no stored price of its own (hand-built) gets one
+            # materialized once, so it never drifts afterwards.
+            block_resale_price(placed)
+        # Placing a block is where its triggers are handed out, so a block
+        # placed while Concert is owned arrives with its extra one (and a block
+        # that never scores keeps its limit either way).
+        placed.triggers_left = self._trigger_limit(placed)
+        # A placed portal inherits its partner's trigger count so the pair stays
+        # in lockstep (e.g. both exhausted after one use).
+        self._sync_portal_pair_triggers(placed, list(self.grid.values()))
+        sounds.play_plop()
+        # A bought block is consumed on placement; an assembled block already
+        # consumed its components. Either way, the selection is cleared.
+        if (item is not None and getattr(item, "kind", None) == "block"
+                and item in self.toolbox.items):
+            self.toolbox.items.remove(item)
+        # Moving a placed block removes it from its original cell.
+        if moving_placed and (item.x, item.y) != (gx, gy):
+            self.grid.pop((item.x, item.y), None)
+        self.has_selected = False
+        self.selected_toolbox_item = None
+        self.selected_toolbox_index = None
+        self.selected_shape = None
+        self.selected_effect = None
+        self.selected_scorer = None
+        self.selected_scorer_amount = None
+        self.selected_effect_amounts = {}
+        return True
 
     def _set_scorer(self, scorer):
         self.selected_scorer = scorer
@@ -3030,8 +3274,8 @@ class Game:
         if self._owns_card(value) and not self._has_card(Card.SHOWMAN):
             self._set_shop_message("Already own this card")
             return
-        if len(self.cards) >= MAX_CARDS:
-            self._set_shop_message(f"Card area is full ({MAX_CARDS} cards)")
+        if len(self.cards) >= self.max_cards:
+            self._set_shop_message(f"Card area is full ({self.max_cards} cards)")
             return
         # Consume the two halves from the toolbox and clear the builder.
         for c in (condition, scorer):
@@ -3128,19 +3372,19 @@ class Game:
     def _assemble_price(self, a):
         """The resale value of an assembled block: 75% of its chosen parts.
 
-        Each part is priced at its OWN magnitude, so a block assembled from a
-        strong scorer or a fast piston is worth more than the same block at the
-        averages. The free defaults (Rect shape, no effect, no scorer) add
-        nothing, so a block assembled from nothing is worth $0 and can't be
-        sold for profit.
+        Each part is priced at the CATALOG price for its kind, never for the
+        magnitude it rolled (see block_price_for), so an assembled block is
+        worth what its parts are worth however well they rolled. The free
+        defaults (Rect shape, no effect, no scorer) add nothing, so a block
+        assembled from nothing is worth $0 and can't be sold for profit.
         """
         total = 0
         if a.shape is not None:
             total += COMPONENT_PRICES.get((Component.SHAPE, a.shape.value), 0)
         for e in a.effects:
-            total += effect_component_price(e.value, getattr(e, "amount", 0))
+            total += effect_component_price(e.value)
         if a.scorer is not None:
-            total += scorer_component_price(a.scorer.value, a.scorer.amount)
+            total += scorer_component_price(a.scorer.value)
         return int(total * 0.75)
 
     def _refund_block(self, block):
@@ -3241,10 +3485,15 @@ class Game:
         # The ERR 404 card is a joke: it never joins the card area itself —
         # buying it grants a random card instead.
         if getattr(item, "kind", None) == "card" and item.value == Card.ERR_404:
-            if len(self.cards) >= MAX_CARDS:
-                self._set_shop_message("Card area is full (5 cards)")
+            # The joke card never joins the area itself: it grants a random card
+            # instead, drawn from the cards the area can actually hold (Essence
+            # and its missing slot included, see _card_capacity_for).
+            pool = [v for v in prebuilt_card_pool()
+                    if v != Card.ERR_404
+                    and len(self.cards) < self._card_capacity_for(v)]
+            if not pool:
+                self._set_shop_message(f"Card area is full ({self.max_cards} cards)")
                 return
-            pool = [v for v in prebuilt_card_pool() if v != Card.ERR_404]
             value = random.choice(pool)
             # Duplicates are blocked unless the player owns the Showman card.
             if self._owns_card(value) and not self._has_card(Card.SHOWMAN):
@@ -3256,11 +3505,12 @@ class Game:
             self._set_shop_message(f"Bought card: {Card.name(value)}")
             sounds.play_coin()
             return
-        # A card goes to the card area above the toolbox (max MAX_CARDS), not
-        # the toolbox, and doesn't drive component prices.
+        # A card goes to the card area above the toolbox (max MAX_CARDS, one
+        # fewer while Essence is owned), not the toolbox, and doesn't drive
+        # component prices.
         if getattr(item, "kind", None) == "card":
-            if len(self.cards) >= MAX_CARDS:
-                self._set_shop_message("Card area is full (5 cards)")
+            if len(self.cards) >= self._card_capacity_for(item.value):
+                self._set_shop_message(f"Card area is full ({self.max_cards} cards)")
                 return
             # Duplicates are blocked unless the player owns the Showman card.
             if self._owns_card(item.value) and not self._has_card(Card.SHOWMAN):
@@ -3409,6 +3659,43 @@ class Game:
         if collection.discover_final_boss(boss):
             self._push_popup("Final boss beaten", FinalBoss.name(boss), (255, 140, 0))
 
+    def _concert_boosts(self, item):
+        """True when the Concert whole card's extra trigger applies to a block.
+
+        Concert only helps a block with something worth repeating: a real shape
+        (not a plain Rect), a real effect, and a scorer to pay out. A block that
+        fails any of the three is left alone, so the run roles (rects), the bare
+        Key/Lock shapes (no effect) and a portal or plain chute (no scorer) all
+        keep the trigger count they have.
+        """
+        return (self._has_card(Card.CONCERT)
+                and getattr(item, "shape", Shape.RECT) != Shape.RECT
+                and getattr(item, "scorer", Scorer.NONE) != Scorer.NONE
+                and any(effect != Effect.NONE
+                        for effect in getattr(item, "effects", None) or ()))
+
+    def _trigger_limit(self, item):
+        """How many times a block scores in one run, Concert included.
+
+        The block's OWN limit — paid upgrades and Deja Vu included — plus the
+        Concert whole card's bonus while it is owned and not cut by the Card
+        cutter trial. A Hands tied block stays at TRIAL_MAX_TRIGGERS whatever
+        else is going on: the trial is a cap applied AFTER the bonus, so a
+        disabled block is never handed an extra trigger by Concert.
+
+        This is the number to HAND OUT triggers from (a fresh run's refill, a
+        Procrastination rewind, and a block being placed), and what the info box
+        reports. The bonus is derived rather than written onto the block, so
+        selling Concert (or cutting it) takes the extra trigger away again
+        instead of leaving a raised limit behind on every block. Triggers
+        already handed out are not taken back — a limit only bites when triggers
+        are dealt.
+        """
+        if item in self.trial_maxed_blocks:
+            return TRIAL_MAX_TRIGGERS
+        bonus = CONCERT_TRIGGER_BONUS if self._concert_boosts(item) else 0
+        return getattr(item, "trigger_limit", 1) + bonus
+
     def _trigger_upgrade_cost(self, item):
         """Cash to raise a block's trigger limit by one.
 
@@ -3465,7 +3752,7 @@ class Game:
             Component.scorer_component(item.scorer,
                                        amount=getattr(item, "scorer_amount", 0)))
         self._sync_portal_pair_limits(item)
-        self._set_shop_message(f"Trigger limit now {item.trigger_limit} (${cost})")
+        self._set_shop_message(f"Trigger limit now {self._trigger_limit(item)} (${cost})")
 
     def _item_name(self, item):
         """A display name for a shop/toolbox item or a placed block.
@@ -3475,7 +3762,9 @@ class Game:
         pipe that grants +chips twice per run reads "Slippery Fragile Pipe
         +Chips v2". An upgraded (v2) action carries its version the same way,
         so "Death v2" is what every message about it calls it; a plain v1
-        action stays just "Death".
+        action stays just "Death". The trigger count shown is the block's
+        EFFECTIVE one (see _trigger_limit), so a Concert-boosted block reads one
+        higher than its own printed limit while the card is owned.
         """
         if item is CASH_BREAKDOWN:
             return "Last run cash gained"
@@ -3483,7 +3772,7 @@ class Game:
             effects = " ".join(Effect.name(e) for e in item.effects if e != Effect.NONE)
             parts = ([effects, Shape.name(item.shape), Scorer.name(item.scorer)] if effects
                      else [Shape.name(item.shape), Scorer.name(item.scorer)])
-            limit = getattr(item, "trigger_limit", 1)
+            limit = self._trigger_limit(item)
             return f"{' '.join(parts)} v{limit}"
         name = getattr(item, "name", "")
         if getattr(item, "kind", None) == "action" and name:
@@ -3496,7 +3785,7 @@ class Game:
     def card_area_item_at(self, pos):
         """Return the owned card at a screen position, or None."""
         x, y = CARD_AREA_COORDS[0], CARD_AREA_COORDS[1]
-        if not (x <= pos[0] < x + MAX_CARDS * GRID_SIZE and y <= pos[1] < y + GRID_SIZE):
+        if not (x <= pos[0] < x + self.max_cards * GRID_SIZE and y <= pos[1] < y + GRID_SIZE):
             return None
         index = (pos[0] - x) // GRID_SIZE
         if 0 <= index < len(self.cards):
@@ -3539,6 +3828,77 @@ class Game:
         """
         return any(c.value == value and not self._card_disabled(c)
                    for c in self.cards)
+
+    @property
+    def max_cards(self):
+        """How many cards the card area holds: MAX_CARDS, or one fewer.
+
+        The Essence whole card trades a slot away, and its own slot counts, so
+        while it is owned the area holds MAX_CARDS - 1 cards in all (Essence
+        plus the rest). Every path that FILLS the area — a shop purchase, a
+        random grant, a Recognition copy, a built card — asks this (or
+        _card_capacity_for, when the card being added may be Essence itself)
+        before adding, so no card is ever left outside the slots: with the
+        smaller area there is simply one fewer place to put one.
+        """
+        return MAX_CARDS - 1 if self._has_card(Card.ESSENCE) else MAX_CARDS
+
+    def _card_capacity_for(self, value):
+        """The card area's size once ``value`` is owned (Essence shrinks it).
+
+        Buying or finding Essence is what takes the slot away, so a path adding
+        Essence has to have room for the SMALLER area, not the one it is looking
+        at now: at MAX_CARDS - 1 cards the last slot is exactly the one it
+        would give up, and adding it there would put a card outside the area.
+        """
+        if value == Card.ESSENCE and not self._has_card(Card.ESSENCE):
+            return self.max_cards - 1
+        return self.max_cards
+
+    def _card_sold_message(self, card, message):
+        """``message`` plus whatever the card does when it LEAVES by sale.
+
+        Essence distils into ESSENCE_TOKENS random permanent Spirit tokens when
+        it is sold (by the sell key or by the Death action — both go through
+        here), and the sale message says so. Every other card just keeps its
+        sale message, so a new whole card only has to declare its own rule in
+        this one place.
+        """
+        if card.value != Card.ESSENCE:
+            return message
+        granted = self._grant_permanent_tokens(ESSENCE_TOKENS)
+        if not granted:
+            return (f"{message} — no room for its Spirit tokens "
+                    f"({MAX_TOKENS} max)")
+        plural = "" if granted == 1 else "s"
+        return (f"{message} — {granted} permanent Spirit token{plural} "
+                f"distilled from its essence")
+
+    def _grant_permanent_tokens(self, count):
+        """Grant ``count`` random PERMANENT Spirit tokens (see ScorerToken).
+
+        A token is a whole random block's scorer kept forever: a scorer from the
+        shop's pool (never a run role, which a token cannot use, and never the
+        no-scorer NONE), its own rolled magnitude, and random effects like a
+        random block carries — so an Effective token can actually pay off. The
+        token column caps at MAX_TOKENS; only what fits is granted, and the
+        caller reports it. Returns how many were granted.
+        """
+        pool = [s for s in Scorer.SHOP_ORDER
+                if s not in (Scorer.START, Scorer.FINISH, Scorer.NONE)]
+        granted = 0
+        for _ in range(count):
+            if len(self.tokens) >= MAX_TOKENS:
+                break
+            scorer = random.choice(pool)
+            shape = random.choice(Shape.ORDER)
+            effects = random.sample(Effect.REAL_ORDER, random_effect_count())
+            shape, effects = role_block_parts(scorer, shape, effects)
+            self.tokens.append(ScorerToken(scorer, roll_scorer_amount(scorer),
+                                           shape=shape, effects=effects,
+                                           runs_left=None))
+            granted += 1
+        return granted
 
     def action_area_item_at(self, pos):
         """Return the owned action at a screen position, or None."""
@@ -3632,7 +3992,8 @@ class Game:
             gained = int(subject.price * multiplier)
             self.cards.remove(subject)
             self.cash += gained
-            self._set_shop_message(f"{action.name} sold {subject.name} for ${gained}")
+            self._set_shop_message(self._card_sold_message(
+                subject, f"{action.name} sold {subject.name} for ${gained}"))
             sounds.play_coin()
             return True
         if isinstance(subject, Block):
@@ -3667,8 +4028,8 @@ class Game:
             if getattr(subject, "kind", None) != "card" or subject not in self.cards:
                 self._set_shop_message("v2 Recognition targets an owned card")
                 return False
-            if len(self.cards) >= MAX_CARDS:
-                self._set_shop_message("Card area is full (5 cards)")
+            if len(self.cards) >= self._card_capacity_for(subject.value):
+                self._set_shop_message(f"Card area is full ({self.max_cards} cards)")
                 return False
             if self.cash < subject.price:
                 self._set_shop_message(f"Need ${subject.price} to duplicate {subject.name}")
@@ -3755,7 +4116,7 @@ class Game:
         self._add_portal_pair_triggers(subject, gained)
         self._set_shop_message(
             f"{action.name} gave {self._item_name(subject)} +{gained} triggers "
-            f"(now {subject.trigger_limit})")
+            f"(now {self._trigger_limit(subject)})")
         return True
 
     def _add_portal_pair_triggers(self, block, amount):
@@ -3784,16 +4145,16 @@ class Game:
         """Give a block one extra effect and reprice it for the new part.
 
         The effect arrives with its own rolled magnitude (see
-        roll_effect_magnitude), and the block is repriced for what that
-        magnitude is worth, so the block's resale value (what a sale, a Death
-        action, and the Painting condition read) keeps matching what the block
-        is made of.
+        roll_effect_magnitude), and the block is repriced by the effect's
+        CATALOG price — never by the strength it rolled — so the block's resale
+        value (what a sale, a Death action, and the Painting condition read)
+        keeps matching what the block is made of without charging for luck.
         """
         item.effects.append(effect)
         magnitude = roll_effect_magnitude(effect)
         if magnitude:
             item.effect_amounts[effect] = magnitude
-        added = effect_component_price(effect, magnitude)
+        added = effect_component_price(effect)
         for attr in ("price", "resale_price"):
             if hasattr(item, attr):
                 setattr(item, attr, getattr(item, attr) + added)
@@ -4305,14 +4666,19 @@ class Game:
         every candidate is somehow owned already, the plain pool is used — the
         grant is always delivered.
         """
-        if len(self.cards) >= MAX_CARDS:
+        if len(self.cards) >= self.max_cards:
             self._set_shop_message("Card area is full — card withheld")
             return False
         owned = self.shop.owned_cards()
         pool = [v for v in prebuilt_card_pool()
-                if v != Card.ERR_404 and v not in owned]
+                if v != Card.ERR_404 and v not in owned
+                and len(self.cards) < self._card_capacity_for(v)]
         if not pool:
-            pool = [v for v in prebuilt_card_pool() if v != Card.ERR_404]
+            pool = [v for v in prebuilt_card_pool()
+                    if v != Card.ERR_404 and len(self.cards) < self._card_capacity_for(v)]
+        if not pool:
+            self._set_shop_message("Card area is full — card withheld")
+            return False
         value = random.choice(pool)
         self.cards.append(make_card_item(value))
         self._discover_owned_card(value)
@@ -4334,7 +4700,7 @@ class Game:
         amounts = roll_effect_amounts(effects)
         name = role_block_name(scorer, shape)
         item = BlockItem(0, 0, shape, Effect.NONE, scorer, amount,
-                         block_price_for(shape, effects, scorer, amount, amounts), name,
+                         block_price_for(shape, effects, scorer), name,
                          effects=effects, effect_amounts=amounts)
         self.toolbox.add(item)
         self._discover_block(item)
@@ -4565,7 +4931,8 @@ class Game:
             self.cards.remove(item)
             self.cash += sell_price
             self._clear_toolbox_selection()
-            self._set_shop_message(f"Sold {item.name} for ${sell_price}")
+            self._set_shop_message(self._card_sold_message(
+                item, f"Sold {item.name} for ${sell_price}"))
             return
         if item not in self.toolbox.items:
             self._set_shop_message("Item is not in the inventory")
@@ -4629,7 +4996,7 @@ class Game:
                                Scorer.RANDOM, Scorer.EFFECTIVE, Scorer.FRESH,
                                Scorer.PICKY, Scorer.VOYAGER, Scorer.SATANIC,
                                Scorer.SUMMIT, Scorer.AIRBALL):
-                limit = getattr(item, "trigger_limit", 1)
+                limit = self._trigger_limit(item)
                 if limit == 1:
                     rows.append(("Trigger", f"Scores once per run ({item.triggers_left} left)"))
                 else:
@@ -4648,7 +5015,7 @@ class Game:
                                Scorer.RANDOM, Scorer.EFFECTIVE, Scorer.FRESH,
                                Scorer.PICKY, Scorer.VOYAGER, Scorer.SATANIC,
                                Scorer.SUMMIT, Scorer.AIRBALL):
-                limit = getattr(item, "trigger_limit", 1)
+                limit = self._trigger_limit(item)
                 if limit == 1:
                     rows.append(("Trigger", "Scores once per run"))
                 else:
@@ -4730,6 +5097,9 @@ class Game:
             ("Cash/Lucky scorers", (f"${rows.get('scorers', 0)} — from Cash "
                                     "blocks and Lucky rolls (paid out as they "
                                     "trigger, and undone by a retry)")),
+            ("Essence", (f"${rows.get('essence', 0)} — the flat "
+                          f"${ESSENCE_RUN_CASH} the Essence card pays at the "
+                          "end of every run")),
             ("Total", f"${self.last_run_cash_gained} earned on the last run"),
         ]
 
@@ -4900,6 +5270,11 @@ class Game:
             for marble in self.marbles:
                 if marble.collisions_this_tick:
                     marble.air_streak = 0.0
+            # Record where every marble ended this frame: the oldest snapshot in
+            # each marble's history is one second back, which is exactly where
+            # Procrastination sends a finished run (see _procrastination_rewind).
+            for marble in self.marbles:
+                marble.history.append(marble.motion_state())
         # The marble-box fire animates every frame (growing while the score
         # passes the run, dying down once it is over).
         if not self.paused:
@@ -5065,6 +5440,10 @@ class Game:
         # cancelled the run's interest yet.
         self.run_blocks_destroyed = 0
         self.debt_run_triggered = False
+        # Fresh run: the Procrastination rewind has not been spent yet. The
+        # marbles below are newly built, so their motion-history deques start
+        # empty too — a new run can never rewind into the last one's past.
+        self.procrastination_used = False
         # Fresh run: no Rally touches, no previous-contact block for Echo, and
         # no primed Bomb blocks yet.
         self.run_fresh_touches = 0
@@ -5090,13 +5469,13 @@ class Game:
         # end-condition Quick card can measure the run's final block hit (there
         # is no NEXT block after the run for the usual Quick payoff to arm on).
         self._last_contact_speed = 0.0
-        # Fresh run: every scoring block gets its triggers back (Hands tied
-        # maxes out the chosen blocks' triggers), rotating blocks return to
-        # their base angle (continuous spin reset to 0), and fragile blocks
-        # that shattered are rebuilt to their original shape.
+        # Fresh run: every scoring block gets its triggers back — its own limit
+        # plus the Concert card's bonus (see _trigger_limit), with Hands tied
+        # maxing out the chosen blocks' triggers instead — rotating blocks
+        # return to their base angle (continuous spin reset to 0), and fragile
+        # blocks that shattered are rebuilt to their original shape.
         for block in self.grid.values():
-            block.triggers_left = (TRIAL_MAX_TRIGGERS if block in self.trial_maxed_blocks
-                                   else block.trigger_limit)
+            block.triggers_left = self._trigger_limit(block)
             # A portal pair's travel budget refills each run (see
             # PORTAL_MAX_ACTIVATIONS): 100 travels are allowed per run.
             if block.has_effect(Effect.PORTAL):
@@ -5386,6 +5765,20 @@ class Game:
             if (block.shape == Shape.LOCK and getattr(block, "locked", True)
                     and getattr(block, "key_number", 0) == number):
                 block.locked = False
+
+    def _adopt_pairing_numbers(self):
+        """Claim the pairing numbers the loaded state already uses.
+
+        Called once a save has been loaded (see save_system._load_save_data):
+        the pairing numbers are handed out by a counter that lives in this
+        process while the numbers themselves come from the save, so the loaded
+        board's numbers are claimed here before any new pair is built — and a
+        board saved with two pairs sharing a number is re-paired on the way in
+        (see adopt_pairing_numbers).
+        """
+        adopt_pairing_numbers(list(self.grid.values())
+                              + list(self.toolbox.items)
+                              + list(self.shop.items))
 
     def _sync_portal_pair_triggers(self, block, blocks):
         """Make a portal share its trigger count with its paired portal.
@@ -5720,6 +6113,11 @@ class Game:
         self.score_total = self._compute_total_score()
 
         if self.marbles and all(getattr(marble, "finished", False) for marble in self.marbles):
+            # Procrastination gets there late: the run's FIRST completion sends
+            # it one second back in time, with every block trigger refilled, and
+            # the marbles fly their last second again (see the method).
+            if self._procrastination_rewind():
+                return
             # End-of-run cards (e.g. Explorer's distance xMult) adjust the score
             # before it is finalized.
             self._apply_cards_on_finish()
@@ -5816,6 +6214,56 @@ class Game:
             if meta is not None and meta[1] in (Scorer.RANDOM, Scorer.LUCKY):
                 self._set_run_random_result(card, meta[1])
 
+    def _procrastination_rewind(self):
+        """Procrastination: hand the run back its last second (once per run).
+
+        Called when every marble has just finished. Instead of ending, the run
+        rewinds: each marble returns to the motion state it had one second ago
+        (the oldest snapshot in its history) and flies again, and every block
+        gets its full trigger count back, so the second that just ended is
+        played again with the blocks able to score. The score, the measurements
+        (distance travelled, air time) and the run clock keep their values: the
+        run is simply one second longer.
+
+        Only the FIRST completion of a run rewinds (``procrastination_used``);
+        the next one ends the run normally. Without that cap a rewound run could
+        never end — the marbles would reach the finish again about a second
+        later and rewind forever. A marble that finished more than a second
+        before the run did was already resting on its finish back then, so it
+        starts the replay there and finishes again immediately; the marble that
+        ended the run replays its whole approach.
+
+        Portal travel budgets (Effect.PORTAL's per-run activations) are not
+        trigger counts and are left as they are; destroyed blocks stay
+        destroyed — only trigger counts and the marbles' motion come back.
+
+        Returns True when the run was rewound (and is therefore still going).
+        """
+        if self.procrastination_used or not self._has_card(Card.PROCRASTINATION):
+            return False
+        self.procrastination_used = True
+        # Every block can score its trigger limit again — the Concert card's
+        # bonus and the Hands tied trial's cap included, exactly as a fresh run
+        # would set it (see _trigger_limit).
+        for block in self.grid.values():
+            block.triggers_left = self._trigger_limit(block)
+        for marble in self.marbles:
+            if marble.history:
+                marble.restore_motion_state(marble.history[0])
+            # The second just rewound never happened, so its snapshots go too
+            # (they are the future now) — and the marbles are flying again, so
+            # the run is not over.
+            marble.history.clear()
+            marble.finished = False
+        self._set_shop_message(
+            "Procrastination: rewound 1 second — every block's triggers are back")
+        card = next((c for c in self.cards
+                     if c.value == Card.PROCRASTINATION
+                     and not self._card_disabled(c)), None)
+        if card is not None:
+            self._spawn_card_particle(card, "-1s", BLUE)
+        return True
+
     def _watch_blocks_out_of_play(self, block):
         """True when the Watch card stops this block from contributing score.
 
@@ -5907,8 +6355,11 @@ class Game:
             self._spawn_block_particle(block, self._particle_amount_text(gained), GREEN)
             return True
         if block.scorer == Scorer.CASH:
-            # Cash blocks pay out money instead of score.
-            gained = int(block.scorer_amount)
+            # Cash blocks pay out money instead of score. The rolled magnitude
+            # is fractional (a Cash block averages $120 and can now come out at
+            # $132.4), so it is paid as the whole dollar its description states
+            # rather than truncated to $132.
+            gained = round(block.scorer_amount)
             self.cash += gained
             self.run_cash_gained += gained
             self._spawn_block_particle(block, f"${gained}", YELLOW)
@@ -6185,7 +6636,10 @@ class Game:
         # part of the run's earnings but not of this award.
         scorer_cash = self.run_cash_gained
         self.run_cash_gained = 0
-        award = score_gain + base_cash + interest + card_cash
+        # The Essence whole card pays a flat sum at the end of every run (it is
+        # part of the award, so a retry takes it back with the rest).
+        essence_cash = ESSENCE_RUN_CASH if self._has_card(Card.ESSENCE) else 0
+        award = score_gain + base_cash + interest + card_cash + essence_cash
         self.cash += award
         # The run's "cash gained" covers every dollar the run earned: the whole
         # award PLUS the scorer cash already paid out mid-run, so the display
@@ -6197,6 +6651,7 @@ class Game:
             "score": score_gain,
             "cards": card_cash,
             "scorers": scorer_cash,
+            "essence": essence_cash,
             # True when a Debt block cancelled this run's interest, so the
             # breakdown can say why it is $0.
             "debt": bool(self.debt_run_triggered),

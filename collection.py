@@ -8,10 +8,24 @@ entries show "???" instead of their name/description/icon.
 """
 
 import json
-import os
 
-# Where the discovered set lives. Tests redirect this for isolation.
-FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "collection.json")
+import components
+import player_paths
+
+# Where the discovered set lives. Tests redirect this, and it defaults INSIDE
+# profiles/ (see player_paths) so a write from a tool that has not activated a
+# profile can never land beside main.py.
+FILE_PATH = player_paths.default_file("collection.json")
+
+# The Start and Finish scorers are RUN ROLES rather than things to discover:
+# every game hands the player a Start block and a Finish block, so their
+# collection entries are always known. Reading them as discovered (rather than
+# writing them to the file) keeps BUILDING a Game — which happens in tests,
+# tools and probes as well as in play — from touching the player's data.
+ALWAYS_DISCOVERED_COMPONENTS = frozenset({
+    (components.Component.SCORER, components.Scorer.START),
+    (components.Component.SCORER, components.Scorer.FINISH),
+})
 
 _DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "conditions": set, "trials": set, "final_bosses": set}
 
@@ -38,6 +52,7 @@ def _load():
 
 def _save():
     """Write the discovered set to disk."""
+    player_paths.ensure_parent(FILE_PATH)
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         json.dump({
             "cards": sorted(_DATA["cards"]),
@@ -128,7 +143,8 @@ def is_action_discovered(value):
 
 def is_component_discovered(kind, value):
     _load()
-    return (kind, value) in _DATA["components"]
+    return ((kind, value) in ALWAYS_DISCOVERED_COMPONENTS
+            or (kind, value) in _DATA["components"])
 
 
 def is_condition_discovered(value):

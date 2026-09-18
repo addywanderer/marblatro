@@ -200,7 +200,7 @@
       "scorer_amount": 0.0,
       "angle": 90,
       "portal_number": 0,
-      "key_number": 1,
+      "key_number": 2,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
@@ -223,7 +223,7 @@
       "scorer_amount": 0.0,
       "angle": 90,
       "portal_number": 0,
-      "key_number": 1,
+      "key_number": 2,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
@@ -238,7 +238,9 @@
       "x": 6,
       "y": 11,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 30,
       "scorer_amount": 0.0,

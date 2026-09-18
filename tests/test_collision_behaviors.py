@@ -1,15 +1,48 @@
 import math
 import os
+import shutil
+import tempfile
 import unittest
 
 os.environ.setdefault("SDL_VIDEODRIVER", "dummy")
 
 import numpy as np
 
+import achievements
+import collection
 import main
+import metagame
+import save_system
 
 
 class CollisionBehaviorTests(unittest.TestCase):
+    def setUp(self):
+        # These tests build Games, and a Game touches the player's data files
+        # (it creates the save slots). Point every one of them at a throwaway
+        # folder so the suite can never write into a real profile.
+        self._tmp = tempfile.mkdtemp()
+        self._old_saves_dir = save_system.SAVES_DIR
+        self._old_ach_file = achievements.FILE_PATH
+        self._old_meta_file = metagame.FILE_PATH
+        self._old_collection_file = collection.FILE_PATH
+        save_system.SAVES_DIR = os.path.join(self._tmp, "saves")
+        achievements.FILE_PATH = os.path.join(self._tmp, "achievements.json")
+        metagame.FILE_PATH = os.path.join(self._tmp, "metagame.json")
+        collection.FILE_PATH = os.path.join(self._tmp, "collection.json")
+        achievements.reset()
+        metagame.reset()
+        collection.reset()
+
+    def tearDown(self):
+        save_system.SAVES_DIR = self._old_saves_dir
+        achievements.FILE_PATH = self._old_ach_file
+        metagame.FILE_PATH = self._old_meta_file
+        collection.FILE_PATH = self._old_collection_file
+        achievements.reset()
+        metagame.reset()
+        collection.reset()
+        shutil.rmtree(self._tmp, ignore_errors=True)
+
     def test_accelerator_pushes_resting_marble_along_arrow_direction(self):
         # Arrow points right (angle 90): a marble resting on top should be
         # pushed right and roll off, even though it is not penetrating the block.

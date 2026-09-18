@@ -22,15 +22,17 @@
   "runs_cleared": 5,
   "failed_runs": 0,
   "current_trial": 12,
+  "difficulty": 4,
   "final_boss": null,
   "cards": [
     {
       "kind": "card",
       "value": 2660,
       "price": 31,
+      "amount": 0,
       "col": 0,
       "row": 0,
-      "name": "Peg card (Summit)"
+      "name": "Curved Slope Line card (Satanic)"
     }
   ],
   "actions": [],
@@ -676,16 +678,19 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -693,17 +698,22 @@
       "x": 4,
       "y": 8,
       "shape": 13,
-      "effects": [],
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
       "scorer": 23,
       "scorer_amount": 0.0,
       "angle": 90,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -714,16 +724,19 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
       "angle": 90,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -734,16 +747,19 @@
       "effects": [
         17
       ],
+      "effect_amounts": {},
       "scorer": 2,
       "scorer_amount": 4.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -751,17 +767,22 @@
       "x": 5,
       "y": 6,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
       "scorer": 9,
       "scorer_amount": 1.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -769,17 +790,22 @@
       "x": 6,
       "y": 8,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
       "scorer": 9,
       "scorer_amount": 1.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     }
   ],
   "shop": [
@@ -850,17 +876,19 @@
       "kind": "card",
       "value": 2032,
       "price": 42,
+      "amount": 0,
       "col": 1,
       "row": 3,
-      "name": "Bouncy card (Cash)"
+      "name": "Bump card (Quick)"
     },
     {
       "kind": "card",
       "value": 2044,
       "price": 37,
+      "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "Repulsor card (Cash)"
+      "name": "Fragile card (Quick)"
     },
     {
       "kind": "condition",
@@ -908,11 +936,13 @@
         11,
         1
       ],
+      "effect_amounts": {},
       "scorer": 6,
       "scorer_amount": 0.0,
       "price": 57,
       "name": "Convex Slope Quick",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     },
@@ -925,11 +955,13 @@
       "effects": [
         11
       ],
+      "effect_amounts": {},
       "scorer": 15,
       "scorer_amount": 1.0,
       "price": 37,
       "name": "Line Fresh",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     }
@@ -980,6 +1012,8 @@
       1.0
     ]
   ],
+  "tesseract_bonus": 1.0,
+  "tokens": [],
   "shred_points": 0,
   "rubble_points": 0,
   "idea_points": 0,
@@ -992,9 +1026,10 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 31,
+  "score_chips": 61,
   "score_mult": 1,
   "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       5,

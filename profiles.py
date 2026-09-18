@@ -21,16 +21,16 @@ import time
 import achievements
 import collection
 import metagame
+import player_paths
 import save_system
 
-# The game's own folder (source of the legacy pre-profile data). Tests
-# redirect this to a throwaway folder to migrate a fake legacy layout.
-GAME_DIR = os.path.dirname(os.path.abspath(__file__))
-# The root folder that holds every profile. Tests redirect this to a
-# throwaway folder (the same pattern as the modules' FILE_PATH/SAVES_DIR).
-PROFILES_DIR = os.path.join(GAME_DIR, "profiles")
-# The folder that receives any pre-profile data on the first run.
-DEFAULT_PROFILE = "profile_1"
+# The paths themselves are named in player_paths, which the persistence modules
+# also use for their own defaults. They are re-exported here (rather than
+# redefined) so there is one place that knows the layout; tests redirect the
+# module attributes below.
+GAME_DIR = player_paths.GAME_DIR
+PROFILES_DIR = player_paths.PROFILES_DIR
+DEFAULT_PROFILE = player_paths.DEFAULT_PROFILE
 
 
 def profile_dir(name):

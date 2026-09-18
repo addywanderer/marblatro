@@ -12,7 +12,8 @@ achievements tab until they are unlocked).
 """
 
 import json
-import os
+
+import player_paths
 
 
 class Achievement:
@@ -46,8 +47,10 @@ ACHIEVEMENTS = [
 ]
 
 # Where the unlocked set lives. Global (not per save slot): an achievement
-# stays unlocked no matter which slot you play. Tests redirect this.
-FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "achievements.json")
+# stays unlocked no matter which slot you play. Tests redirect this, and it
+# defaults INSIDE profiles/ (see player_paths) so a write from a tool that has
+# not activated a profile can never land beside main.py.
+FILE_PATH = player_paths.default_file("achievements.json")
 
 _UNLOCKED = None  # set of unlocked achievement ids; lazily loaded once
 # True once achievements have been disabled for this profile (unlocking the
@@ -75,6 +78,7 @@ def _load():
 
 def _save():
     """Write the unlocked set and disabled flag to disk."""
+    player_paths.ensure_parent(FILE_PATH)
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         json.dump({"unlocked": sorted(_UNLOCKED),
                    "disabled": bool(_DISABLED)}, f)

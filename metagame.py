@@ -9,10 +9,13 @@ with the display options (the CRT screen filter), which are also per player.
 """
 
 import json
-import os
 
-# Where the metagame state lives. Tests redirect this for isolation.
-FILE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "metagame.json")
+import player_paths
+
+# Where the metagame state lives. Tests redirect this, and it defaults INSIDE
+# profiles/ (see player_paths) so a write from a tool that has not activated a
+# profile can never land beside main.py.
+FILE_PATH = player_paths.default_file("metagame.json")
 
 _DATA = None  # {"dice": int, "chip_level": int, "mult_level": int,
 #                "xmult_level": int, "crt": int}
@@ -47,6 +50,7 @@ def _load():
 
 def _save():
     """Write the metagame state to disk."""
+    player_paths.ensure_parent(FILE_PATH)
     with open(FILE_PATH, "w", encoding="utf-8") as f:
         json.dump(_DATA, f)
 

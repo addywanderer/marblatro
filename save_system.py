@@ -18,6 +18,8 @@ import sys
 
 import pygame
 
+import player_paths
+
 # main.py defines the Block/BlockItem/CardItem classes, the component enums,
 # and the drawing constants used below. Reuse whichever module is actually
 # running main.py — a plain `from main import ...` here would import a second,
@@ -55,8 +57,10 @@ WHITE = _save_source.WHITE
 del _save_source
 
 # The 6 save slots, each a JSON text file. The player picks the active slot on
-# the title screen; pressing P writes the whole game state to that slot.
-SAVES_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saves")
+# the title screen; pressing P writes the whole game state to that slot. Tests
+# redirect this, and it defaults INSIDE profiles/ (see player_paths) so the
+# empty slot files a Game creates can never land beside main.py.
+SAVES_DIR = player_paths.default_saves_dir()
 SAVE_SLOT_COUNT = 6
 
 
@@ -435,6 +439,13 @@ def _load_save_data(game, data, slot):
     for d in data.get("grid", []):
         block = _deserialize_item(d)
         game.grid[(block.x, block.y)] = block
+    # Pairing numbers (Key/Lock and Portal) are handed out by a counter that
+    # lives in the running game while the numbers themselves live in this save,
+    # so the loaded board claims its numbers before any new pair is built:
+    # otherwise a pair bought after a reload reuses a number the save already
+    # has and one key opens the locks of two different pairs (see
+    # Game._adopt_pairing_numbers).
+    game._adopt_pairing_numbers()
     # A loaded game starts in the build state: no active run.
     game.marbles = []
     game.run_active = False
