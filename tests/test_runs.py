@@ -136,7 +136,7 @@ class RunsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, 170)
 
 
-    def test_debt_gives_120_chips_and_marks_the_run(self):
+    def test_debt_gives_60_chips_and_marks_the_run(self):
         block = main.Block(0, 0, scorer=main.Scorer.DEBT)
         self.game.grid[(0, 0)] = block
         self.game.run_active = True
@@ -147,7 +147,7 @@ class RunsTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertEqual(self.game.score_chips, 120)
+        self.assertEqual(self.game.score_chips, 60)
         self.assertTrue(self.game.debt_run_triggered)
         self.assertEqual(block.triggers_left, 0)
 

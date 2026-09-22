@@ -11,7 +11,7 @@
   "run_results": [],
   "runs_cleared": 0,
   "failed_runs": 0,
-  "current_trial": 2,
+  "current_trial": 4,
   "difficulty": 4,
   "final_boss": null,
   "cards": [],
@@ -23,7 +23,9 @@
       "col": 0,
       "row": 0,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
@@ -40,7 +42,9 @@
       "col": 0,
       "row": 1,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
@@ -56,135 +60,143 @@
   "shop": [
     {
       "kind": "shape",
-      "value": 18,
+      "value": 4,
       "amount": 0,
-      "price": 11,
-      "name": "Cradle",
+      "price": 8,
+      "name": "Circle",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 5,
+      "value": 6,
       "amount": 0,
-      "price": 12,
-      "name": "Curved Slope",
+      "price": 9,
+      "name": "Pipe",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 15,
+      "value": 11,
       "amount": 0,
-      "price": 22,
-      "name": "Zipper",
+      "price": 24,
+      "name": "Shrinking",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
       "value": 7,
-      "amount": 810.0,
-      "price": 14,
+      "amount": 235.7,
+      "price": 16,
       "name": "Rotate",
       "col": 4,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 8,
-      "amount": 3.3,
-      "price": 26,
-      "name": "Sharp",
+      "value": 17,
+      "amount": 0.01021,
+      "price": 24,
+      "name": "Voyager",
       "col": 5,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 1,
-      "amount": 21.0,
-      "price": 8,
-      "name": "+Chips",
+      "value": 25,
+      "amount": 1.201,
+      "price": 24,
+      "name": "Rally",
       "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 34,
-      "amount": 132.0,
-      "price": 26,
-      "name": "Debt",
+      "value": 16,
+      "amount": 1.196,
+      "price": 17,
+      "name": "Picky",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 88,
+      "value": 2716,
       "price": 44,
-      "amount": 0,
+      "amount": 0.7928,
       "col": 1,
       "row": 3,
-      "name": "Factory"
+      "name": "Platform card (Summit)"
     },
     {
       "kind": "card",
-      "value": 2710,
-      "price": 37,
-      "amount": 0.75,
+      "value": 3133,
+      "price": 38,
+      "amount": 25.01,
       "col": 2,
       "row": 3,
-      "name": "Pipe Bend card (Summit)"
+      "name": "Drain card (Powerline)"
     },
     {
       "kind": "condition",
-      "value": 3,
+      "value": 146,
       "amount": 0,
-      "price": 16,
-      "name": "Plane",
+      "price": 5,
+      "name": "Portal",
       "col": 3,
       "row": 3
     },
     {
       "kind": "condition",
-      "value": 142,
+      "value": 118,
       "amount": 0,
-      "price": 6,
-      "name": "Accelerator",
+      "price": 15,
+      "name": "Cradle",
       "col": 4,
       "row": 3
-    },
-    {
-      "kind": "action",
-      "value": 4,
-      "price": 28,
-      "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Strength"
     },
     {
       "kind": "action",
       "value": 1,
       "price": 24,
       "version": 1,
-      "col": 6,
+      "col": 5,
       "row": 3,
       "name": "Recognition"
+    },
+    {
+      "kind": "action",
+      "value": 4,
+      "price": 28,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Strength"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 15,
+      "shape": 9,
       "effects": [
-        10
+        15,
+        4,
+        1,
+        10,
+        6,
+        12
       ],
-      "effect_amounts": {},
-      "scorer": 19,
-      "scorer_amount": 0.75,
-      "price": 42,
-      "name": "Corner Summit",
+      "effect_amounts": {
+        "1": 79.4,
+        "12": 0.307
+      },
+      "scorer": 12,
+      "scorer_amount": 1.46,
+      "price": 126,
+      "name": "Convex Slope Ideas",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -195,17 +207,17 @@
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 3,
+      "shape": 6,
       "effects": [
-        14
+        2
       ],
       "effect_amounts": {
-        "14": 300.0
+        "2": 13228.0
       },
-      "scorer": 9,
-      "scorer_amount": 1.0,
-      "price": 30,
-      "name": "None Parts",
+      "scorer": 21,
+      "scorer_amount": 1.513,
+      "price": 42,
+      "name": "Pipe Seed",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,

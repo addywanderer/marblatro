@@ -38,6 +38,18 @@ ORANGE = (255, 165, 0)
 WHITE = (255, 255, 255)
 
 
+def shade(color, factor):
+    """Blend a colour toward white (``factor`` > 0) or black (``factor`` < 0).
+
+    ``factor`` is the fraction of the way to the target, so 0.3 is 30% lighter
+    and -0.3 is 30% darker. Used to build a tile's palette (and the panels that
+    echo it) out of one base colour.
+    """
+    target = 255 if factor >= 0 else 0
+    amount = abs(factor)
+    return tuple(round(c + (target - c) * amount) for c in color)
+
+
 class Shape:
     """The block's hitbox geometry.
 
@@ -196,7 +208,7 @@ class Scorer:
     QUICK = 6
     CASH = 7
     SHARP = 8
-    PARTS = 9
+    PARTS = 9  # 1 component per trigger (granted when the run is continued)
     SHREDS = 10
     RUBBLE = 11
     IDEAS = 12
@@ -221,7 +233,7 @@ class Scorer:
     CLUSTER = 31  # +4 mult per block orthogonally adjacent to it (no diagonals)
     COLOSSUS = 32  # +0.1 xMult per px of marble radius above the base size
     UNDERTAKER = 33  # +15 mult per block destroyed this run
-    DEBT = 34  # +120 chips, but the run pays no interest afterwards
+    DEBT = 34  # +60 chips, but the run pays no interest afterwards
 
     DEFAULT_AMOUNT: ClassVar[dict[int, float]] = {
         NONE: 0,
@@ -258,7 +270,7 @@ class Scorer:
         CLUSTER: 4,  # +4 mult per block orthogonally adjacent to it
         COLOSSUS: 0.1,  # +0.1 xMult per px of radius above the base radius
         UNDERTAKER: 15,  # +15 mult per block destroyed this run
-        DEBT: 120,  # 120 chips per trigger
+        DEBT: 60,  # 60 chips per trigger
     }
     NAMES: ClassVar[dict[int, str]] = {
         NONE: "None",
@@ -368,8 +380,9 @@ class Scorer:
     # third, the others a half, so the reward RATE is exactly what it always
     # was (3 Shreds triggers a card, 2 Rubble triggers a block) while the bank
     # reads as one point a reward. The fraction scales with the scorer's own
-    # magnitude, so a 3-magnitude Rubble banks 1.5 points a trigger. Parts and
-    # Fresh grant their reward instantly and bank nothing.
+    # magnitude, so a 3-magnitude Rubble banks 1.5 points a trigger. Parts
+    # banks whole components rather than points and Fresh grants its reroll
+    # immediately; neither appears here.
     RESOURCE_RATE: ClassVar[dict[int, float]] = {
         SHREDS: 1.0 / 3.0,
         RUBBLE: 0.5,
@@ -438,7 +451,8 @@ class Trial:
         DEAL_BREAKER: "Deal breaker",
     }
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
-        HANDS_TIED: "Disables the scoring effect of a random 1/4 of blocks.",
+        HANDS_TIED: "A random 1/4 of your blocks can score 1 fewer time per "
+                    "run.",
         CARD_CUTTER: "Disables a random card.",
         DEAD_ZONE: "Gravity is tripled in the board's bottom third.",
         ALL_FINISHES: "The board borders count as finish blocks.",
@@ -466,6 +480,117 @@ class Trial:
                                   BOUNCY_CASTLE, CRUMBLING, MARBLE_WEIGHT,
                                   SPEEDRUN, REPEATS_ONLY, INFLATION,
                                   EMPTY_POCKETS, DEAL_BREAKER]
+    # The base colour of each trial's tile: the field its tessellation is built
+    # from, and the hue the trial's icon in the collection and the trial-tinted
+    # panels (see panel_color) are derived from. One per trial, as unlike each
+    # other as the trials are.
+    COLORS: ClassVar[dict[int, tuple]] = {
+        HANDS_TIED: (58, 62, 76),       # chained slate
+        CARD_CUTTER: (150, 60, 120),    # cut magenta
+        DEAD_ZONE: (48, 62, 150),       # heavy indigo
+        ALL_FINISHES: (245, 245, 245),  # goal white
+        SLIM_PICKINGS: (150, 140, 80),  # shelf olive
+        LONG_RUN: (45, 120, 95),        # long sea green
+        SHUFFLED: (110, 70, 160),       # shuffle purple
+        BOUNCY_CASTLE: (200, 90, 140),  # bouncy pink
+        CRUMBLING: (105, 105, 115),     # cracked stone
+        MARBLE_WEIGHT: (40, 140, 145),  # scale teal
+        SPEEDRUN: (215, 110, 35),       # speed orange
+        REPEATS_ONLY: (40, 150, 185),   # repeat cyan
+        INFLATION: (190, 60, 45),       # inflation red
+        EMPTY_POCKETS: (120, 80, 50),   # empty brown
+        DEAL_BREAKER: (140, 40, 60),    # broken crimson
+    }
+    # Which tessellation each trial's tile is drawn with (see
+    # ui._TRIAL_TESSELLATIONS): the pattern is always made of SHAPES — rows of
+    # triangles, rings, circles, chevrons, scales, diamonds, octagons, split
+    # cells — never a plain rectangle of flat colour, and the family is picked
+    # to echo what the trial does (interlocked rings for chained hands, circles
+    # bouncing in a castle, chevrons for speed, scales for repetition, cut cells
+    # for a cutter, climbing bars for inflation ...).
+    TILE_STYLES: ClassVar[dict[int, str]] = {
+        HANDS_TIED: "rings",         # links of a chain
+        CARD_CUTTER: "splits",       # cards cut corner to corner
+        DEAD_ZONE: "chevrons",       # bands, with a fall through them
+        ALL_FINISHES: "checker",     # the finish checkerboard, in triangles
+        SLIM_PICKINGS: "octagons",   # tiles with gaps between them
+        LONG_RUN: "bars",            # a long even track of bars
+        SHUFFLED: "pinwheel",        # cells rotated every which way
+        BOUNCY_CASTLE: "circles",    # balls, touching in a lattice
+        CRUMBLING: "cracked",        # a broken triangle lattice
+        MARBLE_WEIGHT: "dots",       # big marbles against small ones
+        SPEEDRUN: "chevrons",        # speed
+        REPEATS_ONLY: "scales",      # the same arc repeated
+        INFLATION: "climbers",       # bars climbing, price and all
+        EMPTY_POCKETS: "pockets",    # hollow rings
+        DEAL_BREAKER: "tears",       # cells torn apart
+    }
+    # The extra colours a tile may use besides the trial's own: an accent (gold
+    # by default: the game's "payoff" colour) and the two ends of the light/dark
+    # range. Kept as fractions so every palette is derived from COLORS.
+    TILE_LIGHT = 0.34       # how much lighter the light shade is
+    TILE_DARK = 0.34        # how much darker the dark shade is
+    TILE_ACCENT_LIGHT = 0.72
+    PANEL_LIGHT = 0.22      # the board/inventory/shop tint (see panel_color)
+    LOCKED_DARK = 0.34      # how far a locked square sinks below a panel
+    # A tile brighter than this gets its panels DARKENED instead of lightened:
+    # the panels carry white text (the board/inventory/shop titles, prices and
+    # messages), so an all-finishes run cannot have near-white panels.
+    PANEL_LIGHT_LIMIT = 200
+
+    @classmethod
+    def palette(cls, trial):
+        """The few colours one trial's tile is built from.
+
+        Four shades derived from the trial's base colour — a light, the base
+        itself, a dark, and a pale accent — so a tile reads as one colour FAMILY
+        while its shapes still tell each other apart. The mesh lines drawn
+        between the shapes use the dark shade, so the same palette covers the
+        whole pattern.
+        """
+        base = cls.COLORS.get(trial, (60, 60, 70))
+        return {
+            "light": shade(base, cls.TILE_LIGHT),
+            "base": base,
+            "dark": shade(base, -cls.TILE_DARK),
+            "accent": shade(base, cls.TILE_ACCENT_LIGHT),
+        }
+
+    @classmethod
+    def panel_color(cls, trial):
+        """The colour the board/inventory/shop panels are filled with.
+
+        The trial's tile colour, a little lighter, so the panels read as part of
+        the run's palette instead of a separate red. The one exception is a tile
+        that is already very light (the all-finishes trial is near-white): its
+        panels are darkened instead of lightened, because they carry white text
+        and near-white panels would swallow it. No trial (or an unknown id)
+        keeps the game's own panel colour.
+        """
+        if trial is None:
+            return None
+        base = cls.COLORS.get(trial, (60, 60, 70))
+        if sum(base) / 3 > cls.PANEL_LIGHT_LIMIT:
+            return shade(base, -cls.TILE_DARK)
+        return shade(base, cls.PANEL_LIGHT)
+
+    @classmethod
+    def locked_color(cls, trial):
+        """The colour a LOCKED board square is filled with during that trial.
+
+        Always taken a step DOWN from panel_color (LOCKED_DARK) rather than
+        straight from the tile's base: the all-finishes tile is near-white and
+        its panel is darkened rather than lightened, so a locked square derived
+        from the base could come out the SAME as its own panel — or lighter.
+        Deriving from the panel makes a locked square darker than the unlocked
+        ones around it for every trial, which is what keeps the playable region
+        reading as raised out of the board it sits in. No trial (or an unknown
+        id) returns None, and the caller keeps its own locked colour.
+        """
+        panel = cls.panel_color(trial)
+        if panel is None:
+            return None
+        return shade(panel, -cls.LOCKED_DARK)
 
     @classmethod
     def name(cls, trial):
@@ -1377,7 +1502,8 @@ def scorer_description(scorer, amount=None):
         Scorer.CASH: f"Gives ${amount:.0f}{dev} when touched",
         Scorer.SHARP: f"Multiplies the multiplier by {amount:g}{dev} when touched. "
                       "Has a 1/4 chance to destroy its block when moving on from a run.",
-        Scorer.PARTS: f"Gives {amount:g} component{_plural(amount)}{dev} when touched",
+        Scorer.PARTS: f"Gives {amount:g} component{_plural(amount)}{dev} when touched, "
+                      "handed over once the run is continued",
         Scorer.SHREDS: f"Gives {points_text(resource_points_for(Scorer.SHREDS, amount))} "
                        f"shred point{_plural_points(resource_points_for(Scorer.SHREDS, amount))}"
                        f"{pdev}. 1 point converts into a random card",
@@ -2021,7 +2147,8 @@ def _generic_effect_phrase(scorer, amount=None, dev="", condition=None):
     if scorer == Scorer.SHARP:
         return f"{amount:g}x mult{dev}"
     if scorer == Scorer.PARTS:
-        return f"{amount:g} component{_plural(amount)}{dev}"
+        return (f"{amount:g} component{_plural(amount)}{dev} handed over once "
+                "the run is continued")
     if scorer == Scorer.SHREDS:
         return (f"{points_text(resource_points_for(Scorer.SHREDS, amount))} shred "
                 f"point{_plural_points(resource_points_for(Scorer.SHREDS, amount))}{pdev}")

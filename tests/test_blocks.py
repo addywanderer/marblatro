@@ -679,7 +679,7 @@ class BlocksTests(GameTestCase):
         self.game.run_active = True
         marble.collisions_this_tick = [block]
         marble.collisions_last_tick = []
-        with mock.patch("main.random.random", return_value=0.1):  # under 0.25 -> retrigger
+        with mock.patch.object(self.game.run_rng, "random", return_value=0.1):
             self.game._handle_block_contacts(list(self.game.grid.values()))
         self.assertEqual(self.game.score_chips, 20)  # 10 base + 10 retrigger
         self.assertEqual(block.triggers_left, 0)  # still only one trigger used
@@ -696,7 +696,7 @@ class BlocksTests(GameTestCase):
         self.game.run_active = True
         marble.collisions_this_tick = [block]
         marble.collisions_last_tick = []
-        with mock.patch("main.random.random", return_value=0.9):  # 25%+ -> no retrigger
+        with mock.patch.object(self.game.run_rng, "random", return_value=0.9):
             self.game._handle_block_contacts(list(self.game.grid.values()))
         self.assertEqual(self.game.score_chips, 10)
         self.assertEqual(block.triggers_left, 0)

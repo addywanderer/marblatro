@@ -117,9 +117,11 @@ MIN_MARBLE_RADIUS = 1.0
 TRAIL_SPACING = 4.0
 TRAIL_LIFE = 0.6
 TRAIL_RADIUS_SCALE = 0.5
-# Trials: exactly one run-wide modifier per run. Hands tied set the
-# trigger limit to 0 for a random 1/4 of the marble-box blocks.
-TRIAL_MAX_TRIGGERS = 0
+# Trials: exactly one run-wide modifier per run. Hands tied takes this many
+# triggers away from a random 1/4 of the marble-box blocks: a block that could
+# score 3 times scores twice instead, and one out of triggers entirely (0) is
+# silenced for the run (see Game._trigger_limit).
+TRIAL_TRIGGER_PENALTY = 1
 # The Concert whole card hands every block that is not a plain rect AND has both
 # an effect and a scorer one extra trigger per run (see Game._trigger_limit).
 CONCERT_TRIGGER_BONUS = 1
@@ -2078,8 +2080,9 @@ class Game:
         # Resource points banked by Shreds/Rubble/Ideas/Picky scorers. They
         # persist across runs (and saves) and convert into rewards at their
         # thresholds after a run; RETRYING a run resets them all to zero (see
-        # _retry_run). (Parts grants a component
-        # and Fresh a free reroll immediately, so they bank no points.)
+        # _retry_run). (Parts banks whole components instead — granted when the
+        # run is continued, see parts_run_gain — and Fresh grants a free reroll
+        # immediately, so neither banks any points.)
         self.shred_points = 0
         self.rubble_points = 0
         self.idea_points = 0
@@ -2213,6 +2216,13 @@ class Game:
         # card fires: it is folded into the run's end-of-run cash award, so it
         # only sticks after a run (retrying discards it).
         self.card_cash_run_gain = 0
+        # Components earned THIS RUN by Parts-scorer blocks and cards. Like the
+        # Cash-card money above, a trigger does not hand anything over: every
+        # Parts trigger banks one component (a card banks its own magnitude in
+        # components), and the bank is granted only once the player CONTINUES
+        # the run (see _continue_run), so a run that is retried or restarted
+        # hands over nothing at all.
+        self.parts_run_gain = 0
         # The current run's trial (a run plays at most one; the difficulty
         # decides which of a round's runs have one — see _choose_trial) and the
         # blocks/card it affects. The trial is CHOSEN before the run starts (at
@@ -2221,7 +2231,9 @@ class Game:
         # The run being set up at game start is run 0 itself (the run_number a
         # fresh game holds), not the run after the last finished one.
         self._choose_trial(self.run_number)
-        self.trial_maxed_blocks = set()
+        # Hands tied's chosen blocks: each of them scores one time fewer this
+        # run (see _trigger_limit and TRIAL_TRIGGER_PENALTY).
+        self.trial_debuffed_blocks = set()
         self.disabled_card = None
         # The deal-breaker trial disables every owned card whose 
         
@@ -2236,9 +2248,24 @@ class Game:
         # random 1/4 of the placed blocks shatter like real fragile blocks.
         self.trial_fragile_blocks = set()
         # The marble-weight trial rolls heavier or lighter once per run; the
-        # factor (2.0 heavy / 0.5 light) scales only effect pushes, not the
+        # factor (2.0 heavy / 0.9 light) scales only effect pushes, not the
         # marble's fall speed.
         self.trial_marble_weight = 1.0
+        # This run's rolled trial choices (see _roll_trial_decision): every
+        # random pick a trial makes is decided ONCE and replayed from here, so
+        # restarting (R) or retrying a run can never reroll it. None until the
+        # trial is first applied to a run; a new trial or a new run clears it.
+        self.trial_decision = None
+        # The seed this run's own random choices derive from, and the RNG the
+        # run's in-play dice roll on (the 8 ball's retrigger chance, a Random
+        # condition's own measure). A run can be replayed at will — R restarts
+        # it and a finished run can be retried — so its dice must be a function
+        # of the run, not of how many times the player has rolled it. The seed
+        # is drawn once per run (see _choose_trial, called just above) and
+        # run_rng is re-seeded from it every time the run (re)starts (see
+        # reset_run), which makes a retry replay the same run instead of
+        # rerolling its luck.
+        self.run_rng = random.Random(self.run_seed)
         # The repeats-only trial counts distinct fresh touches per block type
         # (shape/effect/scorer) so only types touched twice contribute to the
         # run's uniqueness score. Reset at the start of each run.
@@ -3659,6 +3686,18 @@ class Game:
         if collection.discover_final_boss(boss):
             self._push_popup("Final boss beaten", FinalBoss.name(boss), (255, 140, 0))
 
+    @property
+    def active_trial(self):
+        """The trial this run is really playing, or None.
+
+        ``current_trial`` holds an id even when the trial system is switched
+        off for the game (the id is drawn when the run is set up), so everything
+        that APPLIES a trial — its rolled picks, the marble flags, the panels
+        and the tiled background — reads this instead: with trials disabled no
+        trial is in effect, whatever id the game happens to be holding.
+        """
+        return self.current_trial if self.trials_enabled else None
+
     def _concert_boosts(self, item):
         """True when the Concert whole card's extra trigger applies to a block.
 
@@ -3675,26 +3714,29 @@ class Game:
                         for effect in getattr(item, "effects", None) or ()))
 
     def _trigger_limit(self, item):
-        """How many times a block scores in one run, Concert included.
+        """How many times a block scores in one run, trial and Concert included.
 
         The block's OWN limit — paid upgrades and Deja Vu included — plus the
         Concert whole card's bonus while it is owned and not cut by the Card
-        cutter trial. A Hands tied block stays at TRIAL_MAX_TRIGGERS whatever
-        else is going on: the trial is a cap applied AFTER the bonus, so a
-        disabled block is never handed an extra trigger by Concert.
+        cutter trial, or MINUS the Hands tied trial's penalty
+        (TRIAL_TRIGGER_PENALTY, floored at 0) for the blocks that trial debuffed.
+        The penalty REPLACES the Concert bonus rather than stacking with it, so
+        a debuffed block is never handed an extra trigger by Concert: a 1-limit
+        block that Hands tied picks is still silenced under both.
 
         This is the number to HAND OUT triggers from (a fresh run's refill, a
         Procrastination rewind, and a block being placed), and what the info box
-        reports. The bonus is derived rather than written onto the block, so
-        selling Concert (or cutting it) takes the extra trigger away again
-        instead of leaving a raised limit behind on every block. Triggers
-        already handed out are not taken back — a limit only bites when triggers
-        are dealt.
+        reports. Charge rules like the trial penalty and the Concert bonus are
+        derived rather than written onto the block, so selling Concert, cutting
+        it, or re-rolling the trial's choices takes them away again instead of
+        leaving a changed limit behind on every block. Triggers already handed
+        out are not taken back — a limit only bites when triggers are dealt.
         """
-        if item in self.trial_maxed_blocks:
-            return TRIAL_MAX_TRIGGERS
+        limit = getattr(item, "trigger_limit", 1)
+        if item in self.trial_debuffed_blocks:
+            return max(0, limit - TRIAL_TRIGGER_PENALTY)
         bonus = CONCERT_TRIGGER_BONUS if self._concert_boosts(item) else 0
-        return getattr(item, "trigger_limit", 1) + bonus
+        return limit + bonus
 
     def _trigger_upgrade_cost(self, item):
         """Cash to raise a block's trigger limit by one.
@@ -4578,8 +4620,9 @@ class Game:
         run are held in this run's gain counters. They only move into the
         permanent bank — and convert into rewards — after a run (see
         _commit_resource_points); RETRYING a run resets the pending gain and the
-        bank alike (see _retry_run). (Parts and Fresh grant their reward
-        immediately, so they are not handled here.)
+        bank alike (see _retry_run). (Parts banks components separately — they
+        are granted when the run is continued, see _continue_run — and Fresh
+        grants its reroll immediately, so neither is handled here.)
         """
         if scorer == Scorer.SHREDS:
             self.shred_run_gain += amount
@@ -4742,7 +4785,9 @@ class Game:
     def _resource_display(self):
         """Lines to show under cash: (points_to_next, reward label) for each
         owned point-banked resource scorer (Shreds/Rubble/Ideas/Picky).
-        Parts and Fresh grant immediately, so they show no points line."""
+        Parts banks whole components rather than points — they are granted when
+        the run is continued (see _continue_run) — and Fresh grants its reroll
+        immediately, so neither shows a points line."""
         lines = []
         specs = [
             (Scorer.SHREDS, self.shred_points, self.shred_run_gain, "card"),
@@ -5330,23 +5375,23 @@ class Game:
         marble = Marble(start_block.rect.centerx, start_block.rect.centery)
         marble.velocity = np.array([vx, 0.0])
         marble.start_block = start_block
-        # The dead-zone trial triples gravity in the box's bottom third;
-        # the all-finishes trial makes the marble-box borders act as a
-        # finish. Restarts keep the same trial, so these are read from the
-        # current (already chosen/applied) trial each run.
-        marble.dead_zone = self.current_trial == Trial.DEAD_ZONE
-        marble.finish_on_border = self.current_trial == Trial.ALL_FINISHES
+        # The dead-zone trial triples gravity in the box's bottom third; the
+        # all-finishes trial makes the marble-box borders act as a finish.
+        # Restarts keep the same trial, so these are read from the current
+        # (already chosen/applied) trial each run — and every one of them comes
+        # from active_trial, so a game with the trial system switched off plays
+        # no trial at all, however its id happens to read.
+        trial = self.active_trial
+        marble.dead_zone = trial == Trial.DEAD_ZONE
+        marble.finish_on_border = trial == Trial.ALL_FINISHES
         # The bouncy-castle trial makes every solid block reflect the
         # marble like a bouncy block (physics.resolve_collision reads it).
         # The marble-weight trial scales only effect pushes by
         # 1/effect_mass_mult (2.0 heavy / 0.5 light, rolled in _apply_trial);
-        # fall speed reads marble.mass and stays normal. Both are gated by
-        # trials_enabled so a random trial never leaks into non-trial tests.
-        marble.bouncy_castle = self.trials_enabled and self.current_trial == Trial.BOUNCY_CASTLE
+        # fall speed reads marble.mass and stays normal.
+        marble.bouncy_castle = trial == Trial.BOUNCY_CASTLE
         marble.effect_mass_mult = (self.trial_marble_weight
-                                   if self.trials_enabled
-                                   and self.current_trial == Trial.MARBLE_WEIGHT
-                                   else 1.0)
+                                   if trial == Trial.MARBLE_WEIGHT else 1.0)
         # The save's marble type drives the marble's behavior and look: the
         # 8 ball retriggers block scorers, the rubber ball bounces (and
         # wears two random half-colors), the ping-pong ball is very light.
@@ -5378,17 +5423,24 @@ class Game:
             xmult = metagame.xmult_bonus()
             if xmult != 1.0:
                 self.score_mult = self.score_mult * xmult
+        # The run's own dice are reset here, so replaying the run (R, T, a
+        # retry) rolls the same luck it had the first time round instead of a
+        # fresh set (see run_rng / _choose_trial). This has to happen BEFORE the
+        # trial and the random-output rolls below, which draw on it.
+        self.run_rng.seed(self.run_seed)
         # The trial is chosen BEFORE the run starts (see _choose_trial, called
         # at game start and after each run); starting the run applies its
         # effects to the current board. Restarts, board edits, and retries keep
-        # the already-applied trial so it never changes mid-run.
+        # the already-applied trial — and its decided random picks — so neither
+        # the trial nor what it debuffs can be rerolled by replaying the run.
         if choose_trial and self.trials_enabled:
             self._apply_trial()
-        # A fresh run starts with no armed Quick cards and no pending Cash-card
-        # cash; cards that fire at the start of the run (below) arm/earn right
-        # after this.
+        # A fresh run starts with no armed Quick cards, no pending Cash-card
+        # cash and no banked Parts components; cards that fire at the start of
+        # the run (below) arm/earn right after this.
         self.armed_quick.clear()
         self.card_cash_run_gain = 0
+        self.parts_run_gain = 0
         # A fresh run starts with no cash earned by Cash/Lucky scorer blocks
         # yet (it accumulates as the run's blocks trigger) — but this run
         # already PAID that cash into the wallet as it triggered, so the money
@@ -5470,8 +5522,8 @@ class Game:
         # is no NEXT block after the run for the usual Quick payoff to arm on).
         self._last_contact_speed = 0.0
         # Fresh run: every scoring block gets its triggers back — its own limit
-        # plus the Concert card's bonus (see _trigger_limit), with Hands tied
-        # maxing out the chosen blocks' triggers instead — rotating blocks
+        # plus the Concert card's bonus, or one fewer for the blocks Hands tied
+        # debuffed (see _trigger_limit) — rotating blocks
         # return to their base angle (continuous spin reset to 0), and fragile
         # blocks that shattered are rebuilt to their original shape.
         for block in self.grid.values():
@@ -5549,6 +5601,14 @@ class Game:
         is played clean — the display reads NO TRIAL — though the player can
         still buy one onto it (see _click_trial_display). The shapes a trial
         carries are applied to the board when the run begins (see _apply_trial).
+
+        The run being set up also gets its own random seed here (``run_seed``),
+        which every run-scoped decision derives from — the trial's own picks and
+        the run's in-play dice — so a run replays identically instead of
+        rerolling its luck (see _roll_trial_decision and Game.run_rng). The seed
+        belongs to the RUN, so pressing R/T, retrying the run and editing the
+        board all keep it; only setting a run up afresh (this method) or buying
+        a different trial re-seeds it.
         """
         if next_run is None:
             next_run = self.run_number + 1
@@ -5556,6 +5616,10 @@ class Game:
             self.current_trial = None
         else:
             self.current_trial = random.choice(Trial.ORDER)
+        self.run_seed = random.randrange(1 << 31)
+        self.run_rng = random.Random(self.run_seed)
+        # The trial's own random picks belong to the trial that was just chosen.
+        self.trial_decision = None
 
     @property
     def trials_without_trial_runs(self):
@@ -5649,81 +5713,154 @@ class Game:
         sounds.play_coin()
         return True
 
+    def _roll_trial_decision(self):
+        """Decide every random pick this trial makes, ONCE for the run.
+
+        One dict per run, stored in ``trial_decision`` and re-applied by
+        _apply_trial. The picks are recorded as POSITIONS rather than objects
+        wherever the board or card area can change under them — the chosen
+        blocks are board CELLS and the cut card is an index into the card area —
+        so re-applying the decision to a board the player has edited since still
+        means "the blocks in these cells", and the same trial keeps cutting the
+        same slot. That is what makes the decision stable: a restart or a retry
+        replays it, and only a new run (or a bought trial) re-rolls it.
+
+        The picks are: which cells Hands tied debuffs, which card slot Card
+        cutter disables, the order Shuffled leaves the cards in, which cells
+        Crumbling makes fragile, whether Marble weight is heavy or light, and
+        which condition Deal breaker breaks. A trial that makes no random pick
+        (the rest of them) returns just its own id.
+        """
+        decision = {"trial": self.current_trial}
+        if self.current_trial == Trial.HANDS_TIED:
+            if self.grid:
+                cells = sorted(self.grid)
+                count = max(1, len(cells) // 4)
+                decision["cells"] = set(random.sample(cells, count))
+        elif self.current_trial == Trial.CARD_CUTTER:
+            if self.cards:
+                decision["card_index"] = random.randrange(len(self.cards))
+        elif self.current_trial == Trial.SHUFFLED:
+            # Flips and shuffles the player's cards (order matters for
+            # Blueprint), so the decided order is a shuffle of the reversed
+            # card area.
+            if self.cards:
+                order = list(self.cards)
+                order.reverse()
+                random.shuffle(order)
+                decision["order"] = order
+        elif self.current_trial == Trial.CRUMBLING:
+            # Only real solid blocks can be picked, and the Start/Finish roles
+            # are spared so the run can still be completed.
+            cells = sorted(
+                (x, y) for (x, y), block in self.grid.items()
+                if block.shape != Shape.NONE
+                and block.scorer != Scorer.START and block.scorer != Scorer.FINISH)
+            if cells:
+                count = max(1, len(cells) // 4)
+                decision["cells"] = set(random.sample(cells, count))
+        elif self.current_trial == Trial.MARBLE_WEIGHT:
+            # Heavier (2x effect mass -> weaker pushes) or lighter (0.9x ->
+            # stronger pushes) for the whole run. Only effect pushes change;
+            # fall speed is untouched.
+            decision["weight"] = random.choice((2.0, 0.9))
+        elif self.current_trial == Trial.DEAL_BREAKER:
+            # Only splittable cards have a condition (the indivisible
+            # ERR 404 / Blueprint / Showman never do); pick from the conditions
+            # the player actually owns so the trial bites.
+            conditions = set()
+            for card in self.cards:
+                parts = splittable_card_condition_scorer(card.value)
+                if parts is not None:
+                    conditions.add(parts[0])
+            if conditions:
+                decision["condition"] = random.choice(sorted(conditions))
+        return decision
+
+    def _apply_shuffled_order(self, order):
+        """Put the card area into the order the Shuffled trial settled on.
+
+        The trial's order is decided once per run, so re-applying it (a restart
+        or a retry) must not shuffle the cards again — and it must survive a
+        card being sold or bought afterwards, which is what the merge at the
+        end is for: the decided cards keep their decided order and anything
+        that came later follows them.
+        """
+        if not order:
+            return
+        cards = list(self.cards)
+        decided = [card for card in order if card in cards]
+        self.cards[:] = decided + [c for c in cards if c not in decided]
+
     def _apply_trial(self):
         """Apply the current trial to this run's blocks and cards.
 
-        Hands tied maxes out the trigger limit of a random 1/4 of the blocks
-        currently in the marble box (they recharge to TRIAL_MAX_TRIGGERS on
-        each reset). Card cutter disables a random owned card, whose score
-        effect is skipped for the run. Crumbling marks a random 1/4 of the
-        placed blocks as fragile (they shatter like real fragile blocks once a
-        marble touches and leaves, then rebuild next run). Deal breaker
-        disables every owned card of one randomly chosen condition. Marble
-        weight rolls a heavier-or-lighter effect-push factor for the run. The
-        trial state is cleared again when the run advances (see _continue_run).
+        Every random choice a trial makes is decided ONCE for the run (see
+        _roll_trial_decision) and only APPLIED here, so applying the trial again
+        — which is what restarting the run (R), starting it anew (T) or
+        retrying a finished run does — re-applies the same choices instead of
+        rolling new ones. A run therefore cannot be rerolled by replaying it;
+        only a new run, or buying a different trial (which decides afresh),
+        changes these picks.
+
+        Hands tied debuffs a random 1/4 of the blocks in the marble box: each
+        of them scores TRIAL_TRIGGER_PENALTY fewer times this run. Card cutter
+        disables a random owned card, whose score effect is skipped for the run.
+        Shuffled puts the card area into one decided order. Crumbling marks a
+        random 1/4 of the placed blocks as fragile (they shatter like real
+        fragile blocks once a marble touches and leaves, then rebuild next
+        run). Deal breaker disables every owned card of one decided condition.
+        Marble weight uses a decided heavier-or-lighter effect-push factor.
+
+        The trial state is cleared again when the run advances (see
+        _continue_run), so the NEXT run decides its own picks.
         """
-        self.trial_maxed_blocks = set()
+        decision = self.trial_decision
+        if decision is None or decision.get("trial") != self.current_trial:
+            # First application of this trial to this run (or the player bought
+            # a different trial): decide its picks now, once.
+            decision = self.trial_decision = self._roll_trial_decision()
+        self.trial_debuffed_blocks = set()
         self.disabled_card = None
         self.deal_broken_cards = set()
-        # Marble weight re-rolls each run (a non-MARBLE_WEIGHT trial keeps the
-        # normal 1.0 factor).
+        # A non-MARBLE_WEIGHT trial keeps the normal 1.0 factor.
         self.trial_marble_weight = 1.0
-        # Crumbling marks a fresh random 1/4 of the placed blocks each run;
-        # blocks chosen by an earlier crumbling run are un-marked first so the
+        # Blocks chosen by an earlier crumbling run are un-marked first so the
         # fragility never lingers into a trial that isn't crumbling.
         for block in self.grid.values():
             block.trial_fragile = False
         self.trial_fragile_blocks = set()
         if self.current_trial == Trial.HANDS_TIED:
-            blocks = list(self.grid.values())
-            if blocks:
-                count = max(1, len(blocks) // 4)
-                self.trial_maxed_blocks = set(random.sample(blocks, count))
+            # The decided CELLS, not the block objects: a block the player has
+            # since moved or replaced in one of them is debuffed too, and a cell
+            # left empty simply has nothing to debuff.
+            self.trial_debuffed_blocks = {
+                self.grid[cell] for cell in decision.get("cells", ())
+                if cell in self.grid}
         elif self.current_trial == Trial.CARD_CUTTER:
+            # The decided card SLOT (clamped, so the trial keeps cutting one
+            # card even if the area has shrunk since).
             if self.cards:
-                self.disabled_card = random.choice(self.cards)
+                index = min(decision.get("card_index", 0), len(self.cards) - 1)
+                self.disabled_card = self.cards[index]
         elif self.current_trial == Trial.SHUFFLED:
-            # Flips and shuffles the player's cards (order matters for Blueprint).
-            if self.cards:
-                self.cards.reverse()
-                random.shuffle(self.cards)
+            self._apply_shuffled_order(decision.get("order"))
         elif self.current_trial == Trial.CRUMBLING:
-            # A random 1/4 of the placed blocks become fragile for the run:
-            # they shatter into no-hitbox fields when a marble touches and
-            # leaves them (physics), and rebuild to their original shape on the
-            # next run reset. Only real solid blocks can be picked, and the
-            # Start/Finish roles are spared so the run can still be completed.
-            blocks = [b for b in self.grid.values()
-                      if b.shape != Shape.NONE
-                      and b.scorer != Scorer.START and b.scorer != Scorer.FINISH]
-            if blocks:
-                count = max(1, len(blocks) // 4)
-                chosen = random.sample(blocks, count)
-                for block in chosen:
+            for cell in decision.get("cells", ()):
+                block = self.grid.get(cell)
+                if block is not None:
                     block.trial_fragile = True
-                self.trial_fragile_blocks = set(chosen)
+                    self.trial_fragile_blocks.add(block)
         elif self.current_trial == Trial.MARBLE_WEIGHT:
-            # The marble is randomly heavier (2x effect mass -> weaker pushes)
-            # or lighter (0.5x -> stronger pushes) for the whole run. Only
-            # effect pushes change; fall speed is untouched.
-            self.trial_marble_weight = random.choice((2.0, 0.9))
+            self.trial_marble_weight = decision.get("weight", 1.0)
         elif self.current_trial == Trial.DEAL_BREAKER:
-            # Disable every owned card whose condition matches one randomly
-            # chosen condition. Only splittable cards have a condition (the
-            # indivisible ERR 404 / Blueprint / Showman never do); pick from
-            # the conditions the player actually owns so the trial bites.
-            if self.cards:
-                conditions = set()
-                for card in self.cards:
-                    parts = splittable_card_condition_scorer(card.value)
-                    if parts is not None:
-                        conditions.add(parts[0])
-                if conditions:
-                    chosen = random.choice(list(conditions))
-                    self.deal_broken_cards = {
-                        card for card in self.cards
-                        if splittable_card_condition_scorer(card.value) is not None
-                        and splittable_card_condition_scorer(card.value)[0] == chosen}
+            # Disable every owned card whose condition matches the decided one.
+            chosen = decision.get("condition")
+            if chosen is not None:
+                self.deal_broken_cards = {
+                    card for card in self.cards
+                    if splittable_card_condition_scorer(card.value) is not None
+                    and splittable_card_condition_scorer(card.value)[0] == chosen}
 
     def _apply_cards(self):
         """Apply every owned card's score effect at the start of a run."""
@@ -6089,9 +6226,11 @@ class Game:
                         self._apply_block_score_effect(marble, block)
                     # The 8 ball has a 1/4 chance to retrigger the block's
                     # scoring effect on collision — a free second score that
-                    # does not consume another trigger.
+                    # does not consume another trigger. The roll comes from the
+                    # RUN's own RNG (see run_rng), so replaying the run replays
+                    # the same lucky retriggers rather than rerolling them.
                     if (getattr(marble, "marble_type", 0) == MarbleType.EIGHT_BALL
-                            and random.random() < 0.25
+                            and self.run_rng.random() < 0.25
                             and block.scorer in (Scorer.CHIPS_ADD, Scorer.MULT_ADD,
                                                  Scorer.MULT_MUL, Scorer.QUICK,
                                                  Scorer.CASH, Scorer.SHARP,
@@ -6181,14 +6320,17 @@ class Game:
     def _run_random_result(self, item, scorer):
         """This run's pre-rolled result for a random-output scorer item.
 
-        The result is chosen BEFORE the run (see _roll_run_random_outputs) and
-        kept on the item, so a scorer that triggers several times repeats the
-        same result and RETRYING the run replays it exactly. An item that
+        The result is chosen when the run is set up (see
+        _roll_run_random_outputs) and kept on the item, tagged with the run it
+        belongs to, so a scorer that triggers several times repeats the same
+        result and REPLAYING the run — rushing R, pressing T, or retrying a
+        finished run — replays it exactly instead of rerolling it. An item that
         entered play after the opening roll (a block placed or a card bought
         mid-run) rolls on its first trigger instead.
         """
         rolls = getattr(item, "random_rolls", None)
-        if rolls is None or rolls.get("scorer") != scorer:
+        if (rolls is None or rolls.get("scorer") != scorer
+                or rolls.get("run") != self.run_number):
             rolls = self._set_run_random_result(item, scorer)
         return rolls
 
@@ -6196,22 +6338,30 @@ class Game:
         """Draw a fresh result for an item, replacing any earlier roll."""
         rolls = self._roll_random_output(scorer)
         rolls["scorer"] = scorer
+        # The run the roll was made for: a roll from an earlier run is stale and
+        # is redrawn, but a roll made for THIS run survives every replay of it.
+        rolls["run"] = self.run_number
         item.random_rolls = rolls
         return rolls
 
     def _roll_run_random_outputs(self):
         """Choose every random-output scorer's result before the run starts.
 
-        Lucky and Random blocks on the board, and Random cards in the card
-        area, all get a FRESH result for the coming run up front, so nothing
-        about their outcome depends on when they happen to trigger.
+        Lucky and Random blocks on the board, and Lucky/Random cards in the card
+        area, all get their result for the coming run up front, so nothing about
+        their outcome depends on when they happen to trigger. An item that
+        ALREADY carries this run's result keeps it: these rolls are decided once
+        per run (run_seed / _run_random_result), and replaying the run — R, T,
+        or the retry after a finished run — is not a chance to roll them again.
         """
         for block in self.grid.values():
-            if block.scorer in (Scorer.LUCKY, Scorer.RANDOM):
+            if (block.scorer in (Scorer.LUCKY, Scorer.RANDOM)
+                    and getattr(block, "random_rolls", {}).get("run") != self.run_number):
                 self._set_run_random_result(block, block.scorer)
         for card in self.cards:
             meta = generic_card_meta(card.value)
-            if meta is not None and meta[1] in (Scorer.RANDOM, Scorer.LUCKY):
+            if (meta is not None and meta[1] in (Scorer.RANDOM, Scorer.LUCKY)
+                    and getattr(card, "random_rolls", {}).get("run") != self.run_number):
                 self._set_run_random_result(card, meta[1])
 
     def _procrastination_rewind(self):
@@ -6388,8 +6538,11 @@ class Game:
             self._add_resource_points(block.scorer, points)
             return True
         if block.scorer == Scorer.PARTS:
-            # Parts grants a random component immediately (no point system).
-            self._grant_random_component()
+            # Parts banks one component per trigger. The component itself is
+            # NOT handed over now: the run's bank is granted only when the
+            # player continues the run (see _continue_run), so a retried or
+            # restarted run cannot walk off with free parts.
+            self.parts_run_gain += 1
             self._spawn_block_particle(block, "Component", ORANGE)
             return True
         if block.scorer == Scorer.FRESH:
@@ -6733,11 +6886,23 @@ class Game:
                 self.cards[:] = kept_cards
                 if destroyed_selected:
                     self._clear_toolbox_selection()
-        # Resource points earned by Parts/Shreds/Rubble/Ideas scorers during
+        # Resource points earned by Shreds/Rubble/Ideas/Picky scorers during
         # the finished run move into the bank (and convert into rewards) after
         # a run only; retrying discards them. These grants run
         # AFTER the card destruction above, so a freshly granted card survives.
         self._commit_resource_points()
+        # Parts components banked during the finished run are handed over here,
+        # one per Parts trigger (a Parts CARD banks its own magnitude). Nothing
+        # was granted while the run played, so this is the only moment a Parts
+        # reward ever reaches the toolbox — and a run that is retried instead
+        # of continued drops the bank with every other per-run gain.
+        pending_parts = self.parts_run_gain
+        self.parts_run_gain = 0
+        for _ in range(pending_parts):
+            if not self._grant_random_component():
+                # A full inventory withholds the rest, exactly as the instant
+                # Parts grant used to.
+                break
         # Bomb blocks touched this run detonate after a run: each unlocks its
         # 1-cell radius (diagonals included) and destroys itself. The blast goes
         # FIRST, before the Drill and Conquistador grants below, because it is a
@@ -6788,14 +6953,16 @@ class Game:
         else:
             self._choose_trial(self.run_number + 1)
         # The just-finished run's trial effects are spent: clear the state so
-        # the next run's trial (chosen above) re-applies fresh when it starts.
-        self.trial_maxed_blocks = set()
+        # the next run's trial (chosen above, which also re-seeded the run and
+        # dropped its decided picks) re-applies fresh when it starts.
+        self.trial_debuffed_blocks = set()
         self.disabled_card = None
         self.deal_broken_cards = set()
         self.trial_fragile_blocks = set()
         for block in self.grid.values():
             block.trial_fragile = False
         self.trial_marble_weight = 1.0
+        self.trial_decision = None
         self.shop.refresh()
         # Slim pickings removes two random shop options for this run.
         if self.trials_enabled and self.current_trial == Trial.SLIM_PICKINGS:
@@ -6952,6 +7119,9 @@ class Game:
         # Cash earned by Cash cards this run was already folded into the run's
         # award (and undone above by the cash rollback); clear any remainder.
         self.card_cash_run_gain = 0
+        # Components banked by Parts triggers this run are discarded too: they
+        # are only ever granted when the run is continued (see _continue_run).
+        self.parts_run_gain = 0
         # Drill-scorer locked squares earned this run are discarded on retry
         # (they only unlock after a run).
         self.drill_run_units = 0
@@ -7062,7 +7232,7 @@ class Game:
         for value in Trial.ORDER:
             d = collection.is_trial_discovered(value)
             entries.append(("trial", value, Trial.name(value) if d else "???",
-                            Trial.description(value) if d else "???", False, d))
+                            Trial.description(value) if d else "???", True, d))
         for value in FinalBoss.ORDER:
             d = collection.is_final_boss_discovered(value)
             entries.append(("final_boss", value, FinalBoss.name(value) if d else "???",

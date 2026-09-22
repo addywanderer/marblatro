@@ -1,17 +1,16 @@
 {
   "version": 1,
-  "cash": 429,
-  "run_number": 5,
+  "cash": 69,
+  "run_number": 4,
   "round_index": 1,
-  "run_in_round": 2,
-  "required_score": 64,
+  "run_in_round": 1,
+  "required_score": 16,
   "required_scores": [
     1,
     2,
-    5,
-    12,
-    28,
-    64
+    4,
+    8,
+    16
   ],
   "run_results": [
     true,
@@ -19,221 +18,41 @@
     true,
     true
   ],
-  "runs_cleared": 5,
+  "runs_cleared": 4,
   "failed_runs": 0,
-  "current_trial": 12,
+  "current_trial": 6,
   "difficulty": 4,
   "final_boss": null,
   "cards": [
     {
       "kind": "card",
-      "value": 2660,
-      "price": 31,
+      "value": 96,
+      "price": 46,
       "amount": 0,
-      "col": 0,
-      "row": 0,
-      "name": "Curved Slope Line card (Satanic)"
+      "col": 1,
+      "row": 3,
+      "name": "Procrastination"
     }
   ],
   "actions": [],
   "toolbox": [
     {
       "kind": "shape",
-      "value": 13,
-      "amount": 0,
-      "price": 10,
-      "name": "Spike",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 0,
-      "amount": 0,
-      "price": 6,
-      "name": "None",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 2,
-      "amount": 0,
-      "price": 12,
-      "name": "Line",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 19,
-      "amount": 0,
-      "price": 9,
-      "name": "Bump",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 1,
-      "amount": 0,
-      "price": 28,
-      "name": "Bouncy",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 10,
-      "amount": 1.0,
-      "price": 16,
-      "name": "Shreds",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 9,
-      "amount": 0,
-      "price": 20,
-      "name": "Fragile",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 7,
-      "amount": 0,
-      "price": 16,
-      "name": "Rotate",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 14,
+      "value": 20,
       "amount": 0,
       "price": 8,
-      "name": "Platform",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 22,
-      "amount": 2.0,
-      "price": 24,
-      "name": "Drill",
-      "col": 0,
-      "row": 0
+      "name": "Key",
+      "col": 1,
+      "row": 1
     },
     {
       "kind": "shape",
-      "value": 11,
-      "amount": 0,
-      "price": 12,
-      "name": "Curved Slope Line",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 10,
-      "amount": 0,
-      "price": 24,
-      "name": "Growing",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 23,
-      "amount": 0,
-      "price": 24,
-      "name": "Lucky",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 28,
-      "amount": 3.0,
-      "price": 22,
-      "name": "Frontier",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 21,
-      "amount": 3.0,
-      "price": 22,
-      "name": "Seed",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 5,
-      "amount": 0,
-      "price": 23,
-      "name": "Black Hole",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 9,
+      "value": 20,
       "amount": 0,
       "price": 8,
-      "name": "Convex Slope",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 26,
-      "amount": 0,
-      "price": 34,
-      "name": "Echo",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 11,
-      "amount": 0,
-      "price": 24,
-      "name": "Shrinking",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 28,
-      "amount": 3.0,
-      "price": 22,
-      "name": "Frontier",
-      "col": 0,
-      "row": 0
+      "name": "Key",
+      "col": 1,
+      "row": 1
     },
     {
       "kind": "shape",
@@ -245,371 +64,56 @@
       "row": 0
     },
     {
-      "kind": "shape",
-      "value": 14,
-      "amount": 0,
-      "price": 8,
-      "name": "Platform",
-      "col": 0,
-      "row": 0
-    },
-    {
       "kind": "scorer",
-      "value": 30,
-      "amount": 0,
-      "price": 30,
-      "name": "Bomb",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 11,
-      "amount": 0,
-      "price": 12,
-      "name": "Curved Slope Line",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 13,
-      "amount": 0,
-      "price": 10,
-      "name": "Spike",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 0,
-      "amount": 0,
-      "price": 6,
-      "name": "None",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 13,
-      "amount": 0,
-      "price": 10,
-      "name": "Spike",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 26,
-      "amount": 0,
-      "price": 34,
-      "name": "Echo",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 15,
-      "amount": 0,
-      "price": 9,
-      "name": "Corner",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 12,
-      "amount": 0,
-      "price": 12,
-      "name": "Half Pipe",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 22,
-      "amount": 2.0,
-      "price": 24,
-      "name": "Drill",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 8,
-      "amount": 0,
-      "price": 12,
-      "name": "Slippery",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 11,
-      "amount": 1.0,
-      "price": 12,
-      "name": "Rubble",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 13,
-      "amount": 0,
-      "price": 10,
-      "name": "Spike",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 21,
-      "amount": 3.0,
-      "price": 22,
-      "name": "Seed",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 12,
-      "amount": 0,
-      "price": 22,
-      "name": "Sticky",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 17,
-      "amount": 0,
-      "price": 11,
-      "name": "Sawtooth",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 27,
-      "amount": 25.0,
-      "price": 22,
-      "name": "Powerline",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
       "value": 1,
-      "amount": 0,
-      "price": 28,
-      "name": "Bouncy",
+      "amount": 28.37,
+      "price": 12,
+      "name": "+Chips",
       "col": 0,
       "row": 0
     },
     {
-      "kind": "effect",
+      "kind": "scorer",
       "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
+      "amount": 0.984,
+      "price": 14,
+      "name": "Fresh",
       "col": 0,
       "row": 0
     },
     {
       "kind": "scorer",
-      "value": 6,
-      "amount": 0,
-      "price": 16,
-      "name": "Quick",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 20,
-      "amount": 8.0,
-      "price": 24,
-      "name": "Airball",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 19,
-      "amount": 0.75,
-      "price": 24,
-      "name": "Summit",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 3,
-      "amount": 0,
-      "price": 10,
-      "name": "None",
+      "value": 2,
+      "amount": 4.151,
+      "price": 17,
+      "name": "+Mult",
       "col": 0,
       "row": 0
     },
     {
       "kind": "effect",
       "value": 7,
-      "amount": 0,
+      "amount": 834.6,
       "price": 16,
       "name": "Rotate",
       "col": 0,
       "row": 0
     },
     {
-      "kind": "scorer",
-      "value": 16,
-      "amount": 1.0,
-      "price": 17,
-      "name": "Picky",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 7,
-      "amount": 15.0,
-      "price": 14,
-      "name": "Cash",
-      "col": 0,
-      "row": 0
-    },
-    {
       "kind": "effect",
-      "value": 17,
-      "amount": 0,
-      "price": 124,
-      "name": "Splitter",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 29,
-      "amount": 0,
-      "price": 30,
-      "name": "Gilded",
+      "value": 1,
+      "amount": 89.4,
+      "price": 28,
+      "name": "Bouncy",
       "col": 0,
       "row": 0
     },
     {
       "kind": "shape",
-      "value": 15,
+      "value": 21,
       "amount": 0,
-      "price": 9,
-      "name": "Corner",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 19,
-      "amount": 0.75,
-      "price": 24,
-      "name": "Summit",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 0,
-      "amount": 0,
-      "price": 6,
-      "name": "Rect",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "scorer",
-      "value": 25,
-      "amount": 1.0,
-      "price": 24,
-      "name": "Rally",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 5,
-      "amount": 0,
-      "price": 23,
-      "name": "Black Hole",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 2,
-      "amount": 0,
-      "price": 12,
-      "name": "Line",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 17,
-      "amount": 0,
-      "price": 11,
-      "name": "Sawtooth",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 16,
-      "amount": 0,
-      "price": 26,
-      "name": "Phase",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 11,
-      "amount": 0,
-      "price": 24,
-      "name": "Shrinking",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 6,
-      "amount": 0,
-      "price": 31,
-      "name": "Portal",
+      "price": 10,
+      "name": "Lock",
       "col": 0,
       "row": 0
     },
@@ -624,51 +128,38 @@
     },
     {
       "kind": "effect",
-      "value": 5,
-      "amount": 0,
-      "price": 23,
-      "name": "Black Hole",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 11,
-      "amount": 0,
-      "price": 12,
-      "name": "Curved Slope Line",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 12,
-      "amount": 0,
-      "price": 22,
-      "name": "Sticky",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "shape",
-      "value": 19,
-      "amount": 0,
-      "price": 9,
-      "name": "Bump",
-      "col": 0,
-      "row": 0
-    },
-    {
-      "kind": "effect",
-      "value": 13,
-      "amount": 0,
-      "price": 23,
-      "name": "Repulsor",
+      "value": 1,
+      "amount": 126.7,
+      "price": 28,
+      "name": "Bouncy",
       "col": 0,
       "row": 0
     }
   ],
   "grid": [
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 8,
+      "shape": 13,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 2,
+      "scorer_amount": 6.143,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 20
+    },
     {
       "kind": "block",
       "placed": true,
@@ -681,29 +172,6 @@
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": null
-    },
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 8,
-      "shape": 13,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 23,
-      "scorer_amount": 0.0,
       "angle": 90,
       "portal_number": 0,
       "key_number": 0,
@@ -713,13 +181,197 @@
       "triggers_left": 1,
       "portal_uses_left": 0,
       "fragile_shape": null,
-      "resale_price": null
+      "resale_price": 109
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 7,
+      "shape": 20,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 15,
+      "scorer_amount": 1.285,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 2,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 16
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 6,
+      "y": 8,
+      "shape": 10,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 1,
+      "scorer_amount": 43.79,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 18
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 7,
+      "shape": 20,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 15,
+      "scorer_amount": 1.285,
+      "angle": 270,
+      "portal_number": 0,
+      "key_number": 1,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 16
     },
     {
       "kind": "block",
       "placed": true,
       "x": 4,
       "y": 9,
+      "shape": 21,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 15,
+      "scorer_amount": 1.285,
+      "angle": 270,
+      "portal_number": 0,
+      "key_number": 1,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 16
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 10,
+      "shape": 21,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 15,
+      "scorer_amount": 1.285,
+      "angle": 270,
+      "portal_number": 0,
+      "key_number": 2,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 16
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 6,
+      "shape": 10,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 1,
+      "scorer_amount": 43.79,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 18
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 8,
+      "shape": 10,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 1,
+      "scorer_amount": 43.79,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 18
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 7,
+      "y": 8,
+      "shape": 20,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 9,
+      "scorer_amount": 1.199,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 3,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 14
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 11,
       "shape": 0,
       "effects": [
         0
@@ -727,29 +379,6 @@
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
-      "angle": 90,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": null
-    },
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 7,
-      "shape": 17,
-      "effects": [
-        17
-      ],
-      "effect_amounts": {},
-      "scorer": 2,
-      "scorer_amount": 4.0,
       "angle": 0,
       "portal_number": 0,
       "key_number": 0,
@@ -759,188 +388,170 @@
       "triggers_left": 1,
       "portal_uses_left": 0,
       "fragile_shape": null,
-      "resale_price": null
+      "resale_price": 53
     },
     {
       "kind": "block",
       "placed": true,
-      "x": 5,
-      "y": 6,
-      "shape": 0,
+      "x": 3,
+      "y": 10,
+      "shape": 21,
       "effects": [
         0
       ],
       "effect_amounts": {},
       "scorer": 9,
-      "scorer_amount": 1.0,
+      "scorer_amount": 1.199,
       "angle": 0,
       "portal_number": 0,
-      "key_number": 0,
+      "key_number": 3,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
       "fragile_shape": null,
-      "resale_price": null
-    },
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 6,
-      "y": 8,
-      "shape": 0,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 9,
-      "scorer_amount": 1.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": null
+      "resale_price": 14
     }
   ],
   "shop": [
     {
       "kind": "shape",
-      "value": 16,
+      "value": 10,
       "amount": 0,
-      "price": 7,
-      "name": "Peg",
+      "price": 12,
+      "name": "Flat Line",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 2,
+      "value": 17,
       "amount": 0,
-      "price": 12,
-      "name": "Line",
+      "price": 11,
+      "name": "Sawtooth",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 13,
+      "value": 8,
       "amount": 0,
-      "price": 23,
-      "name": "Repulsor",
+      "price": 12,
+      "name": "Slippery",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 2,
-      "amount": 0,
-      "price": 25,
-      "name": "Accelerator",
+      "value": 12,
+      "amount": 0.4071,
+      "price": 22,
+      "name": "Sticky",
       "col": 4,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 10,
-      "amount": 1.0,
-      "price": 16,
-      "name": "Shreds",
+      "value": 9,
+      "amount": 1.199,
+      "price": 11,
+      "name": "Parts",
       "col": 5,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 17,
+      "value": 23,
       "amount": 0,
       "price": 24,
-      "name": "Voyager",
+      "name": "Lucky",
       "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 2,
-      "amount": 4.0,
-      "price": 17,
-      "name": "+Mult",
+      "value": 32,
+      "amount": 0.1265,
+      "price": 26,
+      "name": "Colossus",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 2032,
-      "price": 42,
+      "value": 96,
+      "price": 46,
       "amount": 0,
       "col": 1,
       "row": 3,
-      "name": "Bump card (Quick)"
+      "name": "Procrastination"
     },
     {
       "kind": "card",
-      "value": 2044,
-      "price": 37,
+      "value": 3314,
+      "price": 40,
       "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "Fragile card (Quick)"
+      "name": "Rotate card (Bomb)"
     },
     {
       "kind": "condition",
-      "value": 101,
+      "value": 155,
       "amount": 0,
-      "price": 11,
-      "name": "Slope",
+      "price": 7,
+      "name": "Zipper",
       "col": 3,
       "row": 3
     },
     {
       "kind": "condition",
-      "value": 1,
+      "value": 4,
       "amount": 0,
       "price": 16,
-      "name": "Explorer",
+      "name": "Pillar",
       "col": 4,
       "row": 3
     },
     {
       "kind": "action",
-      "value": 0,
-      "price": 48,
+      "value": 1,
+      "price": 24,
       "version": 1,
       "col": 5,
       "row": 3,
-      "name": "Death"
+      "name": "Recognition"
     },
     {
       "kind": "action",
-      "value": 1,
-      "price": 48,
+      "value": 3,
+      "price": 32,
       "version": 1,
       "col": 6,
       "row": 3,
-      "name": "Recognition"
+      "name": "Anointment"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 9,
+      "shape": 13,
       "effects": [
-        11,
-        1
+        16,
+        14,
+        8,
+        6
       ],
-      "effect_amounts": {},
-      "scorer": 6,
-      "scorer_amount": 0.0,
-      "price": 57,
-      "name": "Convex Slope Quick",
+      "effect_amounts": {
+        "16": 1.018,
+        "14": 290.4
+      },
+      "scorer": 7,
+      "scorer_amount": 22.75,
+      "price": 84,
+      "name": "Spike Cash",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -951,15 +562,15 @@
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 2,
+      "shape": 6,
       "effects": [
-        11
+        0
       ],
       "effect_amounts": {},
-      "scorer": 15,
-      "scorer_amount": 1.0,
-      "price": 37,
-      "name": "Line Fresh",
+      "scorer": 2,
+      "scorer_amount": 4.0,
+      "price": 19,
+      "name": "Pipe +Mult",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -969,7 +580,7 @@
   "component_purchases": [
     [
       "scorer",
-      23,
+      2,
       1
     ],
     [
@@ -979,23 +590,28 @@
     ],
     [
       "shape",
-      17,
-      1
+      20,
+      5
     ],
     [
-      "effect",
-      17,
-      1
+      "shape",
+      10,
+      3
     ],
     [
       "scorer",
-      2,
-      1
+      1,
+      3
+    ],
+    [
+      "scorer",
+      15,
+      2
     ],
     [
       "scorer",
       9,
-      2
+      1
     ]
   ],
   "wrecking_bonus": [
@@ -1017,7 +633,7 @@
   "shred_points": 0,
   "rubble_points": 0,
   "idea_points": 0,
-  "free_rerolls": 0,
+  "free_rerolls": 4,
   "option_points": 0,
   "bonus_slots": 0,
   "marble_type": 2,
@@ -1031,6 +647,10 @@
   "last_run_cash_gained": 0,
   "last_run_cash_breakdown": {},
   "unlocked_cells": [
+    [
+      4,
+      10
+    ],
     [
       5,
       8
@@ -1048,6 +668,10 @@
       6
     ],
     [
+      3,
+      10
+    ],
+    [
       5,
       7
     ],
@@ -1061,7 +685,15 @@
     ],
     [
       4,
+      11
+    ],
+    [
+      4,
       7
+    ],
+    [
+      7,
+      8
     ]
   ],
   "board_units": 0

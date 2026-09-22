@@ -33,7 +33,8 @@ class ActionsTests(GameTestCase):
                 # ...and a 3-magnitude scorer banks three times that.
                 self.assertAlmostEqual(components.resource_points_for(scorer, 3),
                                        rate * 3)
-        # Parts and Fresh grant instantly, so they bank nothing.
+        # Parts and Fresh are not point scorers: Parts banks whole components
+        # (see parts_run_gain) and Fresh grants its reroll right away.
         self.assertEqual(components.resource_points_for(main.Scorer.PARTS, 3), 0)
         self.assertEqual(components.resource_points_for(main.Scorer.FRESH, 3), 0)
 

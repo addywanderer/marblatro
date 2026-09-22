@@ -14,6 +14,7 @@ read or change game state.
 
 import json
 import os
+import random
 import sys
 
 import pygame
@@ -421,12 +422,18 @@ def _load_save_data(game, data, slot):
     game.difficulty = data.get("difficulty", DEFAULT_DIFFICULTY)
     # Whether the permanent upgrade effects apply to this save's runs.
     game.upgrades_enabled = data.get("upgrades_enabled", True)
-    # The trial's applied effects re-apply when a run starts.
-    game.trial_maxed_blocks = set()
+    # The trial's applied effects re-apply when a run starts. A loaded save
+    # also drops this run's decided random picks and draws a fresh run seed: the
+    # run is being set up again from the save, so its dice roll afresh rather
+    # than being tied to the choices the (unloaded) session had made.
+    game.trial_debuffed_blocks = set()
     game.disabled_card = None
     game.deal_broken_cards = set()
     game.trial_fragile_blocks = set()
     game.trial_marble_weight = 1.0
+    game.trial_decision = None
+    game.run_seed = random.randrange(1 << 31)
+    game.run_rng = random.Random(game.run_seed)
     game.touch_shape_counts = {}
     game.touch_effect_counts = {}
     game.touch_scorer_counts = {}

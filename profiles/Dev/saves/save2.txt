@@ -1,18 +1,21 @@
 {
   "version": 1,
-  "cash": 256,
-  "run_number": 1,
+  "cash": 319,
+  "run_number": 2,
   "round_index": 0,
-  "run_in_round": 1,
-  "required_score": 2,
+  "run_in_round": 2,
+  "required_score": 4,
   "required_scores": [
     1,
-    2
+    2,
+    4
   ],
-  "run_results": [],
-  "runs_cleared": 1,
+  "run_results": [
+    true
+  ],
+  "runs_cleared": 2,
   "failed_runs": 0,
-  "current_trial": 3,
+  "current_trial": 14,
   "difficulty": 4,
   "final_boss": null,
   "cards": [],
@@ -47,10 +50,10 @@
         0
       ],
       "effect_amounts": {},
-      "scorer": 5,
-      "scorer_amount": 0.0,
-      "price": 9,
-      "name": "Rect Finish",
+      "scorer": 7,
+      "scorer_amount": 15.0,
+      "price": 19,
+      "name": "Rect Cash",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -114,8 +117,8 @@
         0
       ],
       "effect_amounts": {},
-      "scorer": 7,
-      "scorer_amount": 15.0,
+      "scorer": 5,
+      "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
       "key_number": 0,
@@ -125,142 +128,141 @@
       "triggers_left": 1,
       "portal_uses_left": 0,
       "fragile_shape": null,
-      "resale_price": null
+      "resale_price": 9
     }
   ],
   "shop": [
     {
       "kind": "shape",
-      "value": 7,
+      "value": 18,
       "amount": 0,
-      "price": 10,
-      "name": "Drain",
+      "price": 11,
+      "name": "Cradle",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 6,
+      "value": 17,
       "amount": 0,
-      "price": 9,
-      "name": "Pipe",
+      "price": 11,
+      "name": "Sawtooth",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 7,
-      "amount": 0,
-      "price": 16,
-      "name": "Rotate",
+      "value": 16,
+      "amount": 1.07,
+      "price": 26,
+      "name": "Phase",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 3,
+      "value": 6,
       "amount": 0,
-      "price": 36,
-      "name": "Piston",
+      "price": 31,
+      "name": "Portal",
       "col": 4,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 23,
-      "amount": 0,
-      "price": 24,
-      "name": "Lucky",
+      "value": 3,
+      "amount": 1.46,
+      "price": 25,
+      "name": "xMult",
       "col": 5,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 10,
-      "amount": 1.0,
-      "price": 16,
-      "name": "Shreds",
+      "value": 34,
+      "amount": 58.51,
+      "price": 24,
+      "name": "Debt",
       "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 12,
-      "amount": 1.0,
-      "price": 14,
-      "name": "Ideas",
+      "value": 32,
+      "amount": 0.0652,
+      "price": 26,
+      "name": "Colossus",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 81,
-      "price": 38,
-      "amount": 0,
+      "value": 2256,
+      "price": 24,
+      "amount": 1.667,
       "col": 1,
       "row": 3,
-      "name": "Rigged Casino"
+      "name": "Fragile card (Shreds)"
     },
     {
       "kind": "card",
-      "value": 2049,
-      "price": 38,
-      "amount": 0,
+      "value": 2105,
+      "price": 17,
+      "amount": 15.12,
       "col": 2,
       "row": 3,
-      "name": "Conveyor card (Quick)"
+      "name": "Splitter card (Cash)"
     },
     {
       "kind": "condition",
       "value": 118,
       "amount": 0,
-      "price": 11,
+      "price": 15,
       "name": "Cradle",
       "col": 3,
       "row": 3
     },
     {
       "kind": "condition",
-      "value": 116,
+      "value": 9,
       "amount": 0,
-      "price": 7,
-      "name": "Peg",
+      "price": 12,
+      "name": "Ripped Card",
       "col": 4,
       "row": 3
     },
     {
       "kind": "action",
-      "value": 0,
-      "price": 48,
+      "value": 5,
+      "price": 36,
       "version": 1,
       "col": 5,
       "row": 3,
-      "name": "Death"
+      "name": "Spirit"
     },
     {
       "kind": "action",
-      "value": 1,
-      "price": 48,
+      "value": 0,
+      "price": 24,
       "version": 1,
       "col": 6,
       "row": 3,
-      "name": "Recognition"
+      "name": "Death"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 5,
+      "shape": 1,
       "effects": [
-        4,
-        13
+        10
       ],
       "effect_amounts": {},
-      "scorer": 13,
-      "scorer_amount": 0.0,
-      "price": 56,
-      "name": "Curved Slope Random",
+      "scorer": 33,
+      "scorer_amount": 24.68,
+      "price": 45,
+      "name": "Slope Undertaker",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -271,15 +273,15 @@
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 9,
+      "shape": 0,
       "effects": [
-        6
+        9
       ],
       "effect_amounts": {},
-      "scorer": 31,
-      "scorer_amount": 4.0,
-      "price": 47,
-      "name": "Convex Slope Cluster",
+      "scorer": 17,
+      "scorer_amount": 0.00781,
+      "price": 37,
+      "name": "Rect Voyager",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -328,8 +330,16 @@
   "continue_past_game_over": false,
   "score_chips": 61,
   "score_mult": 1,
-  "last_run_cash_gained": 0,
-  "last_run_cash_breakdown": {},
+  "last_run_cash_gained": 63,
+  "last_run_cash_breakdown": {
+    "base": 20,
+    "interest": 27,
+    "score": 1,
+    "cards": 0,
+    "scorers": 15,
+    "essence": 0,
+    "debt": false
+  },
   "unlocked_cells": [
     [
       5,

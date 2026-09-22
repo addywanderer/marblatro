@@ -1322,6 +1322,191 @@ class UiTests(GameTestCase):
         self.game.draw_trial_box()
 
 
+    def test_the_screen_background_is_a_grid_of_the_running_trials_tile(self):
+        # The WHOLE screen is covered in the running trial's tessellation, one
+        # tile per lattice cell and nothing else drawn over it: the pattern is
+        # the background as it is, with no shading pass on top.
+        self.game.trials_enabled = True
+        self.game.final_boss = None
+        self.game.current_trial = main.Trial.SPEEDRUN
+        size = main.ui.TRIAL_TILE_SIZE
+
+        self.game.screen.fill((1, 2, 3))
+        main.ui.draw_background(self.game)
+        tile = main.ui._trial_tile(main.Trial.SPEEDRUN)
+        columns = main.SCREEN_WIDTH // size
+        rows = main.SCREEN_HEIGHT // size
+        for cell_x, cell_y, px, py in ((0, 0, 10, 10),
+                                       (columns - 1, 0, size - 10, 10),
+                                       (columns // 2, rows // 2, 40, 40),
+                                       (0, rows - 1, 10, size - 10),
+                                       (columns - 1, rows - 1, size - 10,
+                                        size - 10)):
+            with self.subTest(cell=(cell_x, cell_y)):
+                self.assertEqual(
+                    tuple(self.game.screen.get_at((cell_x * size + px,
+                                                   cell_y * size + py)))[:3],
+                    tuple(tile.get_at((px, py)))[:3],
+                    f"cell ({cell_x}, {cell_y}) is not the trial's tile")
+
+        # The whole screen is covered, edge to edge: the very last pixel is a
+        # tile pixel too, not a leftover of the old flat fill.
+        self.assertEqual(
+            tuple(self.game.screen.get_at(
+                (main.SCREEN_WIDTH - 1, main.SCREEN_HEIGHT - 1)))[:3],
+            tuple(tile.get_at((size - 1, size - 1)))[:3])
+
+        # A different trial paints a different pattern, and the background is
+        # built once per trial.
+        corner = (10, 10)
+        self.game.current_trial = main.Trial.ALL_FINISHES
+        main.ui.draw_background(self.game)
+        self.assertNotEqual(tuple(self.game.screen.get_at(corner))[:3],
+                            tuple(tile.get_at(corner))[:3])
+        self.assertEqual(
+            tuple(self.game.screen.get_at(corner))[:3],
+            tuple(main.ui._trial_tile(main.Trial.ALL_FINISHES).get_at(corner))[:3])
+        self.assertIs(main.ui._trial_background(main.Trial.ALL_FINISHES),
+                      main.ui._trial_background(main.Trial.ALL_FINISHES))
+
+    def test_a_running_trials_panels_take_its_own_colour(self):
+        # The board, the inventory and the shop are filled with the running
+        # trial's tile colour, a little lighter, so the play areas take the
+        # run's palette instead of the game's own panel colour.
+        self.game.trials_enabled = True
+        self.game.final_boss = None
+        self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
+                                    for y in range(main.GRID_HEIGHT)}
+        self.game.screen.fill((1, 2, 3))
+        self.game.current_trial = main.Trial.SPEEDRUN
+        main.ui.draw(self.game)
+        tint = main.Trial.panel_color(main.Trial.SPEEDRUN)
+        self.assertEqual(tint, components.shade(main.Trial.COLORS[main.Trial.SPEEDRUN],
+                                                main.Trial.PANEL_LIGHT))
+        self.assertNotEqual(tint, main.MARBLE_BOX_COLOR)
+        for label, pos in (("board", (main.MARBLE_BOX_COORDS[0] + 3,
+                                      main.MARBLE_BOX_COORDS[1] + 3)),
+                           ("inventory", (main.TOOLBOX_COORDS[0] + 3,
+                                          main.TOOLBOX_COORDS[1] + 3)),
+                           ("shop", (main.SHOP_COORDS[0] + 3,
+                                     main.SHOP_COORDS[1] + 3))):
+            with self.subTest(panel=label):
+                self.assertEqual(tuple(self.game.screen.get_at(pos))[:3], tint)
+        # A different trial tints them differently, and no trial at all keeps
+        # the game's own panel colour.
+        self.game.current_trial = main.Trial.CRUMBLING
+        main.ui.draw(self.game)
+        self.assertEqual(tuple(self.game.screen.get_at(
+            (main.MARBLE_BOX_COORDS[0] + 3, main.MARBLE_BOX_COORDS[1] + 3)))[:3],
+            main.Trial.panel_color(main.Trial.CRUMBLING))
+        self.game.current_trial = None
+        main.ui.draw(self.game)
+        self.assertEqual(tuple(self.game.screen.get_at(
+            (main.MARBLE_BOX_COORDS[0] + 3, main.MARBLE_BOX_COORDS[1] + 3)))[:3],
+            main.MARBLE_BOX_COLOR)
+
+    def test_the_panels_stay_readable_under_every_trial(self):
+        # The panels carry white text, so no trial may tint them so light that
+        # the text disappears — the near-white all-finishes tile goes the other
+        # way and darkens them instead.
+        for trial in main.Trial.ORDER:
+            with self.subTest(trial=main.Trial.name(trial)):
+                tint = main.Trial.panel_color(trial)
+                brightness = sum(tint) / 3
+                self.assertGreaterEqual(brightness, 40)
+                self.assertLessEqual(brightness, main.Trial.PANEL_LIGHT_LIMIT + 40)
+                if sum(main.Trial.COLORS[trial]) / 3 > main.Trial.PANEL_LIGHT_LIMIT:
+                    self.assertLess(brightness,
+                                    sum(main.Trial.COLORS[trial]) / 3,
+                                    "a near-white tile darkens its panels")
+
+    def test_locked_squares_take_a_darker_shade_only_while_a_trial_runs(self):
+        # A locked board square is filled with a darker shade of the same trial
+        # colour (see locked_fill), so it stays in the run's palette while still
+        # reading as unlit. With the trial system switched off it goes back to
+        # the void however the id happens to read — the same gate panel_fill has
+        # (see Game.active_trial).
+        self.game.current_trial = main.Trial.SPEEDRUN
+        self.game.trials_enabled = False
+        self.assertEqual(main.ui.locked_fill(self.game), main.BG_COLOR)
+        self.assertEqual(main.ui.panel_fill(self.game), main.MARBLE_BOX_COLOR)
+        self.game.trials_enabled = True
+        locked = main.ui.locked_fill(self.game)
+        panel = main.ui.panel_fill(self.game)
+        self.assertEqual(locked, main.Trial.locked_color(main.Trial.SPEEDRUN))
+        self.assertNotEqual(locked, panel)
+        self.assertTrue(all(lo < pa for lo, pa in zip(locked, panel)),
+                        (locked, panel))
+        self.game.current_trial = None
+        self.assertEqual(main.ui.locked_fill(self.game), main.BG_COLOR)
+
+    def test_the_background_is_the_plain_colour_without_a_trial(self):
+        # No trial running: the screen keeps the game's flat background colour.
+        self.game.current_trial = None
+        self.game.final_boss = None
+        self.game.screen.fill((1, 2, 3))
+        main.ui.draw_background(self.game)
+        for pos in ((0, 0), (main.SCREEN_WIDTH - 1, 0),
+                    (main.SCREEN_WIDTH // 2, main.SCREEN_HEIGHT // 2),
+                    (0, main.SCREEN_HEIGHT - 1)):
+            self.assertEqual(tuple(self.game.screen.get_at(pos))[:3],
+                             main.BG_COLOR)
+
+    def test_the_trial_display_takes_the_same_panel_colour_as_the_shop(self):
+        # The display is a panel like the inventory and the shop, so it takes
+        # the same fill (see panel_fill) — the trial's own colour while one runs,
+        # and the game's own panel colour with none. It never carries the tile
+        # itself: the tile is the SCREEN's background (see draw_background).
+        box = main.TRIAL_BOX_RECT
+        cases = (("trial", None, main.Trial.SPEEDRUN),
+                 ("boss", main.FinalBoss.SINGULARITY, main.Trial.SPEEDRUN),
+                 ("no trial", None, None))
+        for label, boss, trial in cases:
+            with self.subTest(case=label):
+                self.game.final_boss = boss
+                self.game.trials_enabled = True
+                self.game.current_trial = trial
+                self.game.screen.fill(main.BG_COLOR)
+                self.game.draw_trial_box()
+                fill = main.ui.panel_fill(self.game)
+                self.assertEqual(fill, main.Trial.panel_color(trial)
+                                 if trial is not None else main.MARBLE_BOX_COLOR)
+                # A 4px strip down the panel's left edge, clear of the rounded
+                # corners: inside the panel, and out of reach of the centred
+                # title and description, so a tile painted into the box would
+                # show up here immediately.
+                for pos in ((box.left + 4, box.top + 10),
+                            (box.left + 4, box.top + 40),
+                            (box.left + 4, box.bottom - 16)):
+                    self.assertEqual(
+                        tuple(self.game.screen.get_at(pos))[:3], fill)
+        self.game.final_boss = None
+        self.game.current_trial = main.Trial.SPEEDRUN
+
+    def test_a_discovered_trials_collection_icon_is_its_tile(self):
+        # The collection shows the same tile as the trial's icon...
+        collection.discover_trial(main.Trial.SHUFFLED)
+        entries = self.game._collection_entries()
+        entry = next(e for e in entries
+                     if e[0] == "trial" and e[1] == main.Trial.SHUFFLED)
+        self.assertTrue(entry[4], "a trial needs an icon in the collection")
+        self.assertTrue(entry[5], "the trial was just discovered")
+
+        self.game.screen.fill(main.BG_COLOR)
+        icon_rect = pygame.Rect(40, 40, main.GRID_SIZE, main.GRID_SIZE)
+        main.ui.draw_collection_icon(self.game, "trial", main.Trial.SHUFFLED,
+                                     icon_rect)
+        tile = main.ui._trial_tile(main.Trial.SHUFFLED)
+        for px, py in ((10, 10), (30, 20), (20, 35)):
+            self.assertEqual(tuple(self.game.screen.get_at(
+                (icon_rect.x + px, icon_rect.y + py)))[:3],
+                tuple(tile.get_at((px, py)))[:3])
+        # ...while an undiscovered trial still shows the ??? square.
+        entry = next(e for e in entries
+                     if e[0] == "trial" and e[1] == main.Trial.INFLATION)
+        self.assertTrue(entry[4])
+        self.assertFalse(entry[5])
+
     def test_trial_box_shows_no_trial_once_it_is_disabled(self):
         # Buying the trial away leaves the display up (showing NO TRIAL) so the
         # player can still click its halves; with trials switched off for the
@@ -1419,11 +1604,12 @@ class UiTests(GameTestCase):
 
     def test_all_finishes_trial_draws_yellow_marble_box_border(self):
         # The marble-box outer border is gold (the finish scorer color) while
-        # the all-finishes trial is active, and the normal dark gray otherwise.
+        # the all-finishes trial is ACTIVE, and the normal dark gray otherwise.
         # The thick border sits just above the box (centered at
         # y - BORD_WIDTH//2), so sample inside it rather than the fill below.
         border_px = (main.MARBLE_BOX_COORDS[0] + 20,
                      main.MARBLE_BOX_COORDS[1] - main.BORD_WIDTH // 2)
+        self.game.trials_enabled = True
         self.game.current_trial = main.Trial.ALL_FINISHES
         self.game.draw()
         self.assertEqual(self.game.screen.get_at(border_px)[:3],
@@ -1431,7 +1617,41 @@ class UiTests(GameTestCase):
         self.game.current_trial = main.Trial.HANDS_TIED
         self.game.draw()
         self.assertEqual(self.game.screen.get_at(border_px)[:3], (30, 30, 30))
+        # A game with the trial system switched off holds an id it never plays
+        # (see Game.active_trial), so the border must stay dark for it too.
+        self.game.current_trial = main.Trial.ALL_FINISHES
+        self.game.trials_enabled = False
+        self.game.draw()
+        self.assertEqual(self.game.screen.get_at(border_px)[:3], (30, 30, 30))
 
+
+    def test_the_card_and_action_slots_share_one_square_back(self):
+        # An empty action slot shows the very same back as an empty card slot
+        # (they are the same slot in two trays), and a slot is a SQUARE cell of
+        # its tray rather than a rounded card: with rounded corners the tray's
+        # own fill would show through at the slot's corners.
+        self.game.cards.clear()
+        self.game.actions.clear()
+        main.ui.draw(self.game)
+        slot = main.GRID_SIZE
+        card_slot = pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
+                                slot, slot)
+        action_slot = pygame.Rect(main.ACTION_AREA_COORDS[0],
+                                  main.ACTION_AREA_COORDS[1], slot, slot)
+        for dx in range(slot):
+            for dy in range(slot):
+                self.assertEqual(
+                    tuple(self.game.screen.get_at(
+                        (card_slot.left + dx, card_slot.top + dy)))[:3],
+                    tuple(self.game.screen.get_at(
+                        (action_slot.left + dx, action_slot.top + dy)))[:3],
+                    (dx, dy))
+        # Every corner is the back's own colour (its fill or its 2px border),
+        # never the tray showing through a rounded corner.
+        back = ((70, 60, 100), (130, 120, 170))
+        for px, py in ((0, 0), (slot - 1, 0), (0, slot - 1), (slot - 1, slot - 1)):
+            self.assertIn(tuple(self.game.screen.get_at(
+                (card_slot.left + px, card_slot.top + py)))[:3], back, (px, py))
 
     def test_disabled_card_draws_dimmed(self):
         joker = main.CardItem(main.Card.JOKER, 20)

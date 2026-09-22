@@ -9,7 +9,6 @@ that delegate to this module, so the rest of the code and the tests call them
 as before.
 """
 
-import random
 import sys
 
 from components import (
@@ -211,7 +210,9 @@ def _condition_units(game, condition):
         return owned_slippery_block_count(game)
     if condition == Condition.RANDOM:
         # Glitch pays a random 0..6 units (between 0 and 6x the base payoff).
-        return random.uniform(0, 6.0)
+        # The roll comes from the RUN's own RNG (see Game.run_rng), so replaying
+        # the run pays the same amount instead of rerolling until it lands high.
+        return game.run_rng.uniform(0, 6.0)
     if condition == Condition.FEW_BLOCKS:
         return 1.0 if len(game.grid) <= 5 else 0.0
     if condition == Condition.COZY:
@@ -303,8 +304,9 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
     """Fire one trigger of a flat (non +Chips/+Mult/xMult) card scorer.
 
     Cash pays out, Sharp multiplies the multiplier, Shreds/Rubble/Ideas/Picky
-    bank resource points (converted after a run), Parts grants components,
-    Fresh grants free rerolls, and Quick arms a payout that resolves at the
+    bank resource points (converted after a run), Parts banks components (granted
+    when the run is continued), Fresh grants free rerolls, and Quick arms a
+    payout that resolves at the
     marble's NEXT block hit, keyed to that impact's speed. The board/run
     scorers (Seed, Roomy, Rally, Drill, Undertaker, Gilded, Debt, Voyager,
     Random, Satanic, Lucky) pay from the same state their block version reads.
@@ -341,10 +343,11 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         game._add_resource_points(scorer, points)
         text, color = points_text(points), ORANGE
     elif scorer == Scorer.PARTS:
-        # Parts cards grant random components immediately (no point system),
-        # one per point of the card's own magnitude.
-        for _ in range(max(1, int(amount))):
-            game._grant_random_component()
+        # Parts cards bank one component per point of their own magnitude.
+        # Like the Cash cards above, the grant is deferred: nothing reaches the
+        # toolbox until the player continues the run (see Game._continue_run),
+        # so a retried run hands nothing over.
+        game.parts_run_gain += max(1, int(amount))
         text, color = "Component", ORANGE
     elif scorer == Scorer.FRESH:
         # Fresh cards grant their own magnitude in free shop rerolls

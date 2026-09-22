@@ -222,9 +222,10 @@ class ScorersTests(GameTestCase):
         self.assertIn((1, 1), self.game.grid)
 
 
-    def test_parts_scorer_grants_a_component_per_trigger(self):
-        # Parts grants a random component IMMEDIATELY on each trigger — its
-        # old point system is gone (nothing is banked for a run).
+    def test_parts_scorer_banks_a_component_per_trigger(self):
+        # Parts banks one component per trigger and hands NOTHING over while
+        # the run plays: the bank is granted only once the player continues
+        # the run. (Its old point system stays gone — no points are banked.)
         self.game.toolbox.items.clear()
         self.game.run_active = True
         for _ in range(2):
@@ -232,23 +233,79 @@ class ScorersTests(GameTestCase):
             marble = self._add_marble()
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
-        comps = [i for i in self.game.toolbox.items if getattr(i, "kind", None)
-                 in (main.Component.SHAPE, main.Component.EFFECT, main.Component.SCORER)]
-        self.assertEqual(len(comps), 2)
+        self.assertEqual(self._component_count(), 0)      # nothing granted yet
+        self.assertEqual(self.game.parts_run_gain, 2)
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        self.game._continue_run()
+        self.assertEqual(self._component_count(), 2)      # granted on continue
+        self.assertEqual(self.game.parts_run_gain, 0)
         self.assertNotIn("point", main.scorer_description(main.Scorer.PARTS).lower())
 
 
-    def test_parts_scorer_grants_one_component_per_single_trigger(self):
-        # Even a lone Parts trigger pays out immediately (no partial bank).
+    def test_parts_scorer_banks_one_component_per_single_trigger(self):
+        # A lone Parts trigger banks exactly one whole component, and a retried
+        # run drops the bank: only continuing hands it over.
         self.game.toolbox.items.clear()
         self.game.run_active = True
         block = main.Block(0, 0, scorer=main.Scorer.PARTS)
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
-        comps = [i for i in self.game.toolbox.items if getattr(i, "kind", None)
-                 in (main.Component.SHAPE, main.Component.EFFECT, main.Component.SCORER)]
-        self.assertEqual(len(comps), 1)
+        self.assertEqual(self.game.parts_run_gain, 1)
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        self.game._retry_run()
+        self.assertEqual(self.game.parts_run_gain, 0)
+        self.assertEqual(self._component_count(), 0)
+
+
+    def test_parts_bank_is_dropped_when_the_run_is_restarted(self):
+        # Only a CONTINUE hands the bank over: restarting the run (R) or
+        # starting a fresh one discards it with every other per-run gain.
+        # (reset_run refuses to build a run with no Start block on the board.)
+        self.game.toolbox.items.clear()
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.run_active = True
+        block = main.Block(0, 0, scorer=main.Scorer.PARTS)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [block]
+        self.game._handle_block_contacts([block])
+        self.assertEqual(self.game.parts_run_gain, 1)
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.parts_run_gain, 0)
+        self.assertEqual(self._component_count(), 0)
+
+
+    def test_parts_reward_is_withheld_when_the_inventory_is_full(self):
+        # A full inventory withholds the banked components (the same rule the
+        # instant grant followed) rather than overfilling the toolbox.
+        self.game.toolbox.items.clear()
+        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                                main.Scorer.NONE, 0, 5, "filler")
+        capacity = self.game.toolbox.cols * self.game.toolbox.rows
+        while len(self.game.toolbox.items) < capacity:
+            self.game.toolbox.add(filler)
+        self.game.parts_run_gain = 2
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        self.game._continue_run()
+        self.assertEqual(self._component_count(), 0)
+        self.assertEqual(len(self.game.toolbox.items), capacity)
+        self.assertEqual(self.game.parts_run_gain, 0)
+        self.assertIn("withheld", self.game.shop_message)
+
+
+    def test_parts_description_states_when_the_reward_arrives(self):
+        # The rule is in the text the player reads: a Parts piece says its
+        # component is handed over once the run is continued, both on a block
+        # and as a card's payoff.
+        self.assertIn("handed over once the run is continued",
+                      main.scorer_description(main.Scorer.PARTS, 1))
+        card = main.condition_scorer_card(main.Condition.SHAPE_PIPE,
+                                          main.Scorer.PARTS)
+        self.assertIn("handed over once the run is continued",
+                      main.Card.description(card))
 
 
     def test_picky_points_convert_to_bonus_slot_on_continue(self):

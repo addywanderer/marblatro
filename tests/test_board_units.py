@@ -477,10 +477,11 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.shop_message,
                          "Board expanded 2 squares (2 from Conquistador)")
 
-    def test_draw_board_paints_locked_squares_as_background(self):
+    def test_draw_board_paints_locked_squares_as_background_without_a_trial(self):
         g = self._start_locked_game()
         main.ui.draw_board(g)
-        # Locked square (0,0) matches the background color.
+        # With no trial there is no tile colour to match: locked square (0,0)
+        # falls back to the void, exactly as it always has.
         self.assertEqual(g.screen.get_at(self._cell_center(0, 0))[:3], main.BG_COLOR)
         # Unlocked square (4,7) keeps the normal board fill.
         self.assertEqual(g.screen.get_at(self._cell_center(4, 7))[:3],
@@ -491,6 +492,29 @@ class BoardTests(unittest.TestCase):
         line_x = main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE
         self.assertEqual(g.screen.get_at((line_x, self._cell_center(4, 7)[1]))[:3],
                          (30, 30, 30))
+
+    def test_locked_squares_take_the_trials_colour_a_step_darker(self):
+        # While a trial runs, a locked square is filled with the SAME colour
+        # family as the board it sits in — the trial's colour, a step below the
+        # panel tint — instead of punching the red void through the palette.
+        # It must still read as unlit next to an unlocked square, so locked is
+        # darker than the panel for every trial, the near-white all-finishes
+        # one included (whose panel is darkened rather than lightened, which is
+        # why the locked shade is derived from the panel and not from the tile).
+        g = self._start_locked_game()
+        g.trials_enabled = True
+        for trial in main.Trial.ORDER:
+            g.current_trial = trial
+            panel = components.Trial.panel_color(trial)
+            locked = components.Trial.locked_color(trial)
+            self.assertIsNotNone(locked, trial)
+            self.assertTrue(all(lo < pa for lo, pa in zip(locked, panel)),
+                            (trial, locked, panel))
+            main.ui.draw_board(g)
+            self.assertEqual(g.screen.get_at(self._cell_center(0, 0))[:3], locked,
+                             trial)
+            self.assertEqual(g.screen.get_at(self._cell_center(4, 7))[:3], panel,
+                             trial)
 
     def test_draw_board_borders_the_playable_region_thickly(self):
         # Every side of an unlocked square that faces a LOCKED one gets the

@@ -580,16 +580,17 @@ class CardsTests(GameTestCase):
 
 
     def test_hands_tied_still_disables_a_concert_block(self):
-        # The trial's cap is applied after Concert's bonus, so a disabled block
-        # is not handed the extra trigger back.
+        # The trial's penalty is applied in place of Concert's bonus, so a
+        # debuffed block is not handed the extra trigger back: a 1-limit block
+        # Hands tied picked is still silenced under both.
         block = self._concert_block()
         self.game.cards = [main.CardItem(main.Card.CONCERT, 44)]
         self.game.grid[(1, 5)] = main.Block(1, 5, scorer=main.Scorer.START)
         self.game.grid[(1, 9)] = main.Block(1, 9, scorer=main.Scorer.FINISH)
-        self.game.trial_maxed_blocks = {block}
+        self.game.trial_debuffed_blocks = {block}
 
         self.assertEqual(self.game._trigger_limit(block),
-                         main.TRIAL_MAX_TRIGGERS)
+                         1 - main.TRIAL_TRIGGER_PENALTY)
         self.game.reset_run()
 
         self.assertEqual(block.triggers_left, 0)
@@ -837,22 +838,23 @@ class CardsTests(GameTestCase):
         # collision, since a collision card only fires while its block can.
         pipe = main.Block(0, 0, shape=main.Shape.PIPE, scorer=main.Scorer.NONE,
                           trigger_limit=2)
-        with mock.patch("cards.random.random", return_value=0.0):  # +35 chips
+        with mock.patch("main.random.random", return_value=0.0):  # +35 chips
             self._card_fire(pipe)
         self.assertEqual(self.game.score_chips, 135)
         # A second collision re-uses that same reward (the patched 0.9 would
         # have been +0.3 xMult).
-        with mock.patch("cards.random.random", return_value=0.9):
+        with mock.patch("main.random.random", return_value=0.9):
             self._card_fire(pipe, self._add_marble())
         self.assertEqual(self.game.score_chips, 170)
         self.assertEqual(self.game.score_mult, 2)
-        # A fresh run re-rolls it, so the card can pay the xMult this time.
-        with mock.patch("cards.random.random", return_value=0.9):
+        # Moving on to the NEXT run re-rolls it, so the card can pay the xMult.
+        self.game.run_number += 1
+        with mock.patch("main.random.random", return_value=0.9):
             self.game._roll_run_random_outputs()
         self.assertEqual(self.game.cards[-1].random_rolls["reward"], 2)
         fresh_pipe = main.Block(1, 0, shape=main.Shape.PIPE,
                                 scorer=main.Scorer.NONE)
-        with mock.patch("cards.random.random", return_value=0.0):
+        with mock.patch("main.random.random", return_value=0.0):
             self._card_fire(fresh_pipe, self._add_marble())
         self.assertAlmostEqual(self.game.score_mult, 2 * 1.3)
 
@@ -914,18 +916,22 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 2)
 
 
-    def test_start_parts_card_grants_component_at_run_start(self):
+    def test_start_parts_card_banks_its_component_at_run_start(self):
         # Regression: a start-of-run resource card (Ripped Card + Parts =
-        # FEW_BLOCKS x Parts) fires when the run starts and grants its reward
-        # (a component) immediately.
+        # FEW_BLOCKS x Parts) fires when the run starts, but its reward is
+        # BANKED — the component only reaches the toolbox when the player
+        # continues the run (see Game._continue_run).
         value = main.condition_scorer_card(main.Condition.FEW_BLOCKS, main.Scorer.PARTS)
         self.game.cards.append(main.CardItem(value, 50))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.toolbox.items.clear()
         self.assertTrue(self.game.reset_run())
-        comps = [i for i in self.game.toolbox.items if getattr(i, "kind", None)
-                 in (main.Component.SHAPE, main.Component.EFFECT, main.Component.SCORER)]
-        self.assertEqual(len(comps), 1)
+        self.assertEqual(self._component_count(), 0)
+        self.assertEqual(self.game.parts_run_gain, 1)
+        self._complete_run(2000)
+        self.game._continue_run()
+        self.assertEqual(self._component_count(), 1)
+        self.assertEqual(self.game.parts_run_gain, 0)
 
 
     def test_card_data_lives_in_components(self):
@@ -1572,15 +1578,41 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 3)
 
 
-    def test_parts_card_grants_a_component_on_matching_collision(self):
+    def test_parts_card_banks_a_component_on_matching_collision(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.PARTS)
         self.game.cards.append(main.CardItem(value, 40))
         self.game.toolbox.items.clear()
+        self.game.parts_run_gain = 0
         pipe = main.Block(0, 0, shape=main.Shape.PIPE, scorer=main.Scorer.NONE)
         self._card_fire(pipe)
-        comps = [i for i in self.game.toolbox.items if getattr(i, "kind", None)
-                 in (main.Component.SHAPE, main.Component.EFFECT, main.Component.SCORER)]
-        self.assertEqual(len(comps), 1)
+        self.assertEqual(self._component_count(), 0)   # nothing handed over yet
+        self.assertEqual(self.game.parts_run_gain, 1)
+        # A non-pipe block doesn't trigger the card, so nothing else is banked.
+        rect = main.Block(0, 0, shape=main.Shape.RECT, scorer=main.Scorer.NONE)
+        self._card_fire(rect)
+        self.assertEqual(self.game.parts_run_gain, 1)
+        # The bank is handed over on continue — and only then.
+        self._complete_run(2000)
+        self.game._continue_run()
+        self.assertEqual(self._component_count(), 1)
+
+
+    def test_parts_card_banks_its_own_magnitude_in_components(self):
+        # A Parts card banks one component per point of its own rolled
+        # magnitude (a 3-magnitude card banks three), and hands them over only
+        # when the run is continued.
+        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.PARTS)
+        self.game.cards.append(main.CardItem(value, 40, amount=3))
+        self.game.toolbox.items.clear()
+        self.game.parts_run_gain = 0
+        pipe = main.Block(0, 0, shape=main.Shape.PIPE, scorer=main.Scorer.NONE)
+        self._card_fire(pipe)
+        self.assertEqual(self.game.parts_run_gain, 3)
+        self.assertEqual(self._component_count(), 0)
+        self._complete_run(2000)
+        self.game._continue_run()
+        self.assertEqual(self._component_count(), 3)
+        self.assertEqual(self.game.parts_run_gain, 0)
 
 
     def test_picky_card_banks_a_point_on_matching_collision(self):

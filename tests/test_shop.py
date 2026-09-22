@@ -385,13 +385,21 @@ class ShopTests(GameTestCase):
 
 
     def test_a_new_run_rerolls_random_outputs(self):
-        # Moving on to the next run chooses fresh outcomes.
+        # Moving on to the NEXT run chooses fresh outcomes — while replaying the
+        # SAME run (R, T) keeps the ones it already decided.
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         block = main.Block(1, 0, scorer=main.Scorer.RANDOM)
         self.game.grid[(1, 0)] = block
         with mock.patch("main.random.random", return_value=0.9):  # xMult
             self.game.reset_run(True)
         self.assertEqual(block.random_rolls["reward"], 2)
+        # Replaying the run (R / T, same run number) does not re-roll it, even
+        # with the RNG rigged the other way.
+        with mock.patch("main.random.random", return_value=0.0):
+            self.game.reset_run(True)
+        self.assertEqual(block.random_rolls["reward"], 2)
+        # The next run decides afresh.
+        self.game.run_number += 1
         with mock.patch("main.random.random", return_value=0.0):  # chips
             self.game.reset_run(True)
         self.assertEqual(block.random_rolls["reward"], 0)
@@ -612,7 +620,7 @@ class ShopTests(GameTestCase):
     def test_new_scorers_are_defined_and_shop_available(self):
         for scorer, name, amount in ((main.Scorer.COLOSSUS, "Colossus", 0.1),
                                      (main.Scorer.UNDERTAKER, "Undertaker", 15),
-                                     (main.Scorer.DEBT, "Debt", 120)):
+                                     (main.Scorer.DEBT, "Debt", 60)):
             self.assertIn(scorer, main.Scorer.ORDER)
             self.assertIn(scorer, main.Scorer.SHOP_ORDER)
             self.assertEqual(main.Scorer.name(scorer), name)
@@ -2233,7 +2241,7 @@ class ShopTests(GameTestCase):
         self.game.current_trial = main.Trial.HANDS_TIED
         self.game.cash = 1000
         self.game._apply_trial()
-        self.assertEqual(self.game.trial_maxed_blocks, set())  # empty board
+        self.assertEqual(self.game.trial_debuffed_blocks, set())  # empty board
         bought = self.game._click_trial_display(
             (main.TRIAL_BOX_RECT.left + 5, main.TRIAL_BOX_RECT.centery))
         self.assertTrue(bought)

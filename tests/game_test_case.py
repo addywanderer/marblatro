@@ -433,6 +433,16 @@ class GameTestCase(unittest.TestCase):
         return marble
 
 
+    def _component_count(self):
+        """How many shape/effect/scorer components the toolbox holds.
+
+        Parts rewards land as toolbox components, so this is the count a Parts
+        test reads (blocks and card items are ignored).
+        """
+        kinds = (main.Component.SHAPE, main.Component.EFFECT, main.Component.SCORER)
+        return len([i for i in self.game.toolbox.items
+                    if getattr(i, "kind", None) in kinds])
+
     def _complete_run(self, score, required=1000):
         """Finish a run with the given total score against the given target."""
         self.game.marbles = []

@@ -153,6 +153,7 @@ from components import (
     condition_effect,
     condition_glyph,
     condition_shape,
+    shade,
     splittable_card_condition_scorer,
 )
 
@@ -170,7 +171,7 @@ def _fmt_tenth(value):
     return f"{rounded:.1f}"
 
 
-def draw_marble_box(screen, x, y, w, h, border_color=(30, 30, 30)):
+def draw_marble_box(screen, x, y, w, h, border_color=(30, 30, 30), fill=None):
     """Draw a marble-box-styled grid panel.
 
     The panel's top-left corner sits at (x, y) pixels and it spans
@@ -178,12 +179,15 @@ def draw_marble_box(screen, x, y, w, h, border_color=(30, 30, 30)):
     cells. The outer border is thick and the interior lines are thin, the
     same look used for the marble box, the toolbox, and the shop.
     ``border_color`` tints the thick outer border (used by the all-finishes
-    trial to paint the marble box's edges like a finish). The thick border
+    trial to paint the marble box's edges like a finish); ``fill`` overrides
+    the panel's interior colour, which is how a run's panels take the running
+    trial's own colour (see panel_fill). The thick border
     lines are drawn last so they sit in front of the thin interior lines.
     """
     width = GRID_SIZE * w
     height = GRID_SIZE * h
-    pygame.draw.rect(screen, MARBLE_BOX_COLOR, (x, y, width, height))
+    pygame.draw.rect(screen, MARBLE_BOX_COLOR if fill is None else fill,
+                     (x, y, width, height))
     # Thin interior grid lines first.
     for gx in range(1, w):
         gx_x = x + gx * GRID_SIZE
@@ -288,25 +292,29 @@ def _draw_locked_boundary(game):
 def draw_board(game, border_color=(30, 30, 30)):
     """Draw the dynamic marble box (the board), same look as draw_marble_box.
 
-    Unlocked squares get the normal board fill; LOCKED squares are painted the
-    background color so they read as part of the red void. The original thin
-    grid overlay stays across the whole 10x15 area — including over locked
-    squares — so the player can see every unit they can expand the board into.
-    The boundary between the playable region and the locked squares gets a
-    thick border of its own (see _draw_locked_boundary), and the thick outer
-    border is drawn last exactly like draw_marble_box.
+    Unlocked squares get the normal board fill; LOCKED squares are painted
+    locked_fill(game) — a darker shade of the same colour while a trial runs, so
+    they stay in the run's palette, and the red void when there is no trial, so
+    the board reads as floating. The original thin grid overlay stays across the
+    whole 10x15 area — including over locked squares — so the player can see
+    every unit they can expand the board into. The boundary between the
+    playable region and the locked squares gets a thick border of its own (see
+    _draw_locked_boundary), and the thick outer border is drawn last exactly
+    like draw_marble_box.
     """
     x, y = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
     width = GRID_SIZE * GRID_WIDTH
     height = GRID_SIZE * GRID_HEIGHT
-    # Normal board fill over the whole box, then locked squares repainted in
-    # the background color so the playable region looks like it floats.
-    pygame.draw.rect(game.screen, MARBLE_BOX_COLOR, (x, y, width, height))
+    # Normal board fill over the whole box (the running trial's own colour,
+    # lightened — see panel_fill), then the locked squares repainted a step
+    # darker (see locked_fill) so the playable region looks like it floats.
+    pygame.draw.rect(game.screen, panel_fill(game), (x, y, width, height))
     if game.board_locked():
+        locked = locked_fill(game)
         for gy in range(GRID_HEIGHT):
             for gx in range(GRID_WIDTH):
                 if game.is_cell_locked(gx, gy):
-                    pygame.draw.rect(game.screen, BG_COLOR,
+                    pygame.draw.rect(game.screen, locked,
                                      (x + gx * GRID_SIZE, y + gy * GRID_SIZE,
                                       GRID_SIZE, GRID_SIZE))
     # Thin interior grid lines (same style as draw_marble_box), across locked
@@ -575,6 +583,401 @@ def _build_action_art(action):
         punch_circle(16, 17, 3)         # eyes, cut out of the body
         punch_circle(24, 17, 3)
     return art
+
+
+# --- Trial tiles: tessellations, not icons -----------------------------------
+# A trial's tile is a square LATTICE CELL whose art is a TESSELLATION of one or
+# a few shapes — rows of triangles, interlocked rings, packed circles, chevron
+# bands, fish scales, diamonds, octagons, split cells — in the few shades of the
+# trial's own colour (see components.Trial.palette). Two rules shape them:
+#
+# * they must tile SEAMLESSLY, because the whole screen is covered in them while
+#   the trial runs. Every family is periodic inside the tile (its shapes repeat
+#   with a period that DIVIDES the tile size), so the seam between two tiles is
+#   just another edge of the same lattice;
+# * the shapes are never plain rectangles, and the family is chosen to echo what
+#   the trial does (rings for chained hands, circles for a bouncy castle,
+#   chevrons for speed, scales for repetition, cut cells for a cutter, climbing
+#   bars for inflation ...).
+TRIAL_TILE_SIZE = 80      # divides 1200x800, so the background tiles exactly
+
+
+def _tess_triangles(art, size, pal, rows=4):
+    """Rows of up/down triangles: the tightest tessellation in the set.
+
+    Every row is a strip of triangles all pointing the same way, and the next
+    row points the other way, so the strips interlock. The pattern's period is
+    two rows vertically and one triangle horizontally, both of which divide the
+    tile size, so the lattice continues across a seam.
+    """
+    cell_h = size / rows
+    cell_w = 2 * cell_h
+    cols = int(size // cell_w)
+    for row in range(rows):
+        for col in range(cols):
+            x, y = col * cell_w, row * cell_h
+            if row % 2 == 0:                      # pointing up
+                points = [(x, y + cell_h), (x + cell_w, y + cell_h),
+                          (x + cell_w / 2, y)]
+            else:                                 # pointing down, filling the strip
+                points = [(x, y), (x + cell_w, y), (x + cell_w / 2, y + cell_h)]
+            face = (pal["base"] if row % 2 == 0 else pal["dark"]) \
+                if col % 2 == 0 else pal["light"]
+            pygame.draw.polygon(art, face, points)
+
+
+def _tess_chevrons(art, size, pal, bands=2):
+    """Full-width V bands (speed, and the dead zone's bands).
+
+    Each band is one V whose apex sits mid-tile, so the band ends at the seam
+    with the same height and slope it started with: the next tile's V simply
+    continues the zigzag.
+    """
+    band_h = size / bands
+    thickness = band_h * 0.34
+    for index in range(bands):
+        top = index * band_h + band_h * 0.2
+        apex = top + band_h * 0.42
+        colour = pal["base"] if index % 2 == 0 else pal["dark"]
+        pygame.draw.polygon(art, colour, [
+            (0, top), (size / 2, apex), (size, top),
+            (size, top + thickness), (size / 2, apex + thickness),
+            (0, top + thickness)])
+        # The band's leading edge, both slopes of the V, so it reads as a
+        # chevron rather than a lone diagonal.
+        pygame.draw.lines(art, pal["light"], False,
+                          [(0, top), (size / 2, apex), (size, top)],
+                          max(2, int(size / 34)))
+
+
+def _tess_checker(art, size, pal, cells=2):
+    """The finish checkerboard, rebuilt out of triangles.
+
+    Each cell is one square of the checkerboard (the two extremes of the palette
+    — near-black and near-white for the all-finishes trial), split along its
+    diagonal into two triangles a shade apart, so the block's checkerboard still
+    reads as the finish quadrant pattern while every shape in it is a triangle.
+    """
+    dark = shade(pal["base"], -0.92)
+    cell = size / cells
+    for row in range(cells):
+        for col in range(cells):
+            x, y = col * cell, row * cell
+            if (row + col) % 2 == 0:
+                colour = dark
+                halves = ([(x, y), (x + cell, y), (x + cell, y + cell)],
+                          [(x, y), (x + cell, y + cell), (x, y + cell)])
+            else:
+                colour = pal["base"]
+                halves = ([(x, y), (x + cell, y), (x, y + cell)],
+                          [(x + cell, y), (x + cell, y + cell), (x, y + cell)])
+            pygame.draw.polygon(art, colour, halves[0])
+            pygame.draw.polygon(art, shade(colour, -0.22), halves[1])
+
+
+def _tess_splits(art, size, pal, cells=2):
+    """Cells split corner to corner by one continuous diagonal CUT.
+
+    All the diagonals run the same way, so they line up across cells (and across
+    tiles) into one long cut. Each cell is self-contained, which is what makes
+    the family periodic.
+    """
+    cell = size / cells
+    for row in range(cells):
+        for col in range(cells):
+            x, y = col * cell, row * cell
+            lower, upper = pal["base"], pal["light"]
+            if (row + col) % 2:
+                lower, upper = pal["dark"], pal["base"]
+            pygame.draw.polygon(art, lower, [(x, y + cell), (x + cell, y + cell),
+                                             (x + cell, y)])
+            pygame.draw.polygon(art, upper, [(x, y), (x + cell, y), (x, y + cell)])
+            pygame.draw.line(art, pal["accent"], (x, y + cell), (x + cell, y),
+                             max(2, int(size / 32)))
+
+
+def _tess_tears(art, size, pal, cells=2):
+    """Like splits, but the cut is a jagged tear through the cell."""
+    cell = size / cells
+    step = cell / 4
+    for row in range(cells):
+        for col in range(cells):
+            x, y = col * cell, row * cell
+            zig = [(x, y + cell), (x + step, y + step * 3), (x + step * 2, y + cell),
+                   (x + step * 3, y + step * 3), (x + cell, y + cell),
+                   (x + cell, y), (x + step * 3, y + step), (x + step * 2, y),
+                   (x + step, y + step), (x, y)]
+            pygame.draw.polygon(art, pal["base"] if (row + col) % 2 == 0
+                                else pal["dark"], zig)
+            pygame.draw.lines(art, pal["accent"], False,
+                              [(x, y + cell), (x + step, y + step * 3),
+                               (x + step * 2, y + cell), (x + step * 3, y + step * 3),
+                               (x + cell, y + cell)], max(2, int(size / 32)))
+
+
+def _tess_pinwheel(art, size, pal, cells=2):
+    """Cells cut both ways into four triangles, each turned a little further."""
+    cell = size / cells
+    corners = ((0, 0), (1, 0), (1, 1), (0, 1))
+    shades = (pal["base"], pal["light"], pal["dark"], pal["accent"])
+    for row in range(cells):
+        for col in range(cells):
+            x, y = col * cell, row * cell
+            centre = (x + cell / 2, y + cell / 2)
+            turn = (row + col) % 4
+            for index in range(4):
+                a = corners[index]
+                b = corners[(index + 1) % 4]
+                pygame.draw.polygon(
+                    art, shades[(index + turn) % len(shades)],
+                    [centre, (x + a[0] * cell, y + a[1] * cell),
+                     (x + b[0] * cell, y + b[1] * cell)])
+
+
+def _tess_circles(art, size, pal, n=2):
+    """Packed circles, touching at the cell corners: balls in a lattice."""
+    cell = size / n
+    radius = cell / 2
+    for row in range(n):
+        for col in range(n):
+            cx, cy = col * cell + radius, row * cell + radius
+            pygame.draw.rect(art, pal["dark"], (col * cell, row * cell, cell, cell))
+            pygame.draw.circle(art, pal["base"] if (row + col) % 2 == 0
+                               else pal["light"], (cx, cy), radius)
+            pygame.draw.circle(art, pal["accent"], (cx - radius * 0.3,
+                                                    cy - radius * 0.3),
+                               max(2, radius * 0.22))
+
+
+def _tess_dots(art, size, pal, n=2):
+    """Big and small circles side by side: the marble made heavier or lighter."""
+    cell = size / n
+    for row in range(n):
+        for col in range(n):
+            big = (row + col) % 2 == 0
+            cx, cy = col * cell + cell / 2, row * cell + cell / 2
+            pygame.draw.rect(art, pal["dark"], (col * cell, row * cell, cell, cell))
+            pygame.draw.circle(art, pal["base"] if big else pal["light"],
+                               (cx, cy), cell * (0.46 if big else 0.24))
+            pygame.draw.line(art, pal["accent"], (col * cell, row * cell + cell / 2),
+                             (col * cell + cell, row * cell + cell / 2),
+                             max(1, int(size / 60)))
+
+
+def _tess_rings(art, size, pal, n=2, hollow=False):
+    """Interlocked rings on a half-drop lattice: a chain (or empty pockets).
+
+    The rows are offset by half a cell, so the rings of one row drop into the
+    gaps of the row above — the lattice's period is two rows by two cells, which
+    divides the tile, so the chain runs on across a seam.
+    """
+    cell = size / n
+    radius = cell * 0.46
+    width = max(2, int(size / 16))
+    for row in range(n):
+        offset = cell / 2 if row % 2 else 0
+        for col in range(n + 1):
+            cx = col * cell + offset + cell / 2 - cell / 2
+            cy = row * cell + cell / 2
+            pygame.draw.rect(art, pal["dark"] if not hollow else pal["base"],
+                             (col * cell + offset - cell / 2, row * cell, cell, cell))
+            if hollow:
+                pygame.draw.circle(art, pal["dark"], (cx, cy), radius)
+            pygame.draw.circle(art, pal["base"] if not hollow else pal["light"],
+                               (cx, cy), radius, width)
+
+
+def _tess_scales(art, size, pal, rows=2):
+    """Overlapping fish scales: the same arc, repeated.
+
+    A row of half-circles offset by half a scale from the row above reproduces
+    itself every two rows, and the tile is two rows tall, so the scales continue
+    over a seam.
+    """
+    row_h = size / rows
+    scale_w = size / 2
+    for row in range(rows + 1):
+        offset = scale_w / 2 if row % 2 else 0
+        for col in range(-1, 3):
+            cx = col * scale_w + offset + scale_w / 2
+            cy = row * row_h
+            radius = scale_w * 0.62
+            pygame.draw.circle(art, pal["base"] if (row + col) % 2 == 0
+                               else pal["light"], (cx, cy), radius)
+            pygame.draw.circle(art, pal["dark"], (cx, cy), radius,
+                               max(2, int(size / 40)))
+
+
+def _tess_octagons(art, size, pal, n=2):
+    """Octagons in a square lattice with small square gaps between them."""
+    pitch = size / n
+    side = pitch / (1 + math.sqrt(2))
+    half = pitch / 2
+    for row in range(n):
+        for col in range(n):
+            cx, cy = col * pitch + half, row * pitch + half
+            colour = pal["base"] if (row + col) % 2 == 0 else pal["light"]
+            pygame.draw.polygon(art, colour, [
+                (cx - half, cy - side / 2), (cx - side / 2, cy - half),
+                (cx + side / 2, cy - half), (cx + half, cy - side / 2),
+                (cx + half, cy + side / 2), (cx + side / 2, cy + half),
+                (cx - side / 2, cy + half), (cx - half, cy + side / 2)])
+
+
+def _tess_cracked(art, size, pal, rows=4):
+    """A triangle lattice split by a jagged crack that runs through the tile."""
+    _tess_triangles(art, size, pal, rows)
+    crack = [(0, size * 0.2), (size * 0.25, size * 0.42), (size * 0.1, size * 0.62),
+             (size * 0.4, size * 0.8), (size * 0.3, size), (size * 0.5, size * 0.86)]
+    pygame.draw.lines(art, shade(pal["base"], -0.8), False, crack,
+                      max(2, int(size / 26)))
+    for x, y, r in ((0.62, 0.28, 0.05), (0.72, 0.66, 0.035), (0.86, 0.18, 0.03)):
+        pygame.draw.circle(art, shade(pal["base"], -0.6),
+                           (size * x, size * y), size * r)
+
+
+def _tess_bars(art, size, pal, n=4, climbing=False):
+    """Vertical bars — even ones for a long track, a climbing ramp for prices."""
+    bar_w = size / n
+    for col in range(n):
+        height = (size * (col + 1) / n) if climbing else size
+        top = size - height
+        colour = pal["base"] if col % 2 == 0 else pal["light"]
+        pygame.draw.polygon(art, colour, [
+            (col * bar_w, top), (col * bar_w + bar_w * 0.72, top - bar_w * 0.18),
+            (col * bar_w + bar_w * 0.72, size), (col * bar_w, size)])
+        pygame.draw.line(art, pal["accent"], (col * bar_w, size), (col * bar_w, top),
+                         max(1, int(size / 60)))
+
+
+_TRIAL_TESSELLATIONS = {
+    # Each family draws one tile; the arrow-style ones tilt their shapes so the
+    # pattern reads as movement even before the colours are taken in.
+    "rings": _tess_rings,
+    "triangles": _tess_triangles,
+    "chevrons": _tess_chevrons,
+    "checker": _tess_checker,
+    "splits": _tess_splits,
+    "tears": _tess_tears,
+    "pinwheel": _tess_pinwheel,
+    "circles": _tess_circles,
+    "dots": _tess_dots,
+    "scales": _tess_scales,
+    "octagons": _tess_octagons,
+    "cracked": _tess_cracked,
+    "bars": _tess_bars,
+    "pockets": _tess_rings,
+    "climbers": _tess_bars,
+}
+
+
+def _build_trial_tile(trial):
+    """Draw one trial's tile: a seamless tessellation in its own colours.
+
+    The tile is BOTH the trial's icon and the pattern the whole screen is
+    covered in while that trial runs (see draw_trial_tile, draw_background and
+    draw_collection_icon). Its family comes from Trial.TILE_STYLES and its few
+    colours from Trial.palette, so every trial is recognisable by its shapes and
+    its hue at once, at 40px (the collection icon) and at 80px (the background)
+    alike.
+    """
+    palette = Trial.palette(trial)
+    art = pygame.Surface((TRIAL_TILE_SIZE, TRIAL_TILE_SIZE))
+    art.fill(palette["base"])
+    style = Trial.TILE_STYLES.get(trial, "triangles")
+    if style == "pockets":
+        _tess_rings(art, TRIAL_TILE_SIZE, palette, hollow=True)
+    elif style == "climbers":
+        _tess_bars(art, TRIAL_TILE_SIZE, palette, climbing=True)
+    else:
+        _TRIAL_TESSELLATIONS[style](art, TRIAL_TILE_SIZE, palette)
+    return art
+
+
+def _trial_tile(trial):
+    """The cached tile for a trial (see _build_trial_tile)."""
+    art = _ICON_ART_CACHE.get(("trial", trial))
+    if art is None:
+        art = _build_trial_tile(trial)
+        _ICON_ART_CACHE[("trial", trial)] = art
+    return art
+
+
+def draw_trial_tile(surface, trial, rect):
+    """Blit a trial's tile into ``rect``.
+
+    This is the ONE place a trial tile is drawn, and a tile appears in exactly
+    two places: the whole screen is tiled with it while the trial runs (see
+    draw_background) and the collection shows one as the trial's entry icon
+    (see draw_collection_icon). Nothing else in the game uses it.
+    """
+    surface.blit(_trial_tile(trial), rect.topleft)
+
+
+_TRIAL_BACKGROUND_CACHE = {}
+
+
+def _trial_background(trial):
+    """The cached full-screen background for a trial: its tile edge to edge.
+
+    Built once per trial (the screen never changes size) instead of every
+    frame, because it is 15x10 tile blits. The tile size divides the screen, so
+    no partial tile is left at the edges and no shading pass is needed on top:
+    the tessellation IS the background (the panels drawn over it echo it in a
+    lighter shade — see panel_fill).
+    """
+    background = _TRIAL_BACKGROUND_CACHE.get(trial)
+    if background is None:
+        background = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
+        for y in range(0, SCREEN_HEIGHT, TRIAL_TILE_SIZE):
+            for x in range(0, SCREEN_WIDTH, TRIAL_TILE_SIZE):
+                draw_trial_tile(background, trial,
+                                pygame.Rect(x, y, TRIAL_TILE_SIZE, TRIAL_TILE_SIZE))
+        _TRIAL_BACKGROUND_CACHE[trial] = background
+    return background
+
+
+def panel_fill(game):
+    """The fill for the board, inventory and shop panels of a run.
+
+    While a trial is running these panels are filled with that trial's tile
+    colour, a little lighter (components.Trial.panel_color), so the play areas
+    read as part of the run's palette instead of a separate colour. With no
+    trial — not even a switched-off one, see Game.active_trial — it is the
+    game's own panel colour.
+    """
+    tint = Trial.panel_color(game.active_trial)
+    return MARBLE_BOX_COLOR if tint is None else tint
+
+
+def locked_fill(game):
+    """The fill for a LOCKED board square in a run.
+
+    The trial's tile colour again, a step darker than the panels (see
+    components.Trial.locked_color), so the squares the board cannot be played on
+    yet stay inside the run's palette instead of showing the red void through
+    it, while still reading as unlit next to the unlocked ones. With no trial it
+    is the void itself, exactly as before: there is no tile colour to match.
+    """
+    tint = Trial.locked_color(game.active_trial)
+    return BG_COLOR if tint is None else tint
+
+
+def draw_background(game):
+    """Paint the screen behind everything the game draws onto it.
+
+    While a trial is running the WHOLE screen is tiled with that trial's
+    tessellation, so the run's modifier is what the player sees around the
+    board; with no trial (and on the title, collection and other full-screen
+    tabs, which fill their own background) it is the plain background colour.
+    This is one of the two places a trial tile is ever drawn — see
+    draw_trial_tile.
+    """
+    trial = game.active_trial
+    if trial is None:
+        game.screen.fill(BG_COLOR)
+        return
+    game.screen.blit(_trial_background(trial), (0, 0))
 
 
 def _build_whole_card_art(card):
@@ -853,9 +1256,14 @@ def draw_card(screen, item, rect, selected=False):
 
 
 def draw_card_back(screen, rect):
-    """Draw a plain 'card back' for an empty card slot."""
-    pygame.draw.rect(screen, (70, 60, 100), rect, border_radius=6)
-    pygame.draw.rect(screen, (130, 120, 170), rect, 2, border_radius=6)
+    """Draw the slot back of an EMPTY card or action slot.
+
+    Both trays use it — an action slot is the same slot as a card slot, so an
+    empty slot looks the same wherever it is — and its corners are SQUARE: a
+    slot is a cell of the tray panel (see draw_marble_box), not a card face.
+    """
+    pygame.draw.rect(screen, (70, 60, 100), rect)
+    pygame.draw.rect(screen, (130, 120, 170), rect, 2)
     for gx in range(rect.left + 7, rect.right - 4, 8):
         for gy in range(rect.top + 7, rect.bottom - 4, 8):
             pygame.draw.circle(screen, (100, 90, 140), (gx, gy), 1)
@@ -925,12 +1333,6 @@ def _draw_version_tag(screen, rect, version):
         return
     badge = font("mini").render(f"v{version}", True, (255, 215, 0))
     screen.blit(badge, (rect.right - badge.get_width() - 3, rect.top + 2))
-
-
-def draw_action_back(screen, rect):
-    """Draw a plain 'action back' for an empty action slot."""
-    pygame.draw.rect(screen, (60, 50, 80), rect, border_radius=6)
-    pygame.draw.rect(screen, (110, 100, 140), rect, 2, border_radius=6)
 
 
 def make_icon():
@@ -1689,7 +2091,12 @@ def _marble_roll(marble):
 
 
 def _shade(color, factor):
-    """Brighten (factor > 1) or darken (factor < 1) an RGB color."""
+    """Brighten (factor > 1) or darken (factor < 1) an RGB color.
+
+    A plain multiply, unlike components.shade (which blends a fraction of the
+    way toward white or black): the marble shading below wants the multiply, the
+    trial tessellations want the blend.
+    """
     return tuple(max(0, min(255, int(c * factor))) for c in color)
 
 
@@ -1837,11 +2244,14 @@ def draw(game):
     if game.collection_open:
         draw_collection(game)
         return
-    game.screen.fill(RED)
+    draw_background(game)
     # The all-finishes trial paints the marble-box border in the finish
-    # scorer color so its edges read as a finish.
+    # scorer color so its edges read as a finish. Read from active_trial, not
+    # current_trial: a game with the trial system switched off holds an id it
+    # does not play (see Game.active_trial), and it must not get a finish
+    # border for a trial it is not running.
     box_border = (Scorer.color(Scorer.FINISH)
-                  if game.current_trial == Trial.ALL_FINISHES else (30, 30, 30))
+                  if game.active_trial == Trial.ALL_FINISHES else (30, 30, 30))
     draw_board(game, box_border)
     draw_run_dots(game)
 
@@ -1958,7 +2368,10 @@ def draw_trial_box(game):
         title = Trial.name(game.current_trial)
         desc = Trial.description(game.current_trial)
     box = TRIAL_BOX_RECT
-    pygame.draw.rect(game.screen, (25, 25, 40), box, border_radius=8)
+    # The display is a panel like the inventory and the shop (see panel_fill),
+    # so it takes the run's palette with them: the trial's tile is the SCREEN's
+    # background (see draw_background), not the box's own fill.
+    pygame.draw.rect(game.screen, panel_fill(game), box, border_radius=8)
     pygame.draw.rect(game.screen, (255, 215, 0), box, 2, border_radius=8)
     title_surf = game.font.render(title, True, (255, 215, 0))
     game.screen.blit(title_surf, title_surf.get_rect(center=(box.centerx, box.top + 13)))
@@ -2089,7 +2502,8 @@ def draw_run_dots(game):
 def draw_toolbox(game):
     """Draw the toolbox panel: its grid, title, and green selection borders."""
     box = game.toolbox
-    draw_marble_box(game.screen, box.rect.x, box.rect.y, box.cols, box.rows)
+    draw_marble_box(game.screen, box.rect.x, box.rect.y, box.cols, box.rows,
+                    fill=panel_fill(game))
 
     # The inventory title sits at the bottom-left of the panel. It hides
     # while the mouse is over the inventory so it never sits under the
@@ -2222,9 +2636,10 @@ def draw_action_area(game):
     """Draw the owned actions above the toolbox (max MAX_ACTIONS).
 
     Owned actions render as mini cards with a v1/v2 tag (a gold frame and a
-    gold plate for the upgraded ones — see draw_action); empty slots show a
-    back. The selected action gets a green outline, and its upgrade button
-    appears beside the area (v1 -> v2 for ACTION_UPGRADE_COST).
+    gold plate for the upgraded ones — see draw_action); empty slots show the
+    same slot back the card tray uses (see draw_card_back). The selected action
+    gets a green outline, and its upgrade button appears beside the area
+    (v1 -> v2 for ACTION_UPGRADE_COST).
     """
     x, y = ACTION_AREA_COORDS[0], ACTION_AREA_COORDS[1]
     draw_marble_box(game.screen, x, y, MAX_ACTIONS, 1)
@@ -2236,7 +2651,7 @@ def draw_action_area(game):
             draw_action(game.screen, game.actions[i], rect,
                         selected=game.selected_action is game.actions[i])
         else:
-            draw_action_back(game.screen, rect)
+            draw_card_back(game.screen, rect)
     # The upgrade button shows while an action is selected.
     action = game.selected_action
     if action is not None and action in game.actions:
@@ -2344,7 +2759,8 @@ def shop_message_layout(game, message):
 def draw_shop(game):
     """Draw the shop panel, its items, prices, refresh button, and messages."""
     shop = game.shop
-    draw_marble_box(game.screen, shop.rect.x, shop.rect.y, shop.cols, shop.rows)
+    draw_marble_box(game.screen, shop.rect.x, shop.rect.y, shop.cols, shop.rows,
+                    fill=panel_fill(game))
 
     # The shop title sits at the bottom-left of the panel. It hides while the
     # mouse is over the shop so it never sits under the cursor.
@@ -2688,8 +3104,15 @@ def draw_upgrades(game):
     text = game.font.render("RETURN TO MAIN MENU", True, WHITE)
     game.screen.blit(text, text.get_rect(center=back.center))
 def draw_collection_icon(game, kind, value, rect):
-    """Draw an entry's icon (a mini card, a shape outline, an effect icon, or a
-    scorer tile) into the given rect. Trials and the final boss have no icon."""
+    """Draw an entry's icon (a mini card, a shape outline, an effect icon, a
+    scorer tile, or a trial's own tile) into the given rect. The final boss
+    has no icon."""
+    if kind == "trial":
+        # A trial's icon is its tile: the same square the trial display is
+        # covered in (see _build_trial_tile).
+        draw_trial_tile(game.screen, value, rect)
+        pygame.draw.rect(game.screen, WHITE, rect, 1)
+        return
     if kind == "card":
         draw_card(game.screen, CardItem(value, 0), rect)
         return

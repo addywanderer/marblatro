@@ -16,6 +16,7 @@
   "runs_cleared": 1,
   "failed_runs": 1,
   "current_trial": 7,
+  "difficulty": 4,
   "final_boss": null,
   "cards": [],
   "actions": [],
@@ -30,16 +31,19 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -47,17 +51,22 @@
       "x": 4,
       "y": 7,
       "shape": 3,
-      "effects": [],
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
       "scorer": 23,
       "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
-      "triggers_left": 0,
+      "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -68,16 +77,19 @@
       "effects": [
         0
       ],
+      "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
       "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     },
     {
       "kind": "block",
@@ -85,17 +97,22 @@
       "x": 4,
       "y": 8,
       "shape": 8,
-      "effects": [],
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
       "scorer": 0,
       "scorer_amount": 0.0,
       "angle": 0,
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
       "spin": 0.0,
-      "triggers_left": 0,
+      "triggers_left": 1,
       "portal_uses_left": 0,
-      "fragile_shape": null
+      "fragile_shape": null,
+      "resale_price": null
     }
   ],
   "shop": [
@@ -166,17 +183,19 @@
       "kind": "card",
       "value": 2310,
       "price": 37,
+      "amount": 0,
       "col": 1,
       "row": 3,
-      "name": "Drain card (Effective)"
+      "name": "Growing card (Rubble)"
     },
     {
       "kind": "card",
       "value": 2319,
       "price": 63,
+      "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "Piston card (Effective)"
+      "name": "Explorer card (Ideas)"
     },
     {
       "kind": "condition",
@@ -223,11 +242,13 @@
       "effects": [
         10
       ],
+      "effect_amounts": {},
       "scorer": 10,
       "scorer_amount": 1.0,
       "price": 36,
       "name": "Circle Shreds",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     },
@@ -240,11 +261,13 @@
       "effects": [
         1
       ],
+      "effect_amounts": {},
       "scorer": 7,
       "scorer_amount": 3.0,
       "price": 36,
       "name": "Rect Cash",
       "portal_number": 0,
+      "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0
     }
@@ -280,11 +303,11 @@
       1.0
     ]
   ],
-  "part_points": 0,
+  "tesseract_bonus": 1.0,
+  "tokens": [],
   "shred_points": 0,
   "rubble_points": 0,
   "idea_points": 0,
-  "fresh_points": 0,
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
@@ -294,9 +317,10 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 1,
+  "score_chips": 61,
   "score_mult": 1,
-  "last_run_cash_gained": 32,
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       5,
