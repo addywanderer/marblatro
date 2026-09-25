@@ -863,7 +863,9 @@ class Card:
       effect that fires at the start of a run, at the end of it, or when a
       fragile block breaks (see Card.NAMED and cards.apply_cards), and each
       keeps the name, the flavour comment and the trigger prose of the named
-      CONDITION it was briefly split into.
+      CONDITION it was briefly split into. Fountain, the one card in that table
+      which never was a named condition, is measured exactly the same way, so
+      it sits with them.
     * the utility cards (ERR 404's random grant, Blueprint's copy, Showman's
       duplicate rule, Garden's seeds, Coupon's discount, ...), which work
       through a passive rule read with Game._has_card or through the code that
@@ -900,6 +902,13 @@ class Card:
     PAINTING = 92      # +3 chips per $1 of the board's sell value, at the start
     SYNTHESIZER = 93   # +3 mult per card in the card area, at the start
     ISLAND = 99        # +0.5 xMult per unconnected group of units, at the start
+    # The measured family's newest member, and the first one that never was a
+    # named condition: a whole card whose payoff is a per-run MEASUREMENT,
+    # exactly like the named cards above (see Card.NAMED), so it plays through
+    # the same start/end machinery. It takes the first free id in the 12..77
+    # band: the named conditions' ids are all taken, and Fountain was never one
+    # of them.
+    FOUNTAIN = 12      # +0.25 xMult per 3 different pipe-group blocks in a row
     # Owning the Showman card lets the player buy more than one copy of any
     # other card (duplicates are otherwise blocked).
     SHOWMAN = 78
@@ -951,6 +960,7 @@ class Card:
         PAINTING: "Painting",
         SYNTHESIZER: "Synthesizer",
         ISLAND: "Island",
+        FOUNTAIN: "Fountain",
         ERR_404: "[ERR 404: CARD NOT FOUND]",
         BLUEPRINT: "Blueprint",
         SHOWMAN: "Showman",
@@ -990,6 +1000,7 @@ class Card:
         PAINTING: "A masterpiece.",
         SYNTHESIZER: "A chorus of parts.",
         ISLAND: "Surrounded by nothing.",
+        FOUNTAIN: "Water always finds a way.",
         ERR_404: "This card does not exist.",
         BLUEPRINT: "Copy of a copy.",
         SHOWMAN: "The more the merrier.",
@@ -1029,6 +1040,7 @@ class Card:
         PAINTING: "Adds 3 chips at the start of the run for each $1 of the total sell price of the blocks on your board",
         SYNTHESIZER: "Adds 3 mult at the start of the run for each card in your card area",
         ISLAND: "Adds 0.5 xMult at the start of the run for each unconnected group of unlocked board units",
+        FOUNTAIN: "Adds 0.25 xMult at the end of the run for every 3 different Pipe, Drain or Pipe Bend blocks the marble touches in a row",
         ERR_404: r"\marblatro\main.py, line 2339: 'self._return_card()' CardNotFoundError: Card was not found [FATAL]",
         BLUEPRINT: "Copies the function of the card to its immediate left in the card area",
         SHOWMAN: "Lets cards you already own show up in the shop again, so you can own more than one of the same card",
@@ -1062,13 +1074,17 @@ class Card:
     # Banker 14+12=26 -> $20, Wrecking Ball 17+17=34 -> $27, Skater 16+25=41 ->
     # $32, Glitch 12+17=29 -> $23, Ripped Card 12+12=24 -> $19, Cozy 17+12=29 ->
     # $23, Painting 15+12=27 -> $21, Synthesizer 15+17=32 -> $25, Island
-    # 16+25=41 -> $32.
+    # 16+25=41 -> $32. Fountain has no named condition behind it, so it is
+    # priced off the two parts it is made of the same way: the PIPE GROUP it
+    # watches (18, the price of a Pipe/Drain/Pipe Bend collision condition —
+    # see match_group_price) plus the xMult scorer half (25) = 43 -> $34.
     PRICES: ClassVar[dict[int, int]] = {JOKER: 24, EXPLORER: 32, ASTRONAUT: 27,
                                         PLANE: 22, PILLAR: 26, BANKER: 20,
                                         WRECKING_BALL: 27, SKATER: 32,
                                         GLITCH: 23, RIPPED_CARD: 19,
                                         COZY: 23, PAINTING: 21,
                                         SYNTHESIZER: 25, ISLAND: 32,
+                                        FOUNTAIN: 34,
                                         ERR_404: 19, BLUEPRINT: 33, SHOWMAN: 48,
                                         GARDEN: 36, RIGGED_CASINO: 38,
                                         CONQUISTADOR: 44, PEDESTAL: 44,
@@ -1099,6 +1115,7 @@ class Card:
         PAINTING: (200, 90, 130),   # canvas rose
         SYNTHESIZER: (140, 90, 210),  # synth violet
         ISLAND: (230, 200, 120),    # sand
+        FOUNTAIN: (70, 155, 205),   # fountain water
         ERR_404: (150, 40, 50),     # error red
         BLUEPRINT: (60, 110, 200),  # blueprint blue
         SHOWMAN: (210, 60, 90),     # showman red
@@ -1133,6 +1150,7 @@ class Card:
         BANKER: "$", WRECKING_BALL: "H", SKATER: "S", GLITCH: "#",
         RIPPED_CARD: "R", COZY: "~", PAINTING: "P", SYNTHESIZER: "Y",
         ISLAND: "L",
+        FOUNTAIN: "F",
         ERR_404: "4", BLUEPRINT: "B", SHOWMAN: "!",
         GARDEN: "G", RIGGED_CASINO: "R", CONQUISTADOR: "C",
         PEDESTAL: "P", INFERNO: "I", DOPPELGANGER: "D",
@@ -1157,7 +1175,7 @@ class Card:
                                   PAINTING, SYNTHESIZER,
                                   TESSERACT,
                                   THOUSAND_HANDED, PROCRASTINATION, ESSENCE,
-                                  CONCERT, ISLAND]
+                                  CONCERT, ISLAND, FOUNTAIN]
     # How rare each whole card is. A whole card's tier follows its price, the
     # codebase's usual rarity rule (see component_weight): up to $28 Common,
     # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
@@ -1169,14 +1187,17 @@ class Card:
         # Common: the joke card and the cheap utility.
         ERR_404: Rarity.COMMON, MARKET: Rarity.COMMON,
         MINESHAFT: Rarity.COMMON,
-        # The named cards up to $28 are Common too (most of them), the three
-        # dearest ($32) are Unusual.
+        # The named cards and the measured card added after them: everything
+        # whose tier follows a price band, which is every whole card except the
+        # three cheap utility ones below. The two dearest measured cards ($32)
+        # are Unusual along with Fountain ($34).
         JOKER: Rarity.COMMON, PLANE: Rarity.COMMON, BANKER: Rarity.COMMON,
         PILLAR: Rarity.COMMON, ASTRONAUT: Rarity.COMMON,
         WRECKING_BALL: Rarity.COMMON, GLITCH: Rarity.COMMON,
         RIPPED_CARD: Rarity.COMMON, COZY: Rarity.COMMON,
         PAINTING: Rarity.COMMON, SYNTHESIZER: Rarity.COMMON,
         EXPLORER: Rarity.UNUSUAL, SKATER: Rarity.UNUSUAL, ISLAND: Rarity.UNUSUAL,
+        FOUNTAIN: Rarity.UNUSUAL,
         # Unusual: single-mechanic helpers.
         BLUEPRINT: Rarity.UNUSUAL, GARDEN: Rarity.UNUSUAL,
         COMPOUND_INTEREST: Rarity.UNUSUAL, RIGGED_CASINO: Rarity.UNUSUAL,
@@ -1191,8 +1212,8 @@ class Card:
         SHOWMAN: Rarity.LEGENDARY, ESSENCE: Rarity.LEGENDARY,
         INFERNO: Rarity.LEGENDARY,
     }
-    # --- The named cards' effects: id -> (phase, scorer, ratio, measure) ---
-    # Each named card fires ONCE per run (or once per fragile break) and pays a
+    # --- The measured whole cards' effects: id -> (phase, scorer, ratio, measure) ---
+    # Each card fires ONCE per run (or once per fragile break) and pays a
     # fixed amount: the canonical pairing it had as a named condition, at the
     # magnitude model every card in the game used then. ``scorer`` and ``ratio``
     # together give the payoff through components.magnitude_payoff(scorer, ratio,
@@ -1223,6 +1244,11 @@ class Card:
         PAINTING: ("start", Scorer.CHIPS_ADD, 0.1, "painting"),
         SYNTHESIZER: ("start", Scorer.MULT_ADD, 0.75, "synthesizer"),
         ISLAND: ("start", Scorer.MULT_MUL, 2.0, "island"),
+        # The first card in this table that was never a named condition: it
+        # measures a run the same way the rest of them do, so it plays through
+        # the same start/end machinery. Its ratio is exactly 1.0, which is what
+        # makes one unit +0.25 xMult (see the standard bases above).
+        FOUNTAIN: ("end", Scorer.MULT_MUL, 1.0, "pipe_streak"),
     }
 
     @classmethod
@@ -2978,8 +3004,13 @@ def card_price_for(card):
 # (Common weighs 1 against a Legendary's 0.2 — see Rarity.WEIGHTS) and the card
 # inside it flat, all 26 groups share the ONE Common slice of the offers along
 # with the 3 cheap whole cards, instead of each group adding its own.
+# The pipe group, by name: the shapes the Fountain whole card watches (it
+# counts the blocks of a marble's contacts that are in it — see Game's pipe
+# streak counters) and the first group of SHAPE_GROUPS below, so the card and
+# the match-group catalogue can never disagree about what a pipe is.
+PIPE_GROUP_SHAPES = (Shape.PIPE, Shape.DRAIN, Shape.PIPE_BEND)
 SHAPE_GROUPS = (
-    (Shape.PIPE, Shape.DRAIN, Shape.PIPE_BEND),
+    PIPE_GROUP_SHAPES,
     (Shape.PLATFORM, Shape.CORNER),
     (Shape.KEY, Shape.LOCK),
     (Shape.BUMP, Shape.CIRCLE),

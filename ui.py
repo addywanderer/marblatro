@@ -1100,6 +1100,26 @@ def _build_whole_card_art(card):
         l(20, 12, 31, 6, 3)             # frond (up-right)
         l(20, 13, 13, 18, 3)            # frond (low-left)
         l(20, 13, 27, 18, 3)            # frond (low-right)
+    elif card == Card.FOUNTAIN:               # a tiered fountain, running
+        # The marble's pipe chain, as water: a jet over a top bowl, the arcs
+        # of water spilling off both bowls' rims, and the basin the whole
+        # thing stands in. The arcs are the tell — as plain bowls the tiers
+        # read as a monument (the Pillar) rather than a fountain.
+        l(20, 2, 20, 7, 2)              # the spout
+        p([(15, 7), (25, 7), (22, 12), (18, 12)])    # the top bowl
+        l(15, 8, 9, 13, 2)              # water arcing off its rim (left)
+        l(25, 8, 31, 13, 2)             # ... (right)
+        c(9, 15, 1.5)                   # a droplet falling from each arc
+        c(31, 15, 1.5)
+        r(19, 12, 2, 6)                 # the stem between the bowls
+        p([(8, 18), (32, 18), (27, 26), (14, 26)])   # the lower bowl
+        l(8, 19, 4, 24, 2)              # its rim spills too (left)
+        l(32, 19, 36, 24, 2)            # ... (right)
+        r(19, 26, 2, 5)                 # the stem into the basin
+        r(3, 30, 34, 3)                 # the basin's rim
+        p([(3, 33), (37, 33), (32, 38), (8, 38)])    # the basin
+        l(10, 35, 16, 35, 2)            # the water standing in it
+        l(24, 35, 30, 35, 2)
     elif card == Card.COZY:                   # a small warm house
         p([(7, 20), (20, 9), (33, 20)])
         r(12, 20, 16, 14)

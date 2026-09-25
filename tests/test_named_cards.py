@@ -1,16 +1,21 @@
-"""The fourteen named cards: the classic cards, back as unsplittable cards.
+"""The measured whole cards: the fourteen classic cards, plus the Fountain.
 
 Each named CONDITION the card system was built around is one whole card again
 (user request: "add back the named conditions you commented out, as
 unsplittable cards"), so the trigger and the payoff live in the card: nothing is
 composed, nothing splits, and nothing is rolled — a Joker always pays +4 mult.
+The Fountain (user request: "add a card, fountain, that gives +0.25 xmult for
+each time a marble consecutively touches 3 different blocks with each one in the
+pipe group") is the one card in that table which never was a named condition: it
+is measured exactly the same way, so it plays through the same machinery.
 
 The payoffs are the canonical (condition x scorer) pairings the named conditions
 came from, on the magnitude model every card used then: one unit is
 +30 chips / +4 mult / +0.25 xMult, scaled by the card's ratio (see
 components.Card.NAMED). So Joker ratio 1.0 is +4 mult, Pillar 0.25 is +1 mult a
 column block, Plane 0.5 is +15 chips an air second, Banker 1/30 is +1 chip per
-$10, Ripped Card 4.0 is +120 chips, Island 2.0 is +0.5 xMult a group.
+$10, Ripped Card 4.0 is +120 chips, Island 2.0 is +0.5 xMult a group, and
+Fountain 1.0 is +0.25 xMult a pipe streak.
 
 Where each card fires: the start of a run (cards.apply_cards, called by
 reset_run), the end of it (cards.apply_cards_on_finish, called by the run's
@@ -28,15 +33,15 @@ def _own(*values):
 
 
 class NamedCardCatalogueTests(GameTestCase):
-    """The fourteen cards exist, priced, tiered, drawn and unsplittable."""
+    """The measured cards exist, priced, tiered, drawn and unsplittable."""
 
-    def test_the_fourteen_named_cards_are_whole_cards(self):
+    def test_the_measured_cards_are_whole_cards(self):
         names = [main.Card.name(value) for value in components.NAMED_CARD_ORDER]
         self.assertEqual(names,
                          ["Joker", "Explorer", "Astronaut", "Plane", "Pillar",
                           "Banker", "Wrecking Ball", "Skater", "Glitch",
                           "Ripped Card", "Cozy", "Painting", "Synthesizer",
-                          "Island"])
+                          "Island", "Fountain"])
         for value in components.NAMED_CARD_ORDER:
             with self.subTest(card=main.Card.name(value)):
                 # A whole card: in the catalogue (so the shop offers it and the
@@ -59,7 +64,8 @@ class NamedCardCatalogueTests(GameTestCase):
         self.assertEqual(starts, {"Joker", "Pillar", "Banker", "Glitch",
                                   "Ripped Card", "Cozy", "Painting",
                                   "Synthesizer", "Island"})
-        self.assertEqual(ends, {"Explorer", "Astronaut", "Plane", "Skater"})
+        self.assertEqual(ends, {"Explorer", "Astronaut", "Plane", "Skater",
+                                "Fountain"})
         self.assertEqual([name for name, phase in phases.items()
                           if phase == "fragile"], ["Wrecking Ball"])
         # A card that is not named has no start/end/fragile phase at all: the
@@ -74,6 +80,9 @@ class NamedCardCatalogueTests(GameTestCase):
     def test_the_payoffs_are_the_canonical_pairings(self):
         # (phase, scorer, ratio, measure) per card — the named condition each
         # one came from, whose canonical scorer reproduces the classic card.
+        # Fountain never was a named condition, so its row is the one card here
+        # whose ratio (1.0) was chosen rather than inherited: 1.0 x the standard
+        # +0.25 xMult base is the +0.25 the card asks for.
         expected = {
             "Joker": ("start", main.Scorer.MULT_ADD, 1.0, "start"),
             "Explorer": ("end", main.Scorer.MULT_MUL, 1.0, "distance"),
@@ -90,6 +99,7 @@ class NamedCardCatalogueTests(GameTestCase):
             "Painting": ("start", main.Scorer.CHIPS_ADD, 0.1, "painting"),
             "Synthesizer": ("start", main.Scorer.MULT_ADD, 0.75, "synthesizer"),
             "Island": ("start", main.Scorer.MULT_MUL, 2.0, "island"),
+            "Fountain": ("end", main.Scorer.MULT_MUL, 1.0, "pipe_streak"),
         }
         for value in components.NAMED_CARD_ORDER:
             meta = components.named_card_meta(value)
@@ -112,26 +122,26 @@ class NamedCardCatalogueTests(GameTestCase):
             else:
                 self.assertLessEqual(tier, components.Rarity.RARE,
                                      main.Card.name(value))
-        # Eleven cheap named cards and the three dear ones ($32 each): every
-        # named card is a Common or an Unusual, so none of them is a chase card.
+        # Eleven cheap measured cards and the four dear ones ($32/$34): every
+        # one of them is a Common or an Unusual, so none is a chase card.
         self.assertEqual(tiers[components.Rarity.COMMON], 11)
-        self.assertEqual(tiers[components.Rarity.UNUSUAL], 3)
+        self.assertEqual(tiers[components.Rarity.UNUSUAL], 4)
         self.assertEqual({main.Card.rarity(v) for v in
                           (main.Card.EXPLORER, main.Card.SKATER,
-                           main.Card.ISLAND)},
+                           main.Card.ISLAND, main.Card.FOUNTAIN)},
                          {components.Rarity.UNUSUAL})
 
-    def test_every_named_card_has_icon_art(self):
+    def test_every_measured_card_has_icon_art(self):
         # The card face draws the named condition's own art (the jester's hat,
-        # the compass, the column, ...), so no named card falls back to a letter
-        # and no two named cards wear the same picture.
+        # the compass, the column, ...), so no card here falls back to a letter
+        # and no two of them wear the same picture.
         drawings = set()
         for value in components.NAMED_CARD_ORDER:
             art = main.ui._whole_card_art(value)
             self.assertGreater(art.get_bounding_rect().width, 0,
                                main.Card.name(value))
             drawings.add(pygame.image.tobytes(art, "RGBA"))
-        self.assertEqual(len(drawings), 14)
+        self.assertEqual(len(drawings), 15)
 
     def test_the_shop_pool_holds_the_named_cards(self):
         pool = main.card_offer_entries()
@@ -291,7 +301,7 @@ class NamedCardStartTests(GameTestCase):
 
 
 class NamedCardEndTests(GameTestCase):
-    """The four cards whose measure is only final once the run is over."""
+    """The five cards whose measure is only final once the run is over."""
 
     def _finish(self, *values):
         self.game.cards = _own(*values)
@@ -372,6 +382,115 @@ class NamedCardEndTests(GameTestCase):
         self.game._handle_block_contacts([])
         self.assertAlmostEqual(self.game.score_mult, 2.0)
         self.assertTrue(self.game.run_complete)
+
+
+class FountainTests(GameTestCase):
+    """The Fountain: +0.25 xMult for every 3 different pipe blocks in a row."""
+
+    def _pipe(self, shape, gx):
+        """A plain pipe-group block on the board, at column ``gx``."""
+        block = main.Block(gx, 0, shape=shape)
+        self.game.grid[(gx, 0)] = block
+        return block
+
+    def _touch(self, block):
+        """One FRESH contact with a block, through the real contact handler.
+
+        Physics raises and lowers ``collisions_this_tick`` as the marble enters
+        and leaves a block, so writing the tick's contact list by hand is how
+        every other contact test drives a touch (see GameTestCase._touch_block).
+        """
+        marble = (self.game.marbles[0] if self.game.marbles
+                  else self._add_marble())
+        marble.collisions_this_tick = [block]
+        self.game.run_active = True
+        self.game._handle_block_contacts([block])
+
+    def test_the_fountain_counts_the_pipe_group_of_shapes(self):
+        # The group is the three shapes the user named — Pipe Bend, Pipe and
+        # Drain — and it is literally the match-group catalogue's pipe group, so
+        # the card and the Pipe/Drain/Pipe Bend cards can never disagree about
+        # what a pipe is.
+        self.assertEqual(components.PIPE_GROUP_SHAPES,
+                         (main.Shape.PIPE, main.Shape.DRAIN,
+                          main.Shape.PIPE_BEND))
+        self.assertIs(components.SHAPE_GROUPS[0], components.PIPE_GROUP_SHAPES)
+        self.assertEqual(main.FOUNTAIN_STREAK_LENGTH, 3)
+        self.assertIn("Pipe, Drain or Pipe Bend",
+                      main.Card.description(main.Card.FOUNTAIN))
+        self.assertIn("0.25 xMult", main.Card.description(main.Card.FOUNTAIN))
+        self.assertEqual(main.Card.rarity_name(main.Card.FOUNTAIN), "Unusual")
+
+    def test_three_different_pipe_blocks_in_a_row_pay_a_quarter_xmult(self):
+        self.game.cards = _own(main.Card.FOUNTAIN)
+        for gx, shape in enumerate((main.Shape.PIPE, main.Shape.PIPE_BEND,
+                                    main.Shape.DRAIN)):
+            self._touch(self._pipe(shape, gx))
+        self.assertEqual(self.game.pipe_streak_run_units, 1)
+        self.game.score_mult = 10
+        self.game._apply_cards_on_finish()
+        self.assertAlmostEqual(self.game.score_mult, 10 * 1.25)
+        self.assertEqual(len(self.game.score_particles), 1)
+
+    def test_the_streak_wants_three_DIFFERENT_blocks(self):
+        # Touching one pipe block again is not a new block: it neither advances
+        # the streak nor breaks it (the marble rolls along a pipe's own wall for
+        # many frames), so the group completes on the third DIFFERENT block.
+        pipe = self._pipe(main.Shape.PIPE, 0)
+        drain = self._pipe(main.Shape.DRAIN, 1)
+        bend = self._pipe(main.Shape.PIPE_BEND, 2)
+        for block in (pipe, pipe, drain):
+            self._touch(block)
+        # pipe, pipe, drain is only TWO different blocks: no group yet.
+        self.assertEqual(self.game.pipe_streak_run_units, 0)
+        self.assertEqual(self.game.pipe_streak_blocks, [pipe, drain])
+        self._touch(bend)
+        self.assertEqual(self.game.pipe_streak_run_units, 1)
+        self.assertEqual(self.game.pipe_streak_blocks, [])
+
+    def test_any_other_block_breaks_the_streak(self):
+        pipe = self._pipe(main.Shape.PIPE, 0)
+        drain = self._pipe(main.Shape.DRAIN, 1)
+        wall = main.Block(5, 0, shape=main.Shape.RECT)
+        self.game.grid[(5, 0)] = wall
+        for block in (pipe, drain, wall):
+            self._touch(block)
+        # Two pipe blocks and then something else: the streak is gone, and the
+        # next pipe block starts a fresh one from scratch.
+        self.assertEqual(self.game.pipe_streak_blocks, [])
+        self._touch(self._pipe(main.Shape.PIPE_BEND, 2))
+        self.assertEqual(self.game.pipe_streak_run_units, 0)
+        self.assertEqual(len(self.game.pipe_streak_blocks), 1)
+
+    def test_a_longer_chain_pays_a_group_for_every_three(self):
+        shapes = (main.Shape.PIPE, main.Shape.DRAIN, main.Shape.PIPE_BEND,
+                  main.Shape.PIPE, main.Shape.DRAIN, main.Shape.PIPE_BEND)
+        for gx, shape in enumerate(shapes):
+            self._touch(self._pipe(shape, gx))
+        self.game.cards = _own(main.Card.FOUNTAIN)
+        self.game.score_mult = 4
+        self.game._apply_cards_on_finish()
+        # Two groups pay +0.25 each: ONE x1.5 factor, not two compounded x1.25s,
+        # exactly as the other measured xMult cards pay (Island's groups, the
+        # Skater's slippery blocks, the Explorer's distance).
+        self.assertAlmostEqual(self.game.score_mult, 4 * (1 + 0.25 * 2))
+
+    def test_no_streak_pays_nothing(self):
+        self.game.cards = _own(main.Card.FOUNTAIN)
+        self.game.score_mult = 7
+        self.game._apply_cards_on_finish()
+        self.assertEqual(self.game.score_mult, 7)
+        self.assertEqual(len(self.game.score_particles), 0)
+
+    def test_the_streak_belongs_to_the_run(self):
+        for gx, shape in enumerate((main.Shape.PIPE, main.Shape.DRAIN,
+                                    main.Shape.PIPE_BEND)):
+            self._touch(self._pipe(shape, gx))
+        self.assertEqual(self.game.pipe_streak_run_units, 1)
+        self.game.grid[(9, 9)] = main.Block(9, 9, scorer=main.Scorer.START)
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.pipe_streak_run_units, 0)
+        self.assertEqual(self.game.pipe_streak_blocks, [])
 
 
 class NamedCardFragileTests(GameTestCase):

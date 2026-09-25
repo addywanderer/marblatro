@@ -20,8 +20,8 @@ class CardRarityTests(GameTestCase):
 
     def test_every_card_has_a_rarity(self):
         cards = list(main.Card.ORDER) + components.match_group_card_values()
-        # 34 whole cards (the 14 named ones among them) + 832 group cards.
-        self.assertEqual(len(cards), 866)
+        # 35 whole cards (the 15 measured ones among them) + 832 group cards.
+        self.assertEqual(len(cards), 867)
         for value in cards:
             self.assertIn(value, main.Card.RARITIES, main.Card.name(value))
             self.assertIn(main.Card.rarity(value), components.Rarity.ORDER,
@@ -109,15 +109,15 @@ class CardRarityTests(GameTestCase):
     def test_a_rarer_tier_is_offered_the_ratio_less_often(self):
         # Measured through the real offer draw: the share of offers that come
         # out of each TIER follows the weights, 1 : 0.7 : 0.5 : 0.3 : 0.2 — and
-        # it follows them even though the tiers hold 40/7/7/3/3 pool entries,
+        # it follows them even though the tiers hold 40/8/7/3/3 pool entries,
         # which is the point of drawing the tier before the card.
         random.seed(90210)
         draws = [main.random_card_option_value() for _ in range(60000)]
         counted = collections.Counter(main.Card.rarity(value) for value in draws)
         entries = {tier: len(main.card_offer_entries(tier))
                    for tier in components.Rarity.ORDER}
-        # 34 whole cards + 26 groups, and the tiers are very unevenly sized.
-        self.assertEqual(sum(entries.values()), 60)
+        # 35 whole cards + 26 groups, and the tiers are very unevenly sized.
+        self.assertEqual(sum(entries.values()), 61)
         self.assertEqual(entries[components.Rarity.COMMON], 40)
         # The tiers are wildly different sizes, so a count-driven draw would
         # show a different pattern: assert the ratio is what decides.

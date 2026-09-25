@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": 60,
+  "cash": 26,
   "run_number": 0,
   "round_index": 0,
   "run_in_round": 0,
@@ -16,7 +16,25 @@
   "final_boss": null,
   "cards": [],
   "actions": [],
-  "toolbox": [],
+  "toolbox": [
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 21,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 23,
+      "scorer_amount": 0.0,
+      "price": 25,
+      "name": "Lock Lucky",
+      "portal_number": 0,
+      "key_number": 1,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    }
+  ],
   "grid": [
     {
       "kind": "block",
@@ -44,8 +62,8 @@
     {
       "kind": "block",
       "placed": true,
-      "x": 4,
-      "y": 8,
+      "x": 5,
+      "y": 7,
       "shape": 0,
       "effects": [
         0
@@ -63,6 +81,27 @@
       "portal_uses_left": 0,
       "fragile_shape": null,
       "resale_price": 53
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 8,
+      "shape": 20,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 23,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 1,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 25
     }
   ],
   "shop": [
@@ -224,7 +263,18 @@
       "trigger_paid": 0
     }
   ],
-  "component_purchases": [],
+  "component_purchases": [
+    [
+      "scorer",
+      23,
+      1
+    ],
+    [
+      "shape",
+      21,
+      1
+    ]
+  ],
   "wrecking_bonus": [
     [
       1,

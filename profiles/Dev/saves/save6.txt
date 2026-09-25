@@ -1,1 +1,269 @@
-{"version": 1}
+{
+  "version": 1,
+  "cash": 60,
+  "run_number": 0,
+  "round_index": 0,
+  "run_in_round": 0,
+  "required_score": 1,
+  "required_scores": [
+    1
+  ],
+  "run_results": [],
+  "runs_cleared": 0,
+  "failed_runs": 0,
+  "current_trial": 12,
+  "difficulty": 4,
+  "final_boss": null,
+  "cards": [],
+  "actions": [],
+  "toolbox": [
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "price": 109,
+      "name": "Start Block",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 1,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "price": 53,
+      "name": "Finish Block",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    }
+  ],
+  "grid": [],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 8,
+      "amount": 0,
+      "price": 12,
+      "name": "Pipe Bend",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 9,
+      "amount": 0,
+      "price": 8,
+      "name": "Convex Slope",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 10,
+      "amount": 0,
+      "price": 24,
+      "name": "Growing",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 5,
+      "amount": 813.0,
+      "price": 23,
+      "name": "Black Hole",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 2,
+      "amount": 5.304,
+      "price": 17,
+      "name": "+Mult",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 28,
+      "amount": 4.206,
+      "price": 22,
+      "name": "Frontier",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 9,
+      "amount": 0.407,
+      "price": 11,
+      "name": "Parts",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "kind": "card",
+      "value": 3175,
+      "price": 55,
+      "amount": 3.652,
+      "col": 1,
+      "row": 3,
+      "name": "Peg/Spike/Sawtooth card (Satanic)"
+    },
+    {
+      "kind": "card",
+      "value": 90,
+      "price": 26,
+      "amount": 0,
+      "col": 2,
+      "row": 3,
+      "name": "Market"
+    },
+    {
+      "kind": "card",
+      "value": 10,
+      "price": 33,
+      "amount": 0,
+      "col": 3,
+      "row": 3,
+      "name": "Blueprint"
+    },
+    {
+      "kind": "card",
+      "value": 91,
+      "price": 40,
+      "amount": 0,
+      "col": 4,
+      "row": 3,
+      "name": "Watch"
+    },
+    {
+      "kind": "action",
+      "value": 1,
+      "price": 24,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Recognition"
+    },
+    {
+      "kind": "action",
+      "value": 5,
+      "price": 36,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Spirit"
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 20,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 33,
+      "scorer_amount": 15.6,
+      "price": 25,
+      "name": "Key Undertaker",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 8,
+      "row": 3,
+      "shape": 13,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 16,
+      "scorer_amount": 1.367,
+      "price": 20,
+      "name": "Spike Picky",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    }
+  ],
+  "component_purchases": [],
+  "wrecking_bonus": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      1.0
+    ]
+  ],
+  "tesseract_bonus": 1.0,
+  "tokens": [],
+  "shred_points": 0,
+  "rubble_points": 0,
+  "idea_points": 0,
+  "free_rerolls": 0,
+  "option_points": 0,
+  "bonus_slots": 0,
+  "marble_type": 2,
+  "upgrades_enabled": true,
+  "game_over": false,
+  "game_won": false,
+  "game_perfect": false,
+  "continue_past_game_over": false,
+  "score_chips": 1,
+  "score_mult": 1,
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
+  "unlocked_cells": [
+    [
+      5,
+      8
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      4,
+      7
+    ]
+  ],
+  "board_units": 0
+}

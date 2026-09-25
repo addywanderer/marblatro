@@ -16,6 +16,7 @@ from components import (
     MAGNITUDE_SCALE,
     MAGNITUDE_STEP_DIVISOR,
     MATCH_GROUPS,
+    PIPE_GROUP_SHAPES,
     RESOURCE_THRESHOLD,
     Action,
     Card,
@@ -270,6 +271,11 @@ MARKET_SELL_FRACTION = 0.75
 # at most the larger of the two: see Game.run_first_blocks).
 PEDESTAL_RETRIGGERS = 3
 WATCH_BLOCK_LIMIT = 5
+# The Fountain whole card pays +0.25 xMult for every this-many PIPE-GROUP blocks
+# (Pipe, Drain, Pipe Bend — see components.PIPE_GROUP_SHAPES) a marble touches in
+# a row without touching anything else; the run's sightings are counted in
+# Game._count_pipe_streak and read at the end of the run.
+FOUNTAIN_STREAK_LENGTH = 3
 # The Inferno whole card adds this to the total-score exponent.
 INFERNO_EXPONENT_BONUS = 0.07
 # The Tesseract whole card permanently gains this much xMult for every shop
@@ -2255,6 +2261,12 @@ class Game:
         # The block freshly touched right before the current one (Echo copies
         # its scorer); None until a second block has been contacted.
         self._prev_contact_block = None
+        # The pipe streak in progress (the DIFFERENT pipe-group blocks the
+        # marble has just touched in a row) and how many groups of three the run
+        # has completed — the Fountain whole card's measurement. Both are reset
+        # every run; see _count_pipe_streak.
+        self.pipe_streak_blocks = []
+        self.pipe_streak_run_units = 0
         # Bomb-scorer blocks touched THIS RUN, keyed by their grid cell. They
         # detonate after a run (unlock radius, then destroyed).
         self.bomb_cells = set()
@@ -2374,6 +2386,12 @@ class Game:
         # Trials can be disabled (used by tests so a random trial can't
         # interfere with a test's expected run behavior).
         self.trials_enabled = True
+        # The shop above was built BEFORE this game's opening run drew its
+        # trial (see _choose_trial above), so an opening Slim pickings run
+        # still has to shed its two options here. Every later shop is a
+        # refreshed one, and those trim as they are built (see _refresh_shop
+        # and _continue_run).
+        self._trim_shop_for_trial()
         # The toolbox starts with one Start block and one Finish block. They
         # are plain Rect blocks with no effects — exactly the shape and price
         # the shop sells a role block in (see Shop._scorer_offer), so a spare
@@ -4721,8 +4739,7 @@ class Game:
         if self.free_rerolls > 0:
             self.free_rerolls -= 1
             self.shop.refresh()
-            if self.trials_enabled and self.current_trial == Trial.SLIM_PICKINGS:
-                self._trim_shop_for_trial()
+            self._trim_shop_for_trial()
             left = f" ({self.free_rerolls} left)" if self.free_rerolls else ""
             self._set_shop_message(f"Free reroll{left}{self._tesseract_reroll_note()}"
                                    f"{self._v2_shelf_note()}")
@@ -4733,8 +4750,7 @@ class Game:
             return
         self.cash -= cost
         self.shop.refresh()
-        if self.trials_enabled and self.current_trial == Trial.SLIM_PICKINGS:
-            self._trim_shop_for_trial()
+        self._trim_shop_for_trial()
         self._set_shop_message(f"Refreshed shop (${cost})"
                                f"{self._tesseract_reroll_note()}"
                                f"{self._v2_shelf_note()}")
@@ -4753,7 +4769,20 @@ class Game:
         return f" — Tesseract x{self.tesseract_bonus:.1f}"
 
     def _trim_shop_for_trial(self):
-        """Slim pickings: remove two random shop options for this run."""
+        """Slim pickings: remove two random shop options for this run.
+
+        Called wherever a shop and the run's trial meet: after every shop
+        refresh (so each rerolled shop is two options lighter), when a run
+        advances onto the fresh shop built for it (see _continue_run), when a
+        trial is bought onto the shop already on screen (see
+        _click_trial_display), and once at game start — the game's opening shop
+        is built before that first run's trial is drawn, so an opening Slim
+        pickings run has to shed its options here too (see reset_game). Any
+        other trial (and trials switched off) leaves the shop alone, so all of
+        those places can simply call this.
+        """
+        if self.active_trial != Trial.SLIM_PICKINGS:
+            return
         if len(self.shop.items) > 2:
             for item in random.sample(self.shop.items, 2):
                 self.shop.items.remove(item)
@@ -5668,6 +5697,12 @@ class Game:
         self.run_first_blocks = []
         self._prev_contact_block = None
         self.bomb_cells = set()
+        # Fresh run: no pipe streak in progress and no completed streaks yet.
+        # A streak is the run of FRESH contacts that are PIPE-GROUP blocks (see
+        # _count_pipe_streak): its completed groups of three are what the
+        # Fountain whole card pays +0.25 xMult for.
+        self.pipe_streak_blocks = []
+        self.pipe_streak_run_units = 0
         # Fresh run: the type bonus counts only the types touched THIS run.
         self.touched_shapes = set()
         self.touched_effects = set()
@@ -5861,6 +5896,9 @@ class Game:
             self.cash -= TRIAL_CHANGE_COST
             self.current_trial = self._random_other_trial()
             self._apply_trial()
+            # A bought Slim pickings bites the shop already on screen, exactly
+            # as a rerolled one would (see _trim_shop_for_trial).
+            self._trim_shop_for_trial()
             self._set_shop_message(f"Trial changed: {Trial.name(self.current_trial)}"
                                    f" (${TRIAL_CHANGE_COST})")
             sounds.play_coin()
@@ -5977,6 +6015,10 @@ class Game:
         run). Deal breaker disables every owned card built on one decided match
         group (a shape group or an effect). Marble weight uses a decided
         heavier-or-lighter effect-push factor.
+
+        Slim pickings has no branch here: it acts on the SHOP rather than on
+        the board or the card area, so it is applied wherever a shop is built
+        or met instead (see _trim_shop_for_trial).
 
         The trial state is cleared again when the run advances (see
         _continue_run), so the NEXT run decides its own picks.
@@ -6218,6 +6260,39 @@ class Game:
         if block.scorer != Scorer.START and block.scorer != Scorer.FINISH:
             self.touch_scorer_counts[block.scorer] = self.touch_scorer_counts.get(block.scorer, 0) + 1
 
+    def _count_pipe_streak(self, block):
+        """Count one fresh contact toward the run's PIPE STREAK (Fountain).
+
+        A pipe streak is a run of FRESH contacts with PIPE-GROUP blocks (Pipe,
+        Drain, Pipe Bend — see components.PIPE_GROUP_SHAPES): every
+        FOUNTAIN_STREAK_LENGTH different ones in a row complete it, and the
+        Fountain whole card pays +0.25 xMult for each completed group when the
+        run ends (see cards._named_card_units).
+
+        Touching a pipe block that is ALREADY in the streak neither advances it
+        nor breaks it: the marble rolls along a pipe's own walls and sits on the
+        same pillar for many frames, and a repeat of a block it has already
+        counted is not a new "different block". Touching any block outside the
+        group is what breaks the streak. The Start and Finish roles are not
+        blocks hit (the same rule the run's first/last block follows, see
+        _handle_block_contacts), so they never break a streak.
+
+        Multi-marble runs share ONE streak: it follows the run's contact
+        sequence, exactly like the previous-block trail Echo reads.
+        """
+        if block.shape not in PIPE_GROUP_SHAPES:
+            self.pipe_streak_blocks = []
+            return
+        if block in self.pipe_streak_blocks:
+            return
+        self.pipe_streak_blocks.append(block)
+        if len(self.pipe_streak_blocks) >= FOUNTAIN_STREAK_LENGTH:
+            # Three different pipe blocks in a row: one group paid. The next
+            # group starts from scratch (the marble has to rack up another
+            # three different blocks after these).
+            self.pipe_streak_blocks = []
+            self.pipe_streak_run_units += 1
+
     def _contact_normal(self, marble, block):
         """The unit collision normal of the marble's contact with a block.
 
@@ -6360,6 +6435,10 @@ class Game:
                         self._prev_contact_block = self._last_contact_block
                         self._last_contact_block = block
                         self.run_fresh_touches += 1
+                        # The Fountain card's pipe streak: this fresh contact
+                        # either extends the run's run of pipe-group blocks or
+                        # breaks it (see _count_pipe_streak).
+                        self._count_pipe_streak(block)
                         # Remember the run's opening blocks (in touch order) for
                         # Pedestal (retrigger the first few) and Watch (only the
                         # first few may score). Distinct blocks only: with two
@@ -7147,8 +7226,7 @@ class Game:
         self.trial_decision = None
         self.shop.refresh()
         # Slim pickings removes two random shop options for this run.
-        if self.trials_enabled and self.current_trial == Trial.SLIM_PICKINGS:
-            self._trim_shop_for_trial()
+        self._trim_shop_for_trial()
         self.run_number += 1
         # Once the player has clicked CONTINUE on a game-over screen, the
         # overlay never shows again for this save: those runs just advance

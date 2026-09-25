@@ -1,1 +1,273 @@
-{"version": 1}
+{
+  "version": 1,
+  "cash": 60,
+  "run_number": 0,
+  "round_index": 0,
+  "run_in_round": 0,
+  "required_score": 1,
+  "required_scores": [
+    1
+  ],
+  "run_results": [],
+  "runs_cleared": 0,
+  "failed_runs": 0,
+  "current_trial": 5,
+  "difficulty": 4,
+  "final_boss": null,
+  "cards": [],
+  "actions": [],
+  "toolbox": [
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "price": 109,
+      "name": "Start Block",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 1,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "price": 53,
+      "name": "Finish Block",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    }
+  ],
+  "grid": [],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 10,
+      "amount": 0,
+      "price": 12,
+      "name": "Flat Line",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 20,
+      "amount": 0,
+      "price": 8,
+      "name": "Key",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 14,
+      "amount": 307.1,
+      "price": 20,
+      "name": "Conveyor",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 8,
+      "amount": 0,
+      "price": 12,
+      "name": "Slippery",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 11,
+      "amount": 1.008,
+      "price": 12,
+      "name": "Rubble",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 29,
+      "amount": 0,
+      "price": 30,
+      "name": "Gilded",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 14,
+      "amount": 2.336,
+      "price": 27,
+      "name": "Effective",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "kind": "card",
+      "value": 83,
+      "price": 44,
+      "amount": 0,
+      "col": 1,
+      "row": 3,
+      "name": "Pedestal"
+    },
+    {
+      "kind": "card",
+      "value": 95,
+      "price": 42,
+      "amount": 0,
+      "col": 2,
+      "row": 3,
+      "name": "1000-handed"
+    },
+    {
+      "kind": "card",
+      "value": 82,
+      "price": 44,
+      "amount": 0,
+      "col": 3,
+      "row": 3,
+      "name": "Conquistador"
+    },
+    {
+      "kind": "card",
+      "value": 7,
+      "price": 32,
+      "amount": 0,
+      "col": 4,
+      "row": 3,
+      "name": "Skater"
+    },
+    {
+      "kind": "action",
+      "value": 6,
+      "price": 70,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Cleansweep"
+    },
+    {
+      "kind": "action",
+      "value": 3,
+      "price": 32,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Anointment"
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 17,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 22,
+      "scorer_amount": 2.413,
+      "price": 26,
+      "name": "Sawtooth Drill",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 8,
+      "row": 3,
+      "shape": 10,
+      "effects": [
+        2
+      ],
+      "effect_amounts": {
+        "2": 23536.0
+      },
+      "scorer": 27,
+      "scorer_amount": 5.01,
+      "price": 44,
+      "name": "Flat Line Powerline",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0
+    }
+  ],
+  "component_purchases": [],
+  "wrecking_bonus": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      1.0
+    ]
+  ],
+  "tesseract_bonus": 1.0,
+  "tokens": [],
+  "shred_points": 0,
+  "rubble_points": 0,
+  "idea_points": 0,
+  "free_rerolls": 0,
+  "option_points": 0,
+  "bonus_slots": 0,
+  "marble_type": 2,
+  "upgrades_enabled": true,
+  "game_over": false,
+  "game_won": false,
+  "game_perfect": false,
+  "continue_past_game_over": false,
+  "score_chips": 1,
+  "score_mult": 1,
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
+  "unlocked_cells": [
+    [
+      5,
+      8
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      4,
+      7
+    ]
+  ],
+  "board_units": 0
+}

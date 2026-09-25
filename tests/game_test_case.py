@@ -150,7 +150,16 @@ class GameTestCase(unittest.TestCase):
     def setUp(self):
         self.game = main.Game()
         self.game.title_screen = False  # skip the title screen in tests
+        # A fresh Game draws the trial of the run it opens on — and on the
+        # default difficulty that run plays one. A Slim pickings draw has
+        # already shed two shop options by the time a test sees the game (see
+        # Game._trim_shop_for_trial), which would leave the starting shop 13
+        # items big 1 draw in 15. Switching the trial system off first is what
+        # keeps it full (nothing trims a shop while trials are disabled), so
+        # rebuilding the shop puts every test on the same 15-item one.
         self.game.trials_enabled = False  # no random trial in generic tests
+        if self.game.current_trial == main.Trial.SLIM_PICKINGS:
+            self.game.shop.refresh()
         self.game.run_active = False
         self.game.run_complete = False
         self.game.score_chips = 0

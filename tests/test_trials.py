@@ -328,6 +328,65 @@ class TrialsTests(GameTestCase):
                         self.assertIsNone(trial, f"run {run + 1} is trial-free")
 
 
+    def test_slim_pickings_trims_the_shop_of_the_games_first_run(self):
+        # The game's opening run draws its trial as the Game is built, and the
+        # shop is built BEFORE that draw: an opening Slim pickings run has to
+        # shed its two options after the fact (see reset_game), or the very
+        # first trial of a game would do nothing at all.
+        full = len(self.game.shop.items)  # the setUp game's untrimmed shop
+        self.game.trials_enabled = True
+        with mock.patch("main.random.choice",
+                        side_effect=lambda seq: (main.Trial.SLIM_PICKINGS
+                                                 if seq is main.Trial.ORDER
+                                                 else seq[0])):
+            self.game.reset_game()
+        self.assertEqual(self.game.current_trial, main.Trial.SLIM_PICKINGS)
+        self.assertEqual(len(self.game.shop.items), full - 2)
+
+
+    def test_any_other_trial_leaves_the_games_first_shop_full(self):
+        full = len(self.game.shop.items)
+        self.game.trials_enabled = True
+        with mock.patch("main.random.choice",
+                        side_effect=lambda seq: (main.Trial.HANDS_TIED
+                                                 if seq is main.Trial.ORDER
+                                                 else seq[0])):
+            self.game.reset_game()
+        self.assertEqual(self.game.current_trial, main.Trial.HANDS_TIED)
+        self.assertEqual(len(self.game.shop.items), full)
+
+
+    def test_buying_slim_pickings_trims_the_shop_on_screen(self):
+        # The trial display's left half buys a different trial onto the shop
+        # the player is already looking at, so landing on Slim pickings must
+        # bite THAT shop rather than wait for the next reroll.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.HANDS_TIED
+        self.game.cash = 1000
+        full = len(self.game.shop.items)
+        left = (main.TRIAL_BOX_RECT.left + 5, main.TRIAL_BOX_RECT.centery)
+        with mock.patch.object(main.Game, "_random_other_trial",
+                               return_value=main.Trial.SLIM_PICKINGS):
+            self.assertTrue(self.game._click_trial_display(left))
+        self.assertEqual(self.game.cash, 1000 - main.TRIAL_CHANGE_COST)
+        self.assertEqual(len(self.game.shop.items), full - 2)
+
+
+    def test_a_slim_run_rerolls_the_shop_two_options_short(self):
+        # Every shop a Slim pickings run rerolls into is two options lighter,
+        # and nothing is trimmed at all while the trial system is switched off.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.SLIM_PICKINGS
+        self.game.cash = 1000
+        full = len(self.game.shop.items)
+        self.game._refresh_shop()
+        self.assertEqual(len(self.game.shop.items), full - 2)
+        self.game.trials_enabled = False
+        self.game.shop.refresh()
+        self.game._trim_shop_for_trial()
+        self.assertEqual(len(self.game.shop.items), full)
+
+
     def test_bouncy_castle_trial_marks_marble_bouncy_castle(self):
         # Starting a run under the bouncy-castle trial gives each marble the
         # bouncy_castle flag (physics reflects it off every solid block).

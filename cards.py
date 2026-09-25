@@ -1,10 +1,10 @@
 """Card score-effect logic for Marblatro.
 
-The owned-card score effects live here: the named cards that fire at the start
-of a run, at the end of it or on a fragile break (see components.Card.NAMED),
-the collision-triggered scorer cards (a match group plus a scorer — see
-components' MATCH GROUPS section), Blueprint copying, and the small
-block/board helpers and per-run measures they use. Each function takes the
+The owned-card score effects live here: the measured whole cards that fire at
+the start of a run, at the end of it or on a fragile break (see
+components.Card.NAMED), the collision-triggered scorer cards (a match group plus
+a scorer — see components' MATCH GROUPS section), Blueprint copying, and the
+small block/board helpers and per-run measures they use. Each function takes the
 ``Game`` as its first argument (mirroring the physics.py pattern); main.py's
 Game keeps thin wrappers (_apply_cards, _apply_cards_on_finish,
 _apply_cards_on_collision, _on_fragile_broken) that delegate to this module, so
@@ -144,7 +144,11 @@ def _named_card_units(game, measure):
     * cozy = 1 while 10 or fewer board units are unlocked;
     * painting = the board's total sell price in whole dollars;
     * synthesizer = the cards in the card area;  island = the groups the
-      unlocked board units form.
+      unlocked board units form;
+    * pipe_streak = the groups of PIPE-GROUP blocks the run's contacts
+      completed (counted live by Game._count_pipe_streak, see
+      FOUNTAIN_STREAK_LENGTH — three different Pipe/Drain/Pipe Bend blocks in a
+      row, anything else breaking the run).
     """
     if measure == "start":
         return 1.0
@@ -177,6 +181,12 @@ def _named_card_units(game, measure):
         return len(game.cards)
     if measure == "island":
         return island_group_count(game)
+    if measure == "pipe_streak":
+        # Counted as the run goes (the contacts that make a streak happen long
+        # before the run ends), never re-derived here: the streak is over by the
+        # time this is read, and a run that is retried replays the same touches
+        # (see Game.reset_run).
+        return getattr(game, "pipe_streak_run_units", 0)
     return 0.0
 
 
@@ -882,9 +892,9 @@ def apply_cards_on_finish(game):
     """Apply the end-of-run card effects.
 
     The named cards whose phase is "end" pay here — Explorer's distance xMult,
-    Astronaut's black-hole mult, Plane's air-time chips and Skater's slippery
-    xMult — because their measures are only final once the marbles have
-    stopped. A Blueprint copies the card to its immediate left; a card disabled
+    Astronaut's black-hole mult, Plane's air-time chips, Skater's slippery
+    xMult and Fountain's pipe streaks — because their measures are only final
+    once the marbles have stopped. A Blueprint copies the card to its immediate left; a card disabled
     by the Card cutter or Deal breaker trial is skipped (and can't be copied
     either). Their popups appear where the run ended (on the finished marble),
     so they are visible instead of lost at the top-of-screen card area.
