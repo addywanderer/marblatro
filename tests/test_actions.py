@@ -60,6 +60,7 @@ class ActionsTests(GameTestCase):
         self.assertEqual(main.Action.name(main.Action.ANOINTMENT), "Anointment")
         self.assertEqual(main.Action.name(main.Action.STRENGTH), "Strength")
         self.assertEqual(main.Action.name(main.Action.SPIRIT), "Spirit")
+        self.assertEqual(main.Action.name(main.Action.CLEANSWEEP), "Cleansweep")
         self.assertEqual(main.Action.PRICES[main.Action.DEATH], 24)
         self.assertEqual(main.Action.PRICES[main.Action.RECOGNITION], 24)
         self.assertEqual(main.Action.PRICES[main.Action.DEJA_VU], 28)
@@ -72,7 +73,8 @@ class ActionsTests(GameTestCase):
         self.assertEqual(main.Action.ORDER,
                          [main.Action.DEATH, main.Action.RECOGNITION,
                           main.Action.DEJA_VU, main.Action.ANOINTMENT,
-                          main.Action.STRENGTH, main.Action.SPIRIT])
+                          main.Action.STRENGTH, main.Action.SPIRIT,
+                          main.Action.CLEANSWEEP])
         # Deja Vu's two versions add triggers: +1, then +100.
         self.assertIn("+1 trigger", main.Action.description(main.Action.DEJA_VU, 1))
         self.assertIn("+100 triggers", main.Action.description(main.Action.DEJA_VU, 2))
@@ -179,6 +181,98 @@ class ActionsTests(GameTestCase):
         self.assertIn(action, self.game.actions)  # not consumed without a target
 
 
+    # --- Cleansweep: an action that spends the purse on cards -------------
+
+    def test_cleansweep_data_lives_in_components(self):
+        self.assertEqual(main.Action.name(main.Action.CLEANSWEEP), "Cleansweep")
+        self.assertGreater(main.Action.PRICES[main.Action.CLEANSWEEP], 0)
+        self.assertIn("card slot", main.Action.description(main.Action.CLEANSWEEP, 1))
+        self.assertIn("cash", main.Action.description(main.Action.CLEANSWEEP, 1))
+        # v2 does the same sweep without the cost.
+        self.assertIn("without spending your cash",
+                      main.Action.description(main.Action.CLEANSWEEP, 2))
+        # It acts on the player, not on a piece, so it needs no target — every
+        # other action does.
+        self.assertFalse(main.Action.needs_target(main.Action.CLEANSWEEP))
+        self.assertIn(main.Action.CLEANSWEEP, main.Action.NO_TARGET)
+        for action in main.Action.ORDER:
+            if action != main.Action.CLEANSWEEP:
+                self.assertTrue(main.Action.needs_target(action),
+                                main.Action.name(action))
+
+
+    def test_cleansweep_spends_the_cash_to_fill_every_empty_slot(self):
+        # A Cleansweep is paid for with the whole purse and fills every empty
+        # card slot with a random card — no target, so it fires from the bare
+        # selection. The cards are drawn without repeats (the pool skips what
+        # the player owns), so a sweep is never wasted on a duplicate.
+        self.game.cash = 250
+        owned = main.CardItem(main.Card.SHOWMAN, 48)
+        self.game.cards.append(owned)
+        action = main.ActionItem(main.Action.CLEANSWEEP, 36)
+        self.game.actions.append(action)
+        self.game.selected_action = action
+        self.assertIsNone(self.game.selected_action_subject)
+
+        self.assertTrue(self.game._apply_action())
+
+        self.assertEqual(self.game.cash, 0)
+        self.assertEqual(len(self.game.cards), self.game.max_cards)
+        drawn = [c.value for c in self.game.cards if c is not owned]
+        self.assertEqual(len(drawn), self.game.max_cards - 1)
+        self.assertEqual(len(set(drawn)), len(drawn))  # all different
+        for value in drawn:
+            self.assertTrue(main.Card.name(value))
+        self.assertIn("$250", self.game.shop_message)
+        self.assertNotIn(action, self.game.actions)  # consumed
+        self.assertIsNone(self.game.selected_action)
+
+
+    def test_v2_cleansweep_fills_the_slots_without_spending_the_cash(self):
+        self.game.cash = 250
+        action = main.ActionItem(main.Action.CLEANSWEEP, 36, version=2)
+        self.game.actions.append(action)
+        self.game.selected_action = action
+
+        self.assertTrue(self.game._apply_action())
+
+        self.assertEqual(self.game.cash, 250)
+        self.assertEqual(len(self.game.cards), self.game.max_cards)
+        self.assertNotIn("$", self.game.shop_message)
+
+
+    def test_cleansweep_says_it_needs_no_target(self):
+        # Selecting an action and the info-box hint both tell the player what
+        # to do next: a targeted action asks for a target, Cleansweep doesn't.
+        cleansweep = main.ActionItem(main.Action.CLEANSWEEP, 36)
+        death = main.ActionItem(main.Action.DEATH, 24)
+        self.game.actions.append(cleansweep)
+
+        self.game._select_action(cleansweep)
+        self.assertIn("press S to use", self.game.shop_message)
+        self.assertIn("no target", self.game._action_hint(cleansweep, "actions"))
+
+        self.game._select_action(death)
+        self.assertIn("click a target block/card", self.game.shop_message)
+        self.assertIn("Click a target", self.game._action_hint(death, "actions"))
+
+
+    def test_cleansweep_is_refused_while_the_card_area_is_full(self):
+        # Nothing to sweep: the action is kept and the purse is untouched.
+        self.game.cash = 250
+        for _ in range(self.game.max_cards):
+            self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
+        action = main.ActionItem(main.Action.CLEANSWEEP, 36)
+        self.game.actions.append(action)
+        self.game.selected_action = action
+
+        self.assertFalse(self.game._apply_action())
+
+        self.assertEqual(self.game.cash, 250)
+        self.assertIn(action, self.game.actions)
+        self.assertIn("full", self.game.shop_message)
+
+
     def test_actions_appear_in_collection_entries(self):
         entries = self.game._collection_entries()
         actions = [e for e in entries if e[0] == "action"]
@@ -191,6 +285,7 @@ class ActionsTests(GameTestCase):
             self.assertFalse(discovered)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_explorer_fraction_is_distance_over_total_grid_units(self):
         # Explorer's xMult is 1 + (travelled grid units / total grid cells).
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))

@@ -247,6 +247,7 @@ class BoardTests(unittest.TestCase):
                 marble.position[1],
                 main.MARBLE_BOX_COORDS[1] + 9 * main.GRID_SIZE)
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_cozy_magnitude_card_fires_3x_base_on_a_small_board(self):
         g = self._start_locked_game()
         # The 2x3 start is 6 unlocked units (10 or fewer), so a Cozy +Mult card
@@ -257,6 +258,7 @@ class BoardTests(unittest.TestCase):
         self.assertTrue(g.reset_run(False))
         self.assertAlmostEqual(g.score_mult, 1 + 12)  # 3x the +4 mult base
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_cozy_magnitude_card_is_silent_on_a_big_board(self):
         g = self._start_locked_game()
         value = main.condition_scorer_card(main.Condition.COZY, main.Scorer.MULT_ADD)

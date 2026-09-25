@@ -183,8 +183,10 @@ class ToolboxTests(GameTestCase):
     def test_clicking_two_cards_swaps_their_order(self):
         # Select one card, then click another to swap their order in the card
         # area (Blueprint copies the card to its left, so order matters).
-        card_a = main.CardItem(main.Card.JOKER, 20)
-        card_b = main.CardItem(main.Card.EXPLORER, 25)
+        card_a = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                            main.Scorer.MULT_ADD)
+        card_b = _card_item(main.match_group_for_shape(main.Shape.SLOPE),
+                            main.Scorer.CHIPS_ADD)
         self.game.cards.append(card_a)
         self.game.cards.append(card_b)
         y = main.CARD_AREA_COORDS[1] + 5

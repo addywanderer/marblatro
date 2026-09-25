@@ -302,8 +302,8 @@ class ScorersTests(GameTestCase):
         # and as a card's payoff.
         self.assertIn("handed over once the run is continued",
                       main.scorer_description(main.Scorer.PARTS, 1))
-        card = main.condition_scorer_card(main.Condition.SHAPE_PIPE,
-                                          main.Scorer.PARTS)
+        card = main.match_group_card(main.match_group_for_shape(main.Shape.PIPE),
+                                     main.Scorer.PARTS)
         self.assertIn("handed over once the run is continued",
                       main.Card.description(card))
 
@@ -876,14 +876,15 @@ class ScorersTests(GameTestCase):
         # An average-magnitude item reads its own count as (0)...
         self.assertIn("Gives 0.5 rubble point (0).",
                       main.scorer_description(main.Scorer.RUBBLE, 1))
-        # ...and a composed card with a rolled resource magnitude does too.
-        card_text = components._card_payoff_text(main.Condition.START,
-                                                 main.Scorer.RUBBLE, 1.4)
+        # ...and a match-group card with a rolled resource magnitude does too.
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        card_text = components._match_group_description(group, main.Scorer.RUBBLE,
+                                                        1.4)
         self.assertIn("Gives 0.7 rubble point (+0.2)", card_text)
         # A catalogue card (no rolled magnitude) states no token at all.
         token = re.compile(r"\([+-]?\d+(\.\d+)?\)")
         catalogue = main.Card.description(
-            main.condition_scorer_card(main.Condition.START, main.Scorer.RUBBLE))
+            main.match_group_card(group, main.Scorer.RUBBLE))
         self.assertIsNone(token.search(catalogue), catalogue)
 
 

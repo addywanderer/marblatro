@@ -5,25 +5,26 @@ from collections import deque
 import numpy as np
 import pygame
 
+import components
 import crt
 from components import (
     CARD_SCORERS,
     COMPONENT_PRICES,
-    CONDITION_ORDER,
     DEFAULT_DIFFICULTY,
     MAGNITUDE_ATAN_LIMIT,
     MAGNITUDE_MAX_STEPS,
     MAGNITUDE_SCALE,
     MAGNITUDE_STEP_DIVISOR,
+    MATCH_GROUPS,
     RESOURCE_THRESHOLD,
     Action,
     Card,
     Component,
-    Condition,
     Difficulty,
     Effect,
     FinalBoss,
     MarbleType,
+    Rarity,
     Scorer,
     Shape,
     Trial,
@@ -31,15 +32,15 @@ from components import (
     card_description,
     card_price_for,
     card_scorer,
-    condition_description,
-    condition_phase,
-    condition_scorer_card,
     effect_component_price,
     effect_description,
     effect_magnitude_floor,
-    generic_card_meta,
     magnitude_precision,
     magnitude_step,
+    match_group_card,
+    match_group_card_meta,
+    match_group_label,
+    match_group_trigger,
     paired_shape,
     points_text,
     resource_points_for,
@@ -47,7 +48,6 @@ from components import (
     scorer_description,
     scorer_magnitude_floor,
     shape_description,
-    splittable_card_condition_scorer,
 )
 
 pygame.init()
@@ -161,7 +161,10 @@ SHOP_REFRESH_COST = 20  # Cash cost to reroll the shop
 TRIAL_CHANGE_COST = 50  # Cash to swap this run's trial for a different random one
 TRIAL_DISABLE_COST = 100  # Cash to play this run with no trial at all
 DISASSEMBLE_COST = 56  # Cash cost to break a block back into its parts
-CARD_DISASSEMBLE_COST = 56  # Cash cost to split a splittable card into its halves
+# COMMENTED OUT with the conditions: the cash cost to split a splittable card
+# back into its two halves. A card is unsplittable now (see the card builder's
+# note below), so nothing charges this fee.
+# CARD_DISASSEMBLE_COST = 56
 DUPLICATE_PRICE_INCREMENT = 0.5  # per-purchase price factor: each copy of a component
                                  # bought (directly or inside a block) raises its price
                                  # by this fraction of the base, with diminishing returns
@@ -349,8 +352,10 @@ SAWTOOTH_HEIGHT = 13
 # wide its flat floor is. The floor is wider than a marble so the marble rests
 # on it (a single, stable contact) instead of wedging between the walls, and
 # the slab below closes the cell so it can never slip out the bottom.
-CRADLE_FLOOR_DEPTH = 20
-CRADLE_FLOOR_HALF = 12
+# COMMENTED OUT with the shape itself (user request: "comment out the cradle
+# shape"): the two floor constants and everything that used them.
+# CRADLE_FLOOR_DEPTH = 20
+# CRADLE_FLOOR_HALF = 12
 # Tuning for the newer effects. A conveyor is a BELT: it carries the marble
 # along its surface at CONVEYOR_SPEED (a constant, like a real belt, so it does
 # not accelerate the marble); a phase block makes the marble pass through every
@@ -479,9 +484,10 @@ class Block:
         self.get_corner_rects = self._get_corner_rects()
         self.get_corner_points = self._get_corner_points()
         self.get_sawtooth_teeth = self._get_sawtooth_teeth()
-        self.get_cradle_pieces = self._get_cradle_pieces()
+        # COMMENTED OUT with the shape itself: the cradle's pieces/silhouette.
+        # self.get_cradle_pieces = self._get_cradle_pieces()
         self.get_corner_silhouette = self._get_corner_silhouette()
-        self.get_cradle_silhouette = self._get_cradle_silhouette()
+        # self.get_cradle_silhouette = self._get_cradle_silhouette()
         self.get_bump_points = self._get_bump_points()
         self.get_belt_direction = self._get_belt_direction()
 
@@ -667,29 +673,34 @@ class Block:
                           for point in base_points])
         return teeth
 
-    def _get_cradle_pieces(self):
-        """The cradle's solid: two side wedges plus a thick floor slab.
-
-        A wide valley is cut from the cell's top edge down to a flat floor
-        (wider than a marble) so a marble that rolls or falls in is caught and
-        rests on the floor at the center. The slab below the floor closes the
-        cell, so a marble can never slip out the bottom. The solid is therefore
-        three convex pieces (a left wedge, a right wedge, and the slab), each
-        rotated with the block (and ROTATE spin) so the hitbox matches the drawn
-        shape.
-        """
-        left, top = self.rect.left, self.rect.top
-        right, bottom = self.rect.right, self.rect.bottom
-        center_x = self.rect.centerx
-        floor_y = top + CRADLE_FLOOR_DEPTH
-        half = CRADLE_FLOOR_HALF
-        base_pieces = [
-            [(left, top), (center_x - half, floor_y), (left, floor_y)],
-            [(right, top), (center_x + half, floor_y), (right, floor_y)],
-            [(left, floor_y), (right, floor_y), (right, bottom), (left, bottom)],
-        ]
-        return [[self._rotate_point(point, self.angle) for point in piece]
-                for piece in base_pieces]
+    # -------------------------------------------------------------------
+    # COMMENTED OUT with the shape itself (user request: "comment out the
+    # cradle shape"). Both builders were only ever reached through
+    # Block._refresh_geometry for a CRADLE block.
+    #
+    # def _get_cradle_pieces(self):
+    #     """The cradle's solid: two side wedges plus a thick floor slab.
+    #
+    #     A wide valley is cut from the cell's top edge down to a flat floor
+    #     (wider than a marble) so a marble that rolls or falls in is caught and
+    #     rests on the floor at the center. The slab below the floor closes the
+    #     cell, so a marble can never slip out the bottom. The solid is therefore
+    #     three convex pieces (a left wedge, a right wedge, and the slab), each
+    #     rotated with the block (and ROTATE spin) so the hitbox matches the drawn
+    #     shape.
+    #     """
+    #     left, top = self.rect.left, self.rect.top
+    #     right, bottom = self.rect.right, self.rect.bottom
+    #     center_x = self.rect.centerx
+    #     floor_y = top + CRADLE_FLOOR_DEPTH
+    #     half = CRADLE_FLOOR_HALF
+    #     base_pieces = [
+    #         [(left, top), (center_x - half, floor_y), (left, floor_y)],
+    #         [(right, top), (center_x + half, floor_y), (right, floor_y)],
+    #         [(left, floor_y), (right, floor_y), (right, bottom), (left, bottom)],
+    #     ]
+    #     return [[self._rotate_point(point, self.angle) for point in piece]
+    #             for piece in base_pieces]
 
     def _get_corner_silhouette(self):
         """The corner's whole outline as ONE polygon (no seam between its legs).
@@ -706,25 +717,28 @@ class Block:
                        (right, bottom - leg), (right, bottom), (left, bottom)]
         return [self._rotate_point(point, self.angle) for point in base_points]
 
-    def _get_cradle_silhouette(self):
-        """The cradle's whole outline as ONE polygon (no seams between pieces).
-
-        The cradle's solid is two side wedges sitting on a floor slab, so
-        outlining the three pieces separately draws a line inside the shape
-        where each wedge meets the slab. This outline follows only the outside
-        of the union (up the left wedge, across the flat floor, up the right
-        wedge, then down the outside), which is what the shape's
-        component/ghost image should show.
-        """
-        left, top = self.rect.left, self.rect.top
-        right, bottom = self.rect.right, self.rect.bottom
-        center_x = self.rect.centerx
-        floor_y = top + CRADLE_FLOOR_DEPTH
-        half = CRADLE_FLOOR_HALF
-        base_points = [(left, top), (center_x - half, floor_y),
-                       (center_x + half, floor_y), (right, top),
-                       (right, bottom), (left, bottom)]
-        return [self._rotate_point(point, self.angle) for point in base_points]
+    # COMMENTED OUT with the shape itself: the cradle's single outline polygon
+    # (a left wedge, the flat floor, a right wedge, then the outside down).
+    #
+    # def _get_cradle_silhouette(self):
+    #     """The cradle's whole outline as ONE polygon (no seams between pieces).
+    #
+    #     The cradle's solid is two side wedges sitting on a floor slab, so
+    #     outlining the three pieces separately draws a line inside the shape
+    #     where each wedge meets the slab. This outline follows only the outside
+    #     of the union (up the left wedge, across the flat floor, up the right
+    #     wedge, then down the outside), which is what the shape's
+    #     component/ghost image should show.
+    #     """
+    #     left, top = self.rect.left, self.rect.top
+    #     right, bottom = self.rect.right, self.rect.bottom
+    #     center_x = self.rect.centerx
+    #     floor_y = top + CRADLE_FLOOR_DEPTH
+    #     half = CRADLE_FLOOR_HALF
+    #     base_points = [(left, top), (center_x - half, floor_y),
+    #                    (center_x + half, floor_y), (right, top),
+    #                    (right, bottom), (left, bottom)]
+    #     return [self._rotate_point(point, self.angle) for point in base_points]
 
     def _get_bump_points(self):
         """The bump's solid dome: a half-disc sitting on the cell's bottom edge.
@@ -1149,33 +1163,40 @@ def block_resale_price(block):
     return price
 
 
-def _random_card_scorer(condition):
-    """A random card scorer that can pair with the given condition.
+def _random_card_scorer():
+    """A random scorer for a card offer: drawn AFTER its group.
 
-    Any scorer can pair with any condition now (an end-phase Quick card pays
-    off the marble's speed at the run's LAST block hit), so the phase only
-    keeps the caller's bookkeeping meaningful and the draw is a flat one.
+    The draw is flat, so the scorer never affects how rare a card is — a card's
+    rarity comes from its match group alone (see random_card_option_value).
     """
-    condition_phase(condition)
     return random.choice(CARD_SCORERS)
 
 
-def random_prebuilt_card_value():
-    """A random pre-built splittable card value: a random (condition, scorer).
+def random_match_group():
+    """A random match group, drawn from the groups alone.
 
-    Any card scorer can pair with any condition, so a pre-built splittable card
-    can carry any scorer — not just +Chips/+Mult/xMult. Used by the random-card
-    grants.
+    Every group is COMMON, so the group cards share one tier in the shop: each
+    group comes up equally often inside it and the 32 scorer variants of a card
+    share that one chance — the scorer never affects how rare a card is (see
+    random_card_option_value, which draws the tier first and an entry second).
     """
-    condition = random.choice(CONDITION_ORDER)
-    return condition_scorer_card(condition, _random_card_scorer(condition))
+    return random.choice(MATCH_GROUPS)
+
+
+def random_prebuilt_card_value():
+    """A random pre-built card value: a random (match group x scorer).
+
+    Any scorer can pair with any group, so a card can carry any scorer — not
+    just +Chips/+Mult/xMult. Used by the random-card grants.
+    """
+    return match_group_card(random_match_group(), _random_card_scorer())
 
 
 def prebuilt_card_pool(grid_combos=10):
-    """Distinct candidate whole cards for a random-card grant.
+    """Distinct candidate cards for a random-card grant.
 
-    The indivisible whole cards (the Card.ORDER catalog) plus ``size`` random
-    (condition x any scorer) grid combos, so a granted splittable card can
+    The cards that are not built on a match group (the Card.ORDER catalog)
+    plus ``grid_combos`` random (group x scorer) cards, so a granted card can
     carry any scorer.
     """
     pool = list(Card.ORDER)
@@ -1190,32 +1211,110 @@ def prebuilt_card_pool(grid_combos=10):
     return pool
 
 
-def random_card_option_value():
-    """A random shop card offer.
+def card_offer_entries(rarity=None):
+    """The entries the shop draws a card offer from: whole cards + groups.
 
-    Chooses equally likely from a combined pool of conditions and the
-    indivisible whole cards (the Card.ORDER catalog); a condition pick gets a
-    random scorer attached, turning it into a composed (condition x scorer)
-    card offer.
+    ``rarity`` narrows the list to one tier (see Card.rarity), which is what
+    lets the offer be drawn TIER FIRST: the tiers are drawn by Rarity.WEIGHTS
+    and only then is an entry picked inside the drawn tier, so how many cards a
+    tier happens to hold cannot change how often that tier comes up.
     """
-    pool = list(CONDITION_ORDER) + list(Card.ORDER)
-    choice = random.choice(pool)
-    if choice in Card.ORDER:
-        return choice
-    return condition_scorer_card(choice, _random_card_scorer(choice))
+    pool = list(Card.ORDER) + list(MATCH_GROUPS)
+    if rarity is None:
+        return pool
+    return [entry for entry in pool if Card.rarity(entry) == rarity]
+
+
+# How many cards an offer tries inside its drawn tier before the slot gives up
+# (a card already on the row, or one the player owns, collides; re-picking
+# INSIDE the tier is what keeps the rarity ratio intact — see
+# random_card_option_value).
+CARD_OFFER_TRIES = 8
+
+
+def _card_option_value(entry):
+    """The card the shop offers for one pool entry.
+
+    A match group becomes that group's card with a freshly rolled scorer (see
+    _random_card_scorer); a whole card is offered as itself.
+    """
+    if entry in MATCH_GROUPS:
+        return match_group_card(entry, _random_card_scorer())
+    return entry
+
+
+def _random_card_rarity():
+    """A tier for a card offer, drawn by Rarity.WEIGHTS.
+
+    This is the step that ties the shop's offers to the rarity ratio, 1 : 0.7 :
+    0.5 : 0.3 : 0.2 from Common up to Legendary (see Rarity.WEIGHTS).
+    """
+    return random.choices(Rarity.ORDER,
+                          weights=[Rarity.weight(tier) for tier in Rarity.ORDER],
+                          k=1)[0]
+
+
+def random_card_option_value(excluded=()):
+    """A random shop card offer: the tier first, then a card inside it.
+
+    The TIER is drawn first, by Rarity.WEIGHTS, so the chance an offer is
+    Common / Unusual / Rare / Epic / Legendary follows the 1 : 0.7 : 0.5 : 0.3
+    : 0.2 ratio on its own — how many cards carry a tier must not change how
+    often that tier comes up (user request: "the chance that any given card
+    option in the shop has a given rarity corresponds to its rarity ratio. The
+    number of cards with a given rarity should not affect the chance of drawing
+    a card with a given rarity."). Only then is a card picked FLAT inside the
+    drawn tier, so every card of a tier is equally likely and no scorer can tilt
+    anything: a match group card gets its scorer rolled here (all 26 groups are
+    Common, so the group cards share the Common tier).
+
+    ``excluded`` are card values this offer must avoid — the cards already on
+    the shop row and the ones the player owns. A collision is resolved by
+    re-picking INSIDE the drawn tier, never by drawing the tier again (which is
+    what would tilt the odds toward the tier with the most cards), so the ratio
+    holds for a whole row of offers, not just for a lone draw. None is returned
+    only when every card of every tier is excluded (a player who owns the whole
+    catalogue); the shop then falls back to an unrestricted draw.
+    """
+    taken = set(excluded)
+    entries = card_offer_entries(_random_card_rarity()) or card_offer_entries()
+    for _ in range(CARD_OFFER_TRIES):
+        value = _card_option_value(random.choice(entries))
+        if value is not None and value not in taken:
+            return value
+    return None
+
+
+def random_card_option_values(count, excluded=()):
+    """``count`` shop card offers: distinct, and away from ``excluded``.
+
+    A card slot that cannot be filled from its own tier (the player owns every
+    card of it) keeps the row full by falling back to an unrestricted draw, as
+    the row did before; the tier of such a slot is the only one that can be
+    overridden, and only when its whole tier is unavailable.
+    """
+    values = []
+    taken = set(excluded)
+    for _ in range(count):
+        value = random_card_option_value(taken)
+        if value is None:
+            value = random_card_option_value()
+        values.append(value)
+        taken.add(value)
+    return values
 
 
 def make_card_item(value, col=0, row=0, amount=None):
-    """A card item, carrying its scorer half's own magnitude.
+    """A card item, carrying its scorer's own magnitude.
 
-    A composed card (condition x scorer) rolls the SCORER half's magnitude when
-    the caller has none — the shop rolls one per offer, exactly like a scorer
-    component — so the card pays, prices and describes itself at the strength
-    it actually has (see components.card_price_for / card_description). A whole
-    card (Coupon, Showman, Garden, ...) has no scorer half, so it carries no
+    A match-group card rolls the SCORER's magnitude when the caller has none —
+    the shop rolls one per offer, exactly like a scorer component — so the card
+    pays, prices and describes itself at the strength it actually has (see
+    components.card_price_for / card_description). A card that is not built on a
+    match group (Coupon, Showman, Garden, ...) has no scorer, so it carries no
     magnitude and is unaffected. ``amount`` is passed through by callers that
-    already know it: a card built from a toolbox scorer keeps that piece's
-    magnitude, and a Recognition copy keeps the original's.
+    already know it: a shop item keeps the magnitude it was offered with, and a
+    Recognition copy keeps the original's.
     """
     scorer = card_scorer(value)
     if amount is None:
@@ -1561,38 +1660,35 @@ class Shop:
             # instead of a scorer component — see _scorer_offer.
             self.items.append(self._scorer_offer(scorer, col, 1))
             col += 1
-        # Two card slots. Each slot chooses equally likely from a combined pool
-        # of conditions and the indivisible whole cards (ERR 404 / Blueprint /
-        # Showman); when a slot draws a condition, a random scorer is attached
-        # so the offer is a full composed (condition x any scorer) card. The
-        # two offers are kept distinct, and neither may be a card the player
-        # already owns unless the Showman card lifts the one-copy rule — an
-        # offer that cannot be bought is a wasted slot, and a card the player
-        # owns should not come back around run after run (see owned_cards).
+        # FOUR card slots. Each offer draws its TIER first, by Rarity.WEIGHTS,
+        # and the card inside that tier second — see random_card_option_values,
+        # where the collision handling stays inside the drawn tier so that
+        # keeping the offers apart cannot tilt the rarity odds (a tier's card
+        # count must not change how often the tier comes up). None of the four
+        # may be a card the player already owns unless the Showman card lifts
+        # the one-copy rule — an offer that cannot be bought is a wasted slot,
+        # and a card the player owns should not come back around run after run
+        # (see owned_cards).
+        #
+        # Two of these four slots used to sell condition components; the
+        # condition system is commented out, so the row sells four cards.
         card_col = 1
-        owned = self.owned_cards()
-        offers = []
-        tries = 0
-        while len(offers) < 2 and tries < 24:
-            tries += 1
-            value = random_card_option_value()
-            if value is not None and value not in offers and value not in owned:
-                offers.append(value)
-        while len(offers) < 2:
-            offers.append(random_card_option_value())
-        for card in offers:
+        for card in random_card_option_values(4, self.owned_cards()):
             self.items.append(make_card_item(card, col=card_col, row=3))
             card_col += 1
-        # Two random conditions sit next to the two whole cards (the condition
-        # is the trigger half of a split card; a scorer pairs with it to build
-        # a card). Cheaper (common) conditions are offered more often.
-        cond_weights = [component_weight(Component.CONDITION, c) for c in CONDITION_ORDER]
-        cond_col = 3
-        for condition in weighted_sample_without_replacement(CONDITION_ORDER,
-                                                             cond_weights, 2):
-            self.items.append(Component.condition_component(condition, col=cond_col, row=3))
-            cond_col += 1
-        # The action slots sit to the right of the conditions in the same row.
+        # COMMENTED OUT with the conditions: the two condition-component slots
+        # that sat next to the two whole cards. A scorer used to pair with the
+        # condition to build a card; every card is whole now, so the columns go
+        # to cards instead (see above).
+        #
+        # cond_weights = [component_weight(Component.CONDITION, c) for c in CONDITION_ORDER]
+        # cond_col = 3
+        # for condition in weighted_sample_without_replacement(CONDITION_ORDER,
+        #                                                      cond_weights, 2):
+        #     self.items.append(Component.condition_component(condition, col=cond_col, row=3))
+        #     cond_col += 1
+        cond_col = 5
+        # The action slots sit to the right of the cards in the same row.
         # The catalogue is bigger than the room left in the row, so each refresh
         # shows a random SHOP_ACTION_SLOTS of them — always DISTINCT actions
         # (random.sample never repeats) — and each is rolled for its version, so
@@ -2201,13 +2297,13 @@ class Game:
         self.actions = []
         self.selected_action = None
         self.selected_action_subject = None
-        # Card builder: selecting an owned Condition component starts card mode,
-        # selecting a Scorer while a condition is assigned pairs it up, and
-        # pressing S builds the card (assembling condition + scorer, like the
-        # block assembler, without a bottom panel).
-        self.card_condition = None
-        self.card_scorer = None
-        self.card_builder_indexes = {}
+        # COMMENTED OUT with the conditions: the card builder's state. Selecting
+        # an owned Condition component used to start card mode, selecting a
+        # Scorer paired it up, and S built the (condition x scorer) card. Every
+        # card is whole now, so there is nothing to build.
+        # self.card_condition = None
+        # self.card_scorer = None
+        # self.card_builder_indexes = {}
         # Quick-scorer cards that are armed (their condition was satisfied) and
         # waiting for the marble to hit its NEXT block, so their reward can use
         # that block's impact speed. Cleared at the start and end of each run.
@@ -2641,8 +2737,10 @@ class Game:
         """Discover every entry the COLLECTION tab can show for this profile."""
         for value in Card.ORDER:
             collection.discover_card(value)
-        for value in CONDITION_ORDER:
-            collection.discover_condition(value)
+        # The condition codex rows are gone; a match group is what a card is
+        # built on now, recorded by its index in MATCH_GROUPS.
+        for index in range(len(MATCH_GROUPS)):
+            collection.discover_match_group(index)
         for value in Action.ORDER:
             collection.discover_action(value)
         for value in Shape.ORDER:
@@ -2877,19 +2975,21 @@ class Game:
                     # B: sell the selected block or component.
                     self._sell_selected_item()
                 elif event.key == pygame.K_s:
-                    # S: apply the selected action to its subject, split a
-                    # selected splittable card into its halves, build a card
-                    # from an assigned condition + scorer, assemble the assigned
-                    # toolbox parts into a block (missing parts default to the
-                    # free Rect shape / no effect / no scorer), disassemble a
-                    # selected block, or — with nothing selected at all — build
+                    # S: apply the selected action to its subject, assemble the
+                    # assigned toolbox parts into a block (missing parts default
+                    # to the free Rect shape / no effect / no scorer), disassemble
+                    # a selected block, or — with nothing selected at all — build
                     # the plain default wall.
+                    #
+                    # COMMENTED OUT with the conditions: S also used to split a
+                    # selected splittable card into its halves, and to build a
+                    # card from an assigned condition + scorer.
                     if self.selected_action is not None:
                         self._apply_action()
-                    elif (getattr(self.selected_toolbox_item, "kind", None) == "card"):
-                        self._disassemble_card()
-                    elif self.card_condition is not None:
-                        self._build_card()
+                    # elif (getattr(self.selected_toolbox_item, "kind", None) == "card"):
+                    #     self._disassemble_card()
+                    # elif self.card_condition is not None:
+                    #     self._build_card()
                     elif self.assembler.has_parts():
                         self._assemble_block()
                     elif isinstance(self.selected_toolbox_item, (Block, BlockItem)):
@@ -3212,28 +3312,20 @@ class Game:
         self.selected_scorer = None
         self.selected_scorer_amount = None
         self.selected_effect_amounts = {}
-        # A deselection also drops any pending card build (assigned condition
-        # + scorer highlight in the toolbox until S builds or S clears them).
-        self.card_condition = None
-        self.card_scorer = None
-        self.card_builder_indexes.clear()
+        # A deselection also drops any pending card build (see the commented-out
+        # `_build_card` below); the builder's state is commented out with the
+        # conditions.
+        # self.card_condition = None
+        # self.card_scorer = None
+        # self.card_builder_indexes.clear()
 
     def _select_toolbox_component(self, component, index=None):
-        """Select a toolbox component.
+        """Select a toolbox component and assign it to the block assembler.
 
-        A Condition component starts the card builder (the player then picks a
-        card scorer); any other component (shape/effect/scorer) is assigned to
-        the block assembler as before. Scorers are shared between the two: a
-        Scorer selected while a condition is assigned pairs with the card
-        builder instead of the block assembler.
+        A shape/effect/scorer click assigns it to the block assembler (the
+        scorer is shared with the card builder, which is commented out with the
+        conditions).
         """
-        # Captured before clearing so a scorer can pair with an assigned
-        # condition (clearing drops the pending card build).
-        pairing_scorer = (component.kind == Component.SCORER
-                          and self.card_condition is not None)
-        kept_condition = self.card_condition if pairing_scorer else None
-        kept_index = (self.card_builder_indexes.get(kept_condition)
-                      if kept_condition is not None else None)
         self._clear_toolbox_selection()
         self.selected_toolbox_item = component
         if index is None:
@@ -3242,28 +3334,34 @@ class Game:
             except ValueError:
                 index = None  # not owned by the toolbox; no cell to highlight
         self.selected_toolbox_index = index
-        if component.kind == Component.CONDITION:
-            # Starting the card builder clears any pending block assembly so S
-            # can't mix the two halves.
-            self.assembler.clear()
-            self.assigned_toolbox_indexes.clear()
-            self.card_condition = component
-            self.card_scorer = None
-            self.card_builder_indexes = {component: index}
-            self._set_shop_message(
-                f"Condition: {component.name} — now pick a scorer, then press S")
-            return
-        if pairing_scorer:
-            self.card_condition = kept_condition
-            self.card_scorer = component
-            self.card_builder_indexes = {kept_condition: kept_index, component: index}
-            self._set_shop_message(
-                f"Scorer: {component.name} — press S to build the card")
-            return
-        # Block assembly: a shape/effect/scorer click clears the card builder.
-        self.card_condition = None
-        self.card_scorer = None
-        self.card_builder_indexes.clear()
+        # COMMENTED OUT with the conditions: a Condition component started the
+        # card builder here, and a Scorer picked while a condition was assigned
+        # paired with it instead of the block assembler. Both are commented out
+        # below (see _build_card).
+        #
+        # pairing_scorer = (component.kind == Component.SCORER
+        #                   and self.card_condition is not None)
+        # kept_condition = self.card_condition if pairing_scorer else None
+        # kept_index = (self.card_builder_indexes.get(kept_condition)
+        #               if kept_condition is not None else None)
+        # if component.kind == Component.CONDITION:
+        #     # Starting the card builder clears any pending block assembly so S
+        #     # can't mix the two halves.
+        #     self.assembler.clear()
+        #     self.assigned_toolbox_indexes.clear()
+        #     self.card_condition = component
+        #     self.card_scorer = None
+        #     self.card_builder_indexes = {component: index}
+        #     self._set_shop_message(
+        #         f"Condition: {component.name} — now pick a scorer, then press S")
+        #     return
+        # if pairing_scorer:
+        #     self.card_condition = kept_condition
+        #     self.card_scorer = component
+        #     self.card_builder_indexes = {kept_condition: kept_index, component: index}
+        #     self._set_shop_message(
+        #         f"Scorer: {component.name} — press S to build the card")
+        #     return
         self._use_component(component)
         # Track the assigned component's cell so draw_toolbox highlights exactly
         # that one, not every copy that shares the same identity.
@@ -3273,49 +3371,58 @@ class Game:
         else:
             self.assigned_toolbox_indexes.pop(component, None)
 
-    def _build_card(self):
-        """Combine the assigned condition + scorer into a card (press S).
-
-        Only pairs that describe a real card build (see
-        components.condition_scorer_card): collision conditions pair with any
-        card scorer, and each named condition recreates its whole card (or, for
-        the magnitude conditions, a new custom card). The two components are
-        consumed from the toolbox and the card joins the card area.
-        """
-        condition = self.card_condition
-        if condition is None:
-            return
-        scorer = self.card_scorer
-        if scorer is None:
-            self._set_shop_message(
-                f"Pick a scorer for {condition.name} (then press S)")
-            return
-        value = condition_scorer_card(condition.value, scorer.value)
-        if value is None:
-            self._set_shop_message(
-                f"{condition.name} + {Scorer.name(scorer.value)} don't form a card")
-            return
-        # Duplicates are blocked unless the player owns the Showman card.
-        # Ownership (not effect) is what matters here: a card disabled for the
-        # run is still owned, so it cannot be built a second time.
-        if self._owns_card(value) and not self._has_card(Card.SHOWMAN):
-            self._set_shop_message("Already own this card")
-            return
-        if len(self.cards) >= self.max_cards:
-            self._set_shop_message(f"Card area is full ({self.max_cards} cards)")
-            return
-        # Consume the two halves from the toolbox and clear the builder.
-        for c in (condition, scorer):
-            if c in self.toolbox.items:
-                self.toolbox.items.remove(c)
-        self._clear_toolbox_selection()
-        # The built card keeps the scorer piece's own magnitude, so building a
-        # card is not a way to launder a weak roll into the average card (or the
-        # reverse): what the piece pays for is what the card pays.
-        self.cards.append(make_card_item(value, amount=scorer.amount))
-        self._discover_owned_card(value)
-        self._set_shop_message(f"Built card: {Card.name(value)}")
-        sounds.play_coin()
+    # -----------------------------------------------------------------------
+    # COMMENTED OUT with the conditions (user request: "comment out all the code
+    # for conditions"): the card builder. A card was built by assigning a
+    # Condition component and a Scorer component in the toolbox and pressing S;
+    # both were consumed and the (condition x scorer) card joined the card area.
+    # Every card is whole and unsplittable now, so there is nothing to build —
+    # the two components no longer exist (the condition is gone, and a scorer
+    # assigned in the toolbox goes to the block assembler as it always did).
+    #
+    # def _build_card(self):
+    #     """Combine the assigned condition + scorer into a card (press S).
+    #
+    #     Only pairs that describe a real card build (see
+    #     components.condition_scorer_card): collision conditions pair with any
+    #     card scorer, and each named condition recreates its whole card (or, for
+    #     the magnitude conditions, a new custom card). The two components are
+    #     consumed from the toolbox and the card joins the card area.
+    #     """
+    #     condition = self.card_condition
+    #     if condition is None:
+    #         return
+    #     scorer = self.card_scorer
+    #     if scorer is None:
+    #         self._set_shop_message(
+    #             f"Pick a scorer for {condition.name} (then press S)")
+    #         return
+    #     value = condition_scorer_card(condition.value, scorer.value)
+    #     if value is None:
+    #         self._set_shop_message(
+    #             f"{condition.name} + {Scorer.name(scorer.value)} don't form a card")
+    #         return
+    #     # Duplicates are blocked unless the player owns the Showman card.
+    #     # Ownership (not effect) is what matters here: a card disabled for the
+    #     # run is still owned, so it cannot be built a second time.
+    #     if self._owns_card(value) and not self._has_card(Card.SHOWMAN):
+    #         self._set_shop_message("Already own this card")
+    #         return
+    #     if len(self.cards) >= self.max_cards:
+    #         self._set_shop_message(f"Card area is full ({self.max_cards} cards)")
+    #         return
+    #     # Consume the two halves from the toolbox and clear the builder.
+    #     for c in (condition, scorer):
+    #         if c in self.toolbox.items:
+    #             self.toolbox.items.remove(c)
+    #     self._clear_toolbox_selection()
+    #     # The built card keeps the scorer piece's own magnitude, so building a
+    #     # card is not a way to launder a weak roll into the average card (or the
+    #     # reverse): what the piece pays for is what the card pays.
+    #     self.cards.append(make_card_item(value, amount=scorer.amount))
+    #     self._discover_owned_card(value)
+    #     self._set_shop_message(f"Built card: {Card.name(value)}")
+    #     sounds.play_coin()
 
     def _assemble_block(self):
         """Combine the assigned toolbox components into a block.
@@ -3621,9 +3728,6 @@ class Game:
 
     def _discover_component(self, kind, value):
         """Discover a component in the collection; pop it up if it's new."""
-        if kind == Component.CONDITION:
-            self._discover_condition(value)
-            return
         if not collection.discover_component(kind, value):
             return
         if kind == Component.SHAPE:
@@ -3634,29 +3738,32 @@ class Game:
             name, category = Scorer.name(value), "scorer"
         self._push_popup(f"New {category}", name, (120, 200, 255))
 
-    def _discover_condition(self, value):
-        """Discover a condition in the collection; pop it up if it's new."""
-        if collection.discover_condition(value):
-            self._push_popup("New condition", Condition.name(value), (140, 190, 190))
+    def _discover_match_group(self, group):
+        """Discover a match group (a shape group or an effect); pop it up if new.
+
+        A card is built on a match group, and the codex lists the groups rather
+        than all 832 (group x scorer) cards, so obtaining a card reveals the
+        group it was built on — and its scorer, which is a component in its own
+        right (the same two things a splittable card used to reveal).
+        """
+        index = MATCH_GROUPS.index(group)
+        if collection.discover_match_group(index):
+            self._push_popup("New match group", match_group_label(group),
+                             (140, 190, 190))
 
     def _discover_owned_card(self, value):
-        """Discover a whole bought/built card.
+        """Discover an obtained card: its match group (or itself) and its scorer.
 
-        Splittable cards aren't in the collection (they're buildable), so
-        obtaining one reveals its two halves instead: the condition and the
-        scorer. The indivisible cards (Showman / Blueprint / ERR 404) reveal
-        themselves as cards.
+        A match-group card reveals the group it is built on plus its scorer (the
+        codex tracks the 26 groups, not the 832 cards). A card that is not built
+        on a group (Showman / Blueprint / ERR 404 / ...) reveals itself.
         """
-        parts = splittable_card_condition_scorer(value)
-        if parts is None:
-            meta = generic_card_meta(value)
-            if meta is not None:
-                parts = meta
-        if parts is None:
+        meta = match_group_card_meta(value)
+        if meta is None:
             self._discover_card(value)
             return
-        condition, scorer = parts
-        self._discover_condition(condition)
+        group, scorer = meta
+        self._discover_match_group(group)
         self._discover_component(Component.SCORER, scorer)
 
     def _discover_block(self, item):
@@ -3838,12 +3945,12 @@ class Game:
         """True when a card is disabled for this run.
 
         The Card cutter trial disables one random owned card and the Deal
-        breaker trial disables every card of one random condition (see
+        breaker trial disables every card built on one random match group (see
         _apply_trial). A disabled card is treated as if it were not owned at
-        all, so BOTH its start-of-run score effect (cards.py) and every passive
-        whole-card effect it drives (_has_card) stop for the run. The state is
-        cleared when the run advances (see _continue_run), so building, buying
-        and selling between runs are never affected.
+        all, so its collision effect (cards.py) and every passive card effect it
+        drives (_has_card) stop for the run. The state is cleared when the run
+        advances (see _continue_run), so building, buying and selling between
+        runs are never affected.
         """
         if card is None:
             return False
@@ -3958,8 +4065,12 @@ class Game:
         self._clear_toolbox_selection()
         self.selected_action = action
         self.selected_action_subject = None
-        self._set_shop_message(
-            f"{action.name} (v{action.version}) — click a target block/card")
+        if Action.needs_target(action.value):
+            self._set_shop_message(
+                f"{action.name} (v{action.version}) — click a target block/card")
+        else:
+            # A target-free action acts on the player, not on a piece.
+            self._set_shop_message(f"{action.name} (v{action.version}) — press S to use")
 
     def _pick_action_subject(self, owned, card, grid_block):
         """Designate the clicked block/card as the active action's subject."""
@@ -3990,18 +4101,22 @@ class Game:
     def _apply_action(self):
         """Apply the selected action to its subject (the S key).
 
-        Using an action consumes it. Returns True when it was applied.
+        Using an action consumes it. An action that acts on the player rather
+        than on a block or card (see Action.needs_target) needs no subject and
+        fires as soon as it is selected. Returns True when it was applied.
         """
         action = self.selected_action
         if action is None or action not in self.actions:
             self._set_shop_message("Select an action first")
             return False
         subject = self.selected_action_subject
-        if subject is None:
+        if subject is None and Action.needs_target(action.value):
             self._set_shop_message("Select a target block or card first")
             return False
         applied = False
-        if action.value == Action.DEATH:
+        if action.value == Action.CLEANSWEEP:
+            applied = self._action_cleansweep(action)
+        elif action.value == Action.DEATH:
             applied = self._action_death(action, subject)
         elif action.value == Action.RECOGNITION:
             applied = self._action_recognition(action, subject)
@@ -4020,6 +4135,38 @@ class Game:
             self.actions.remove(action)
             self._clear_action_selection()
         return applied
+
+    def _action_cleansweep(self, action):
+        """Cleansweep fills every empty card slot with a random card.
+
+        The sweep is paid for with the whole purse — v1 leaves the player with
+        $0 — while v2 spares it. The cards come from the same pool a converted
+        card does (see _draw_random_card_value): a card the player does not
+        already own while one is left, so the sweep is not wasted on a
+        duplicate. Refused while the card area is full, because then there is
+        nothing to sweep and the cash would go for nothing.
+        """
+        if len(self.cards) >= self.max_cards:
+            self._set_shop_message("Card area is full — nothing to sweep")
+            return False
+        spent = 0 if action.version >= 2 else self.cash
+        self.cash -= spent
+        drawn = 0
+        while len(self.cards) < self.max_cards:
+            value = self._draw_random_card_value()
+            if value is None:
+                break
+            self.cards.append(make_card_item(value))
+            self._discover_owned_card(value)
+            drawn += 1
+        cards_text = f"{drawn} card{'' if drawn == 1 else 's'}"
+        if spent:
+            self._set_shop_message(f"Cleansweep swept ${spent} into {cards_text}")
+        else:
+            self._set_shop_message(f"Cleansweep drew {cards_text}")
+        if drawn:
+            sounds.play_coin()
+        return True
 
     def _action_death(self, action, subject):
         """Death sells a chosen block or card for 1.5x (v1) / 6x (v2) its price."""
@@ -4701,17 +4848,28 @@ class Game:
         return True
 
     def _grant_random_card(self):
-        """Grant a random card to the card area.
-
-        Like the shop's card slots, the grant skips the cards the player already
-        owns (see Shop.owned_cards): a second copy is the Showman card's perk,
-        so without it this hands over a card the player can actually use. If
-        every candidate is somehow owned already, the plain pool is used — the
-        grant is always delivered.
-        """
-        if len(self.cards) >= self.max_cards:
+        """Grant a random card to the card area (see _draw_random_card_value)."""
+        value = self._draw_random_card_value()
+        if value is None:
             self._set_shop_message("Card area is full — card withheld")
             return False
+        self.cards.append(make_card_item(value))
+        self._discover_owned_card(value)
+        self._set_shop_message(f"Converted a card: {Card.name(value)}")
+        sounds.play_coin()
+        return True
+
+    def _draw_random_card_value(self):
+        """A random card value for a grant, or None when none can be drawn.
+
+        Like the shop's card slots, the draw skips the cards the player already
+        owns (see Shop.owned_cards): a second copy is the Showman card's perk,
+        so without it this hands over a card the player can actually use. If
+        every candidate is somehow owned already, the plain pool is used — a
+        grant is always delivered while the area has a free slot.
+        """
+        if len(self.cards) >= self.max_cards:
+            return None
         owned = self.shop.owned_cards()
         pool = [v for v in prebuilt_card_pool()
                 if v != Card.ERR_404 and v not in owned
@@ -4720,14 +4878,8 @@ class Game:
             pool = [v for v in prebuilt_card_pool()
                     if v != Card.ERR_404 and len(self.cards) < self._card_capacity_for(v)]
         if not pool:
-            self._set_shop_message("Card area is full — card withheld")
-            return False
-        value = random.choice(pool)
-        self.cards.append(make_card_item(value))
-        self._discover_owned_card(value)
-        self._set_shop_message(f"Converted a card: {Card.name(value)}")
-        sounds.play_coin()
-        return True
+            return None
+        return random.choice(pool)
 
     def _grant_random_block(self):
         """Grant a random block (like a shop block) to the toolbox."""
@@ -4777,8 +4929,9 @@ class Game:
         if any(block.scorer == scorer for block in self.grid.values()):
             return True
         for card in self.cards:
-            meta = generic_card_meta(card.value)
-            if meta is not None and meta[1] == scorer:
+            # A match-group card counts when its scorer is the one asked about:
+            # the card pays that scorer, so the player owns it.
+            if card_scorer(card.value) == scorer:
                 return True
         return False
 
@@ -4819,46 +4972,48 @@ class Game:
                 e, magnitude=block.effect_magnitude(e)))
         return parts
 
-    def _disassemble_card(self):
-        """Split a selected splittable card back into its halves (for a fee).
-
-        The card is removed from the card area and its condition + scorer
-        components go into the toolbox. Whole cards (ERR 404 / Blueprint /
-        Showman) cannot be split.
-        """
-        item = self.selected_toolbox_item
-        if item is None or getattr(item, "kind", None) != "card":
-            self._set_shop_message("Select a splittable card to disassemble")
-            return
-        if item not in self.cards:
-            self._set_shop_message("Item is not owned")
-            return
-        parts = splittable_card_condition_scorer(item.value)
-        if parts is None:
-            # Only the indivisible whole cards can't be split; every composed
-            # card (magnitude 1000+ or generic 2000+) has a condition + scorer.
-            self._set_shop_message("This card cannot be split")
-            return
-        cost = self._inflated(CARD_DISASSEMBLE_COST)
-        if self.cash < cost:
-            self._set_shop_message(f"Need ${cost} to disassemble")
-            return
-        if len(self.toolbox.items) + 2 > self.toolbox.cols * self.toolbox.rows:
-            self._set_shop_message("Inventory needs room for the halves")
-            return
-        condition, scorer = parts
-        self.cards.remove(item)
-        self.cash -= cost
-        self.toolbox.add(Component.condition_component(condition))
-        # The scorer half comes back at the magnitude the card carried (a card
-        # rolled with a 45-chip +Chips half returns a 45-chip piece), so a card
-        # and its halves are always worth the same.
-        amount = getattr(item, "amount", 0) or Scorer.DEFAULT_AMOUNT.get(scorer, 0)
-        self.toolbox.add(Component.scorer_component(scorer, amount=amount))
-        self._clear_toolbox_selection()
-        self._set_shop_message(
-            f"Disassembled {item.name} (${cost})")
-        sounds.play_mech()
+    # -----------------------------------------------------------------------
+    # COMMENTED OUT with the conditions (user request: "comment out all the code
+    # for conditions"): splitting a card back into its two halves. A card was a
+    # condition + a scorer, so it could be taken apart for CARD_DISASSEMBLE_COST;
+    # every card is whole and unsplittable now.
+    #
+    # def _disassemble_card(self):
+    #     """Split a selected splittable card back into its halves (for a fee).
+    #
+    #     The card is removed from the card area and its condition + scorer
+    #     components go into the toolbox. Whole cards (ERR 404 / Blueprint /
+    #     Showman) cannot be split.
+    #     """
+    #     item = self.selected_toolbox_item
+    #     if item is None or getattr(item, "kind", None) != "card":
+    #         self._set_shop_message("Select a splittable card to disassemble")
+    #         return
+    #     if item not in self.cards:
+    #         self._set_shop_message("Item is not owned")
+    #         return
+    #     parts = splittable_card_condition_scorer(item.value)
+    #     if parts is None:
+    #         self._set_shop_message("This card cannot be split")
+    #         return
+    #     cost = self._inflated(CARD_DISASSEMBLE_COST)
+    #     if self.cash < cost:
+    #         self._set_shop_message(f"Need ${cost} to disassemble")
+    #         return
+    #     if len(self.toolbox.items) + 2 > self.toolbox.cols * self.toolbox.rows:
+    #         self._set_shop_message("Inventory needs room for the halves")
+    #         return
+    #     condition, scorer = parts
+    #     self.cards.remove(item)
+    #     self.cash -= cost
+    #     self.toolbox.add(Component.condition_component(condition))
+    #     # The scorer half comes back at the magnitude the card carried, so a
+    #     # card and its halves are always worth the same.
+    #     amount = getattr(item, "amount", 0) or Scorer.DEFAULT_AMOUNT.get(scorer, 0)
+    #     self.toolbox.add(Component.scorer_component(scorer, amount=amount))
+    #     self._clear_toolbox_selection()
+    #     self._set_shop_message(f"Disassembled {item.name} (${cost})")
+    #     sounds.play_mech()
 
     def _disassemble_block(self):
         """Break the selected block back into its parts (for a fee).
@@ -4985,11 +5140,13 @@ class Game:
         # Resale value includes any cash paid to raise the trigger limit.
         sell_price = self._sell_price(item) + getattr(item, "trigger_paid", 0)
         self.toolbox.items.remove(item)
-        # Selling an assigned condition/scorer cancels the pending card build.
-        if item is self.card_condition or item is self.card_scorer:
-            self.card_condition = None
-            self.card_scorer = None
-            self.card_builder_indexes.clear()
+        # COMMENTED OUT with the conditions: selling an assigned condition or
+        # scorer used to cancel the pending card build.
+        #
+        # if item is self.card_condition or item is self.card_scorer:
+        #     self.card_condition = None
+        #     self.card_scorer = None
+        #     self.card_builder_indexes.clear()
         # If the sold component was assigned to the assembler, unassign it.
         a = self.assembler
         if item is a.shape:
@@ -5070,6 +5227,7 @@ class Game:
             return [
                 (f"Card - {Card.name(item.value)}",
                  card_description(item.value, getattr(item, "amount", 0))),
+                ("Rarity", Card.rarity_name(item.value)),
                 ("Comment", Card.comment(item.value)),
             ]
         if getattr(item, "kind", None) == "action":
@@ -5096,9 +5254,12 @@ class Game:
                      effect_description(item.value, item.effect_magnitude))]
         if item.kind == Component.SCORER:
             return [(f"Scorer - {Scorer.name(item.value)}", scorer_description(item.value, item.amount))]
-        if item.kind == Component.CONDITION:
-            return [(f"Condition - {Condition.name(item.value)}",
-                     condition_description(item.value))]
+        # COMMENTED OUT with the conditions: the sidebar row for a condition
+        # component (its name and its trigger prose).
+        #
+        # if item.kind == Component.CONDITION:
+        #     return [(f"Condition - {Condition.name(item.value)}",
+        #              condition_description(item.value))]
         return []
 
     def _pair_description_rows(self, item):
@@ -5155,14 +5316,19 @@ class Game:
         if source == "cards":
             return "Click another card to swap order | B to sell"
         if source == "actions":
+            if not Action.needs_target(getattr(item, "value", None)):
+                return "Press S to use — it needs no target"
             return "Click a target block/card, then press S to use"
         if source == "tokens":
             return "Fires at the start of each run it covers"
         if source == "toolbox":
             if getattr(item, "kind", None) == "block":
                 return "Left-click to place | D to disassemble"
-            if getattr(item, "kind", None) == Component.CONDITION:
-                return "Condition: click a card scorer, then press S to build"
+            # COMMENTED OUT with the conditions: the condition component's hint
+            # ("Condition: click a card scorer, then press S to build").
+            #
+            # if getattr(item, "kind", None) == Component.CONDITION:
+            #     return "Condition: click a card scorer, then press S to build"
             return "Left-click to toggle in the assembler | D to assemble"
         return ""  # Placed blocks and other sources have no extra action.
 
@@ -5765,16 +5931,15 @@ class Game:
             # fall speed is untouched.
             decision["weight"] = random.choice((2.0, 0.9))
         elif self.current_trial == Trial.DEAL_BREAKER:
-            # Only splittable cards have a condition (the indivisible
-            # ERR 404 / Blueprint / Showman never do); pick from the conditions
-            # the player actually owns so the trial bites.
-            conditions = set()
-            for card in self.cards:
-                parts = splittable_card_condition_scorer(card.value)
-                if parts is not None:
-                    conditions.add(parts[0])
-            if conditions:
-                decision["condition"] = random.choice(sorted(conditions))
+            # Deal breaker disables every card of one shape group or effect, so
+            # the picked group is one the player actually holds a card of —
+            # otherwise the trial would not bite. Cards that are not built on a
+            # match group (Coupon, Showman, ...) are never affected.
+            groups = {match_group_card_meta(card.value)[0]
+                      for card in self.cards
+                      if match_group_card_meta(card.value) is not None}
+            if groups:
+                decision["group"] = random.choice(sorted(groups, key=MATCH_GROUPS.index))
         return decision
 
     def _apply_shuffled_order(self, order):
@@ -5809,8 +5974,9 @@ class Game:
         Shuffled puts the card area into one decided order. Crumbling marks a
         random 1/4 of the placed blocks as fragile (they shatter like real
         fragile blocks once a marble touches and leaves, then rebuild next
-        run). Deal breaker disables every owned card of one decided condition.
-        Marble weight uses a decided heavier-or-lighter effect-push factor.
+        run). Deal breaker disables every owned card built on one decided match
+        group (a shape group or an effect). Marble weight uses a decided
+        heavier-or-lighter effect-push factor.
 
         The trial state is cleared again when the run advances (see
         _continue_run), so the NEXT run decides its own picks.
@@ -5854,35 +6020,47 @@ class Game:
         elif self.current_trial == Trial.MARBLE_WEIGHT:
             self.trial_marble_weight = decision.get("weight", 1.0)
         elif self.current_trial == Trial.DEAL_BREAKER:
-            # Disable every owned card whose condition matches the decided one.
-            chosen = decision.get("condition")
+            # Disable every owned card built on the decided match group.
+            chosen = decision.get("group")
             if chosen is not None:
                 self.deal_broken_cards = {
                     card for card in self.cards
-                    if splittable_card_condition_scorer(card.value) is not None
-                    and splittable_card_condition_scorer(card.value)[0] == chosen}
+                    if match_group_card_meta(card.value) is not None
+                    and match_group_card_meta(card.value)[0] == chosen}
 
     def _apply_cards(self):
-        """Apply every owned card's score effect at the start of a run."""
+        """Apply the start-of-run card effects.
+
+        The named cards that fire at the start of a run (Joker's +4 mult, the
+        Pillar, the Banker, Glitch, Ripped Card, Cozy, Painting, Synthesizer,
+        Island), plus Tesseract's saved reroll bonus and the Wrecking Ball's
+        banked mult — see cards.apply_cards.
+        """
         cards.apply_cards(self)
 
     def _apply_cards_on_finish(self):
-        """Apply owned cards that trigger when a run ends (e.g. Explorer)."""
+        """Apply the cards that fire when the run ends (Explorer's distance
+        xMult, Astronaut's black-hole mult, Plane's air-time chips, Skater's
+        slippery xMult) — see cards.apply_cards_on_finish."""
         cards.apply_cards_on_finish(self)
 
     def _apply_cards_on_collision(self, block, marble=None):
-        """Apply owned shape/effect cards when the marble collides with a block.
+        """Apply owned cards whose match group covers the collided block.
 
-        Each owned card matching the block's shape or one of its effects
-        grants +4 mult (once per fresh collision). ``marble`` is the touching
-        marble (an Airball card rewards its airborne streak before the hit).
+        A card fires once per fresh collision: a unit scorer pays one standard
+        unit and every other scorer fires its block-style payoff (see
+        cards.apply_card_on_collision). ``marble`` is the touching marble (an
+        Airball card rewards its airborne streak before the hit).
         """
         cards.apply_card_on_collision(self, block, marble)
 
     def _on_fragile_broken(self, block):
-        """A fragile block broke: the wrecking ball card gains +3 mult."""
-        # A fragile block shattering counts as a block destroyed this run (the
-        # Undertaker scorer pays for each of them).
+        """A fragile block broke.
+
+        The shattering counts as a block destroyed this run (the Undertaker
+        scorer pays for each of them) and fires the Wrecking Ball card, which
+        banks +3 mult a break (see cards.on_fragile_broken).
+        """
         self.run_blocks_destroyed += 1
         cards.on_fragile_broken(self, block)
 
@@ -6168,10 +6346,14 @@ class Game:
                             and block.scorer != Scorer.FINISH):
                         if self._first_contact_block is None:
                             self._first_contact_block = block
-                            # A Start-condition Effective/Summit/Airball card
-                            # fires now that the first block after the start is
-                            # known (Airball uses this marble's air streak).
-                            cards.fire_first_block_cards(self, block, marble)
+                            # Nothing fires here any more: a start-condition card
+                            # with a block-relative payoff (Effective, Summit,
+                            # Airball) used to wait for the run's first block,
+                            # and no card does — the named cards read the run's
+                            # board, cash, cards and time, and every card that
+                            # needs a block fires on a collision. The FIRST
+                            # contact is still remembered (Effective Checks
+                            # below read it).
                         # Echo reads the block touched just before this one, so
                         # remember the current last block before overwriting it;
                         # Rally counts every fresh touch this run.
@@ -6257,8 +6439,10 @@ class Game:
             # the marbles fly their last second again (see the method).
             if self._procrastination_rewind():
                 return
-            # End-of-run cards (e.g. Explorer's distance xMult) adjust the score
-            # before it is finalized.
+            # End-of-run cards: the named cards that read a measure only the
+            # finished run can supply (Explorer's distance xMult, Astronaut's
+            # black-hole time, Plane's air time, Skater's slippery blocks)
+            # adjust the score here, before it is finalized.
             self._apply_cards_on_finish()
             self.score_total = self._compute_total_score()
             self.armed_quick.clear()
@@ -6359,10 +6543,10 @@ class Game:
                     and getattr(block, "random_rolls", {}).get("run") != self.run_number):
                 self._set_run_random_result(block, block.scorer)
         for card in self.cards:
-            meta = generic_card_meta(card.value)
-            if (meta is not None and meta[1] in (Scorer.RANDOM, Scorer.LUCKY)
+            card_scorer_value = card_scorer(card.value)
+            if (card_scorer_value in (Scorer.RANDOM, Scorer.LUCKY)
                     and getattr(card, "random_rolls", {}).get("run") != self.run_number):
-                self._set_run_random_result(card, meta[1])
+                self._set_run_random_result(card, card_scorer_value)
 
     def _procrastination_rewind(self):
         """Procrastination: hand the run back its last second (once per run).
@@ -6857,8 +7041,7 @@ class Game:
             kept_cards = []
             destroyed_selected = False
             for card in self.cards:
-                meta = generic_card_meta(card.value)
-                if meta is not None and meta[1] == Scorer.SHARP \
+                if card_scorer(card.value) == Scorer.SHARP \
                         and random.random() < 0.25:
                     if card is self.selected_toolbox_item:
                         destroyed_selected = True
@@ -6870,14 +7053,13 @@ class Game:
                     self._clear_toolbox_selection()
         # Satanic and Bomb cards are a one-run deal: they are destroyed after a
         # run for good (retrying keeps them), whether or not they fired. A Bomb
-        # card primes the cell of the block its condition points at, exactly
-        # like a Bomb block, and goes off with it.
+        # card primes the cell of the block it collided with, exactly like a
+        # Bomb block, and goes off with it.
         if self.cards:
             kept_cards = []
             destroyed_selected = False
             for card in self.cards:
-                meta = generic_card_meta(card.value)
-                if meta is not None and meta[1] in (Scorer.SATANIC, Scorer.BOMB):
+                if card_scorer(card.value) in (Scorer.SATANIC, Scorer.BOMB):
                     if card is self.selected_toolbox_item:
                         destroyed_selected = True
                     continue
@@ -7197,21 +7379,35 @@ class Game:
         preview.spin_angle = 0.0
         return preview
 
+    def _match_group_description(self, group):
+        """The codex line for a match group: what its cards trigger on.
+
+        A group is not something the player buys, so its entry describes the
+        FAMILY the group stands for: the collision every card of it fires on,
+        and how many cards that is (one per card scorer, each with its own
+        rolled magnitude).
+        """
+        return (f"Cards that fire {match_group_trigger(group)} — "
+                f"{len(CARD_SCORERS)} of them, one per card scorer.")
+
     def _collection_entries(self):
         """Every collection entry: (kind, value, name, description, has_icon,
         discovered). Undiscovered entries show \"???\" for name and description."""
         entries = []
-        # Only the indivisible whole cards appear in the collection: every
-        # splittable card is represented by its condition + scorer halves, and
-        # each condition is its own collection entry.
+        # The cards that are not built on a match group appear one by one. A
+        # match-group card is represented by the GROUP it is built on (plus its
+        # scorer, which is a component entry of its own), so the codex lists the
+        # 26 groups rather than all 832 cards.
         for value in Card.ORDER:
             d = collection.is_card_discovered(value)
             entries.append(("card", value, Card.name(value) if d else "???",
                             Card.description(value) if d else "???", True, d))
-        for value in CONDITION_ORDER:
-            d = collection.is_condition_discovered(value)
-            entries.append(("condition", value, Condition.name(value) if d else "???",
-                            condition_description(value) if d else "???", True, d))
+        for index, group in enumerate(MATCH_GROUPS):
+            d = collection.is_match_group_discovered(index)
+            entries.append(("match_group", index,
+                            match_group_label(group) if d else "???",
+                            self._match_group_description(group) if d else "???",
+                            True, d))
         for value in Action.ORDER:
             d = collection.is_action_discovered(value)
             entries.append(("action", value, Action.name(value) if d else "???",
@@ -7278,6 +7474,16 @@ class Game:
 ScoreParticle = ui.ScoreParticle
 TrailParticle = ui.TrailParticle
 Popup = ui.Popup
+
+# The match-group lookups live in components.py too; the game itself only uses
+# the ones imported at the top, but the tests reach for the rest through main
+# (main.match_group_for_shape(...) and friends), so re-export them here rather
+# than leaving an unused import in the block above.
+match_group_card_values = components.match_group_card_values
+match_group_for_effect = components.match_group_for_effect
+match_group_for_shape = components.match_group_for_shape
+match_group_matches_block = components.match_group_matches_block
+match_group_price = components.match_group_price
 draw_card = ui.draw_card
 draw_card_back = ui.draw_card_back
 draw_marble_box = ui.draw_marble_box

@@ -330,8 +330,9 @@ class PhysicsEngine:
             return self._peg_collision(marble, block, margin) is not None
         if block.shape == Shape.SAWTOOTH:
             return self._sawtooth_collision(marble, block, margin) is not None
-        if block.shape == Shape.CRADLE:
-            return self._cradle_collision(marble, block, margin) is not None
+        # COMMENTED OUT with the shape itself: the cradle's collision.
+        # if block.shape == Shape.CRADLE:
+        #     return self._cradle_collision(marble, block, margin) is not None
         if block.shape == Shape.BUMP:
             return self._bump_collision(marble, block, margin) is not None
         if block.shape == Shape.LOCK:
@@ -601,8 +602,9 @@ class PhysicsEngine:
             return self._peg_collision(marble, block)
         if block.shape == Shape.SAWTOOTH:
             return self._sawtooth_collision(marble, block)
-        if block.shape == Shape.CRADLE:
-            return self._cradle_collision(marble, block)
+        # COMMENTED OUT with the shape itself: the cradle's collision.
+        # if block.shape == Shape.CRADLE:
+        #     return self._cradle_collision(marble, block)
         if block.shape == Shape.BUMP:
             return self._bump_collision(marble, block)
         if block.shape == Shape.LOCK:
@@ -879,24 +881,29 @@ class PhysicsEngine:
         candidates.sort(key=lambda item: item[1])
         return candidates[0]
 
-    def _cradle_collision(self, marble, block, margin=0.0):
-        """Circle vs a cradle: the nearest of its solid pieces.
-
-        The cradle is a V-shaped valley carved from the cell's top edge down to
-        a point above the bottom, backed by a floor slab, so its solid is three
-        convex pieces (two side wedges and the slab). A marble in the valley is
-        between the wedges and clear; one overlapping a piece collides with the
-        nearest piece.
-        """
-        candidates = []
-        for piece in block.get_cradle_pieces:
-            hit = self._convex_polygon_collision(marble, piece, margin)
-            if hit is not None:
-                candidates.append(hit)
-        if not candidates:
-            return None
-        candidates.sort(key=lambda item: item[1])
-        return candidates[0]
+    # COMMENTED OUT with the shape itself (user request: "comment out the cradle
+    # shape"): the cradle's collision, which resolved against its three solid
+    # pieces (two side wedges and the floor slab). Both dispatch branches that
+    # called it are commented out too.
+    #
+    # def _cradle_collision(self, marble, block, margin=0.0):
+    #     """Circle vs a cradle: the nearest of its solid pieces.
+    #
+    #     The cradle is a V-shaped valley carved from the cell's top edge down to
+    #     a point above the bottom, backed by a floor slab, so its solid is three
+    #     convex pieces (two side wedges and the slab). A marble in the valley is
+    #     between the wedges and clear; one overlapping a piece collides with the
+    #     nearest piece.
+    #     """
+    #     candidates = []
+    #     for piece in block.get_cradle_pieces:
+    #         hit = self._convex_polygon_collision(marble, piece, margin)
+    #         if hit is not None:
+    #             candidates.append(hit)
+    #     if not candidates:
+    #         return None
+    #     candidates.sort(key=lambda item: item[1])
+    #     return candidates[0]
 
     def _drain_collision(self, marble, block, margin=0.0):
         """Circle vs a drain: (outward_normal, penetration) or None.

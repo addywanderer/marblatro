@@ -11,6 +11,7 @@ class CardsTests(GameTestCase):
     """Cards: conditions, whole cards and the composed card halves."""
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_sharp_scorer_card_destroyed_on_continue(self):
         # Sharp cards (a generic card whose scorer half is Sharp) each have a
         # 1/4 chance to be destroyed after every run; other cards always
@@ -38,6 +39,7 @@ class CardsTests(GameTestCase):
         self.assertIn(mult_pipe, values)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_sharp_scorer_card_survives_continue_when_lucky(self):
         sharp = main.condition_scorer_card(
             main.Condition.SHAPE_PIPE, main.Scorer.SHARP)
@@ -49,6 +51,7 @@ class CardsTests(GameTestCase):
         self.assertEqual([card.value for card in self.game.cards], [sharp])
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_sharp_scorer_card_survives_retry(self):
         # Retrying a run discards it, so no Sharp card is destroyed (destruction
         # only happens after a run).
@@ -108,6 +111,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 14)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_the_nine_utility_whole_cards_are_defined(self):
         expected = [(main.Card.PEDESTAL, "Pedestal", 44),
                     (main.Card.INFERNO, "Inferno", 50),
@@ -268,6 +272,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(blocks[4].triggers_left, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_watch_leaves_collision_cards_alone(self):
         # Watch gates the BLOCKS' scorers: a card that reacts to a collision
         # still fires on every matching hit, including past the fifth block.
@@ -354,6 +359,7 @@ class CardsTests(GameTestCase):
         self.assertTrue(self.game.run_complete)  # the run just ended as usual
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_essence_card_data(self):
         self.assertIn(main.Card.ESSENCE, main.Card.ORDER)
         self.assertEqual(main.Card.name(main.Card.ESSENCE), "Essence")
@@ -452,6 +458,7 @@ class CardsTests(GameTestCase):
         self.assertIn("Spirit token", self.game.shop_message)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_concert_card_data(self):
         self.assertIn(main.Card.CONCERT, main.Card.ORDER)
         self.assertEqual(main.Card.name(main.Card.CONCERT), "Concert")
@@ -599,6 +606,7 @@ class CardsTests(GameTestCase):
 
     # --- The Painting condition ---------------------------------------------
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_painting_condition_metadata(self):
         self.assertEqual(main.Condition.name(main.Condition.PAINTING), "Painting")
         self.assertEqual(main.condition_phase(main.Condition.PAINTING), "start")
@@ -613,6 +621,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(main.Condition.GLYPHS[main.Condition.PAINTING], "P")
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_card_pays_its_own_scorer_magnitude(self):
         # A +Chips half rolled to 45 makes the start card add 45 chips, and a
         # +Mult half rolled to 6 adds +6 mult (30 and 4 at the averages).
@@ -629,6 +638,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 7)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_card_without_a_magnitude_pays_the_average(self):
         # A card built by hand (or read from an old save) has no magnitude and
         # pays exactly what it always did.
@@ -642,6 +652,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cards[0].amount, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_blueprint_copies_the_magnitude_too(self):
         # A Blueprint copies the card to its left — its value AND its roll.
         mult = main.condition_scorer_card(main.Condition.START, main.Scorer.MULT_ADD)
@@ -654,6 +665,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1 + 9 + 9)  # both copies pay +9
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_card_built_from_a_component_keeps_the_pieces_magnitude(self):
         # Building a card consumes the scorer piece, so the card PAYS the
         # strength that piece was bought at: no laundering a cheap roll into
@@ -681,6 +693,7 @@ class CardsTests(GameTestCase):
                 self.assertEqual(self.game.score_chips, expected)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_scorer_cards_pay_their_own_magnitude(self):
         # Cash pays the card's own amount, and Sharp multiplies by it.
         cash = main.condition_scorer_card(main.Condition.START, main.Scorer.CASH)
@@ -720,6 +733,7 @@ class CardsTests(GameTestCase):
             self.assertEqual(card.price, main.card_price_for(card.value))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_cards_magnitude_round_trips_through_a_save(self):
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
         self.game.cash = 100
@@ -745,6 +759,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(old.amount, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_recognition_copies_a_cards_magnitude(self):
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
         original = main.make_card_item(value, amount=45)
@@ -761,6 +776,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(copy.price, original.price)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_painting_pays_per_dollar_of_board_value(self):
         # A board worth $100 pays +0.4 mult per dollar x 100 = +40 mult.
         for i in range(4):
@@ -778,6 +794,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.4 * 100)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_painting_chips_card_scales_the_same_way(self):
         # +Chips pays 3 chips per dollar: a $50 board adds 150 chips.
         block = main.Block(0, 5, scorer=main.Scorer.NONE)
@@ -806,6 +823,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 7)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_cozy_condition_metadata(self):
         self.assertEqual(main.Condition.name(main.Condition.COZY), "Cozy")
         self.assertEqual(main.condition_phase(main.Condition.COZY), "start")
@@ -814,6 +832,76 @@ class CardsTests(GameTestCase):
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.CONDITION, main.Condition.COZY)], 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
+    def test_island_condition_metadata(self):
+        self.assertEqual(main.Condition.name(main.Condition.ISLAND), "Island")
+        self.assertEqual(main.condition_phase(main.Condition.ISLAND), "start")
+        self.assertAlmostEqual(components.condition_ratio(main.Condition.ISLAND), 2.0)
+        self.assertEqual(main.CONDITION_ORDER.count(main.Condition.ISLAND), 1)
+        self.assertIn("for each unconnected group of unlocked board units",
+                      main.condition_description(main.Condition.ISLAND))
+        self.assertGreater(main.COMPONENT_PRICES[
+            (main.Component.CONDITION, main.Condition.ISLAND)], 0)
+        # The canonical pairing reads as the card it describes: two units of a
+        # 2x ratio make the xMult half multiply by 1.5, i.e. +0.5 xMult a group.
+        value = main.condition_scorer_card(main.Condition.ISLAND,
+                                           main.Scorer.MULT_MUL)
+        self.assertIn("x1.5 mult", main.Card.description(value))
+        self.assertIn("for each unconnected group of unlocked board units",
+                      main.Card.description(value))
+
+
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
+    def test_island_counts_groups_not_units_and_corners_do_not_connect(self):
+        # An island is a group of unlocked units joined by SHARED SIDES. Two
+        # blocks touching only at a corner are two islands: the corner between
+        # them is water. The count is of groups, so one big continent is still
+        # 1 — and a board with nothing unlocked has none.
+        game = self.game
+        game.unlocked_cells = set()
+        self.assertEqual(main.cards.island_group_count(game), 0)
+        game.unlocked_cells = {(0, 0)}
+        self.assertEqual(main.cards.island_group_count(game), 1)
+        # A 2x3 starter region (and any rectangular block) is one island.
+        game.unlocked_cells = {(x, y) for x in range(2) for y in range(3)}
+        self.assertEqual(main.cards.island_group_count(game), 1)
+        # A corner-touching pair is TWO islands...
+        game.unlocked_cells = {(0, 0), (1, 1)}
+        self.assertEqual(main.cards.island_group_count(game), 2)
+        # ...while adding the unit that joins them by a side makes it one.
+        game.unlocked_cells = {(0, 0), (1, 1), (0, 1)}
+        self.assertEqual(main.cards.island_group_count(game), 1)
+        # An L-shape is one island, and a diagonal line of three is three.
+        game.unlocked_cells = {(0, 0), (0, 1), (0, 2), (1, 2)}
+        self.assertEqual(main.cards.island_group_count(game), 1)
+        game.unlocked_cells = {(0, 0), (1, 1), (2, 2)}
+        self.assertEqual(main.cards.island_group_count(game), 3)
+        # The condition's units ARE that count.
+        self.assertEqual(main.cards._condition_units(
+            game, main.Condition.ISLAND), 3)
+
+
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
+    def test_island_card_multiplies_by_one_point_five_per_group(self):
+        # At the start of the run the card multiplies the multiplier by
+        # (1 + 0.5) per island: one island x1.5, three islands x2.5, and a
+        # single block of any size still just x1.5.
+        value = main.condition_scorer_card(main.Condition.ISLAND,
+                                           main.Scorer.MULT_MUL)
+        self.game.cards.append(main.CardItem(value, 0))
+        cases = (("one unit", {(0, 0)}, 15.0),
+                 ("three corner-touching units", {(0, 0), (1, 1), (2, 2)}, 25.0),
+                 ("one 4x4 continent",
+                  {(x, y) for x in range(4) for y in range(4)}, 15.0))
+        for label, cells, expected in cases:
+            with self.subTest(case=label):
+                self.game.unlocked_cells = cells
+                self.game.score_mult = 10
+                self.game._apply_cards()
+                self.assertAlmostEqual(self.game.score_mult, expected)
+
+
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_random_and_effective_are_card_scorers(self):
         # Random and Effective are now card scorers: they build a generic card
         # with any condition.
@@ -826,6 +914,7 @@ class CardsTests(GameTestCase):
             self.assertIn(main.Scorer.name(scorer), main.Card.name(value))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_random_card_fires_random_reward_on_collision(self):
         # A Pipe + Random generic card fires its one pre-rolled reward on every
         # matching pipe collision (the roll is chosen before the run).
@@ -859,6 +948,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 2 * 1.3)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_effective_collision_card_checks_the_block_effects(self):
         # A Pipe + Effective card grants +1 xMult only when the hit pipe
         # block has 2+ effects.
@@ -877,6 +967,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 4.0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_effective_start_card_fires_on_first_block_after_start(self):
         # A Start + Effective card can't fire at run start (no block known);
         # it fires once the run's first block is hit, if that block has 2+
@@ -893,6 +984,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 4.0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_effective_end_card_checks_last_block_before_finish(self):
         # A Distance + Effective card checks the last block the marble hit
         # before finishing: +1 xMult when that block has 2+ effects.
@@ -916,6 +1008,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 2)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_start_parts_card_banks_its_component_at_run_start(self):
         # Regression: a start-of-run resource card (Ripped Card + Parts =
         # FEW_BLOCKS x Parts) fires when the run starts, but its reward is
@@ -934,6 +1027,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.parts_run_gain, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_card_data_lives_in_components(self):
         # Only the indivisible whole cards (the Card.ORDER catalog) remain as
         # whole cards; every splittable card is now composed from a condition +
@@ -988,14 +1082,15 @@ class CardsTests(GameTestCase):
         self.assertIn(value, main.Card.COLORS)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_condition_data_lives_in_components(self):
         # Conditions are a purchasable component kind with the full catalogue:
         # the named triggers plus one collision condition per shape/effect.
         self.assertEqual(main.Component.CONDITION, "condition")
-        # 13 named triggers (incl. Cozy, Painting and Synthesizer) + one
+        # 14 named triggers (incl. Cozy, Painting, Synthesizer and Island) + one
         # collision condition per shape/effect.
         self.assertEqual(len(main.CONDITION_ORDER),
-                         13 + len(main.Shape.ORDER) + len(main.Effect.ORDER))
+                         14 + len(main.Shape.ORDER) + len(main.Effect.ORDER))
         # Named conditions are named after the card they were split from.
         self.assertEqual(main.Condition.name(main.Condition.COZY), "Cozy")
         self.assertEqual(main.Condition.name(main.Condition.START), "Joker")
@@ -1019,6 +1114,7 @@ class CardsTests(GameTestCase):
             self.assertEqual(components.condition_effect(cond), effect)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_new_shapes_and_sticky_generate_card_conditions(self):
         # The two new line shapes and the sticky effect each auto-generate a
         # collision condition that builds a magnitude card like any other.
@@ -1033,6 +1129,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(components.condition_effect(cond), main.Effect.STICKY)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_half_pipe_generates_card_condition(self):
         # The half-pipe shape auto-generates a collision condition that builds
         # a magnitude card like any other shape.
@@ -1044,6 +1141,7 @@ class CardsTests(GameTestCase):
         self.assertGreaterEqual(value, components.CONDITION_CARD_OFFSET)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_new_shapes_generate_card_conditions(self):
         # Each new shape auto-generates a collision condition that builds a
         # magnitude card like every other shape, and resolves back to the shape.
@@ -1055,6 +1153,7 @@ class CardsTests(GameTestCase):
             self.assertGreaterEqual(value, components.CONDITION_CARD_OFFSET)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_effect_condition_ids_are_pinned_below_shape_growth(self):
         # EFFECT_BASE is a fixed id (not derived from len(Shape.ORDER)) so that
         # adding shapes never renumbers the effect collision conditions.
@@ -1062,6 +1161,7 @@ class CardsTests(GameTestCase):
                            main.Condition.SHAPE_BASE + len(main.Shape.ORDER) - 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_new_effects_generate_card_conditions(self):
         # Each new effect auto-generates a collision condition that resolves
         # back to the effect and builds a card like every other effect.
@@ -1074,6 +1174,7 @@ class CardsTests(GameTestCase):
                 components.CONDITION_CARD_OFFSET)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_building_collision_card_from_condition_and_scorer(self):
         # Pipe condition + +Mult scorer builds the Pipe +Mult magnitude card.
         cond = main.Component.condition_component(main.Condition.SHAPE_PIPE)
@@ -1089,6 +1190,7 @@ class CardsTests(GameTestCase):
         self.assertNotIn(scorer, self.game.toolbox.items)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_building_canonical_named_card_recreates_whole_card(self):
         # Start condition + +Mult scorer recreates the Joker (a whole card).
         cond = main.Component.condition_component(main.Condition.START)
@@ -1098,6 +1200,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cards[0].value, main.Card.JOKER)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_building_magnitude_card_creates_custom_card(self):
         # Explorer (Distance) + +Mult builds a derived custom card.
         cond = main.Component.condition_component(main.Condition.DISTANCE)
@@ -1111,6 +1214,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(main.Card.name(value), "Explorer +Mult")
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_card_builder_requires_a_scorer_and_known_combo(self):
         # A condition alone can't build anything.
         cond = main.Component.condition_component(main.Condition.SHAPE_PIPE)
@@ -1147,6 +1251,7 @@ class CardsTests(GameTestCase):
         self.assertGreaterEqual(value, components.CONDITION_CARD_OFFSET)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_start_chips_custom_card_gives_chips_at_run_start(self):
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
         self.game.cards.append(main.CardItem(value, 50))
@@ -1155,6 +1260,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, 30)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_distance_custom_cards_scale_with_distance_travelled(self):
         # A full board (fraction 1.0) is 4 units: +120 chips or +16 mult.
         marble = self._add_marble()
@@ -1172,6 +1278,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 17)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collection_entries_hide_splittable_cards_and_list_conditions(self):
         # Only the indivisible cards appear as card entries; conditions are
         # their own collection entries.
@@ -1183,6 +1290,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(cond_entries), len(components.CONDITION_ORDER))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_every_block_scorer_is_a_card_scorer(self):
         # The card scorer set covers every block payoff scorer, and a flat
         # scorer builds a generic card with a collision condition.
@@ -1207,6 +1315,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(main.Card.name(value), "Explorer card (Quick)")
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_every_condition_and_card_scorer_pair_forms_a_card(self):
         # The whole grid: EVERY condition pairs with EVERY card scorer to form
         # a real card (a name, a description, a price and a split back into its
@@ -1244,6 +1353,7 @@ class CardsTests(GameTestCase):
                          * len(components.CARD_SCORERS))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_cards_state_the_gate_not_a_per_unit_measure(self):
         # A flat card pays ONE trigger, so it must not claim to scale with the
         # condition's measured units ("for each second the marble is in the
@@ -1296,6 +1406,7 @@ class CardsTests(GameTestCase):
                          main.condition_description(main.Condition.START))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_block_relative_cards_name_the_block_their_condition_hands_them(self):
         # A card has no position of its own, so a position-reading payoff (a
         # row, a border, neighbours, a bomb) says which block it reads.
@@ -1315,6 +1426,7 @@ class CardsTests(GameTestCase):
             self.assertIn("the shattered block", fragile)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_powerline_card_counts_the_blocks_in_the_collided_row(self):
         # A Pipe x Powerline card pays its chips for every block in the row of
         # the block the marble hit (the collided block included).
@@ -1331,6 +1443,7 @@ class CardsTests(GameTestCase):
                          main.Scorer.DEFAULT_AMOUNT[main.Scorer.POWERLINE] * 3)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_cluster_card_counts_the_blocks_next_to_the_collided_block(self):
         # A Cluster card pays its mult for each block orthogonally adjacent to
         # the collided block (two here, one of them diagonal and not counted).
@@ -1348,6 +1461,7 @@ class CardsTests(GameTestCase):
                          1 + main.Scorer.DEFAULT_AMOUNT[main.Scorer.CLUSTER] * 2)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_colossus_card_scales_with_the_touching_marble_radius(self):
         # A Colossus card pays its xMult for each pixel the touching marble's
         # radius is above the base size (a card measures the marble it fires
@@ -1364,6 +1478,7 @@ class CardsTests(GameTestCase):
                                2 * (1 + 5 * main.Scorer.DEFAULT_AMOUNT[main.Scorer.COLOSSUS]))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_echo_card_refires_the_collided_block_scorer(self):
         # An Echo card has no "block touched before it", so it copies the block
         # its condition is about: a Pipe x Echo card re-fires the collided
@@ -1380,6 +1495,7 @@ class CardsTests(GameTestCase):
                          2 * main.Scorer.DEFAULT_AMOUNT[main.Scorer.CASH])
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_bomb_card_primes_the_collided_cell(self):
         # A Bomb card plants a bomb on the cell of the block its condition
         # hands it, exactly like a Bomb block (the units around it unlock after
@@ -1393,6 +1509,7 @@ class CardsTests(GameTestCase):
         self.assertIn((3, 2), self.game.bomb_cells)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_bomb_card_is_destroyed_after_the_run(self):
         # A Bomb card is a one-run deal: it goes off with the block it primed,
         # so it is destroyed after the run for good (only a retry keeps it).
@@ -1409,6 +1526,7 @@ class CardsTests(GameTestCase):
         self.assertIn(cash, values)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_bomb_card_survives_retry(self):
         # Retrying the run discards it, so the Bomb card is kept.
         bomb = main.condition_scorer_card(main.Condition.SHAPE_PIPE,
@@ -1420,6 +1538,7 @@ class CardsTests(GameTestCase):
         self.assertEqual([card.value for card in self.game.cards], [bomb])
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_start_block_relative_card_waits_for_the_first_block(self):
         # A start-phase Powerline card has no row to read at run start, so it
         # waits for the run's first contacted block and pays from that row.
@@ -1438,6 +1557,7 @@ class CardsTests(GameTestCase):
                          main.Scorer.DEFAULT_AMOUNT[main.Scorer.POWERLINE] * 2)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_end_quick_card_pays_from_the_last_contact_speed(self):
         # There is no NEXT block after the run, so an end-phase Quick card pays
         # from the speed the marble had at its last block contact.
@@ -1451,6 +1571,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_chips, 400 * main.QUICK_SCALE)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_end_quick_card_grants_nothing_without_a_block_contact(self):
         value = main.condition_scorer_card(main.Condition.DISTANCE,
                                            main.Scorer.QUICK)
@@ -1462,6 +1583,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_lucky_card_keeps_its_pre_rolled_outcome_for_the_whole_run(self):
         # A Lucky card's two rolls are chosen BEFORE the run (like a Lucky
         # block's), so the patched draw below can't change the outcome.
@@ -1483,6 +1605,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cash, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_every_named_condition_pairs_with_every_unit_scorer(self):
         # The full grid: every named condition can build a card with every unit
         # scorer, and every produced value has metadata (it could be offered
@@ -1496,6 +1619,7 @@ class CardsTests(GameTestCase):
                 self.assertGreater(main.Card.PRICES[value], 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_condition_scorer_card_splits_back_into_its_pair(self):
         # (condition, scorer) maps to one card, and that card decomposes back
         # into exactly that pair (only the indivisible cards lack a split).
@@ -1510,6 +1634,7 @@ class CardsTests(GameTestCase):
                                  (cond, scorer))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_canonical_combo_recreates_original_card_value(self):
         # Building (Joker condition, +Mult) still yields the classic Joker card.
         self.assertEqual(main.condition_scorer_card(main.Condition.START,
@@ -1517,6 +1642,7 @@ class CardsTests(GameTestCase):
                          main.Card.JOKER)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_wrecking_ball_chips_card_pays_proportional_chips_per_break(self):
         # Fragile Breaks at ratio 0.75: a +Chips version pays int(0.75*30 + .5)
         # = +23 chips per fragile block that breaks.
@@ -1530,6 +1656,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, 23)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_collision_card_is_a_prebuilt_candidate(self):
         # Building (Pipe condition, Cash) produces a generic card that is also a
         # valid pre-built shop candidate: one family, any scorer.
@@ -1542,6 +1669,7 @@ class CardsTests(GameTestCase):
         self.assertIn(value, main.Card.NAMES)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_pipe_cash_card_earns_toward_the_run_award_on_matching_collision(self):
         # A Cash card doesn't pay out mid-run: it banks toward the run's
         # end-of-run cash award (paid only after a run).
@@ -1559,6 +1687,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.card_cash_run_gain, 15)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_start_cash_card_banks_toward_run_award_at_run_start(self):
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.CASH)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1569,6 +1698,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cash, cash)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_sharp_card_triples_mult_on_matching_collision(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.SHARP)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1578,6 +1708,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 3)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_parts_card_banks_a_component_on_matching_collision(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.PARTS)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1597,6 +1728,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self._component_count(), 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_parts_card_banks_its_own_magnitude_in_components(self):
         # A Parts card banks one component per point of its own rolled
         # magnitude (a 3-magnitude card banks three), and hands them over only
@@ -1615,6 +1747,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.parts_run_gain, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_picky_card_banks_a_point_on_matching_collision(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.PICKY)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1624,6 +1757,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.option_run_gain, 0.5)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_voyager_card_adds_mult_per_pixel_of_total_run_distance(self):
         # A Voyager card has no single touching marble, so it measures the
         # total distance all of the run's marbles have traveled when it fires.
@@ -1639,6 +1773,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.01 * 2400)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_voyager_card_uses_its_own_rolled_rate(self):
         # A card's Voyager half keeps its own magnitude, so a card rolled above
         # the average rate pays more for the same travel.
@@ -1652,6 +1787,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.018 * 1000)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_summit_card_descriptions_name_the_measured_block(self):
         # A Summit card's description explains that it measures the row of the
         # block its condition hands it.
@@ -1673,6 +1809,7 @@ class CardsTests(GameTestCase):
         self.assertIn("shattered block", main.Card.description(breaks).lower())
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_summit_card_collision_uses_collided_block_row(self):
         # A Summit collision card measures the row of the block the marble
         # actually hit (a card has no row of its own).
@@ -1685,6 +1822,7 @@ class CardsTests(GameTestCase):
                                1 + 0.75 * (main.GRID_HEIGHT - 1))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_summit_card_collision_bottom_row_gives_nothing(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.SUMMIT)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1695,6 +1833,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_summit_start_card_waits_for_first_contact_block(self):
         # A start-phase Summit card can't measure a row at run start (no block
         # has been hit yet), so it waits until the run's first contacted block.
@@ -1710,6 +1849,7 @@ class CardsTests(GameTestCase):
                                1 + 0.75 * ((main.GRID_HEIGHT - 1) - 2))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_summit_end_card_uses_last_contact_block(self):
         # An end-phase Summit card measures the last block the marble hit
         # before finishing.
@@ -1723,6 +1863,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.75 * 4)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_airball_card_collision_uses_touching_marble_air(self):
         # A Pipe x Airball card pays +8 mult per second of the touching
         # marble's air streak before it hit the matching pipe.
@@ -1736,6 +1877,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 8 * 1.5)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_airball_card_collision_with_no_air_grants_nothing(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.AIRBALL)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1745,6 +1887,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_airball_start_card_fires_on_first_contact_with_air(self):
         # A start-condition Airball card waits for the run's first contacted
         # block and rewards that marble's air streak before the touch.
@@ -1761,6 +1904,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 8 * 2.0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_airball_end_card_uses_last_contact_air(self):
         # An end-condition Airball card rewards the air streak the marble had
         # before its last block contact before finishing.
@@ -1774,6 +1918,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 8 * 2.5)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_airball_fragile_card_uses_broken_block_touch_air(self):
         # A Fragile Breaks x Airball card rewards the air streak the marble had
         # before it first touched the fragile block that later broke.
@@ -1786,6 +1931,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 8 * 3.0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_satanic_card_multiplies_mult_on_matching_collision(self):
         value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.SATANIC)
         self.game.cards.append(main.CardItem(value, 40))
@@ -1795,6 +1941,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 6.66)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_satanic_card_destroyed_on_continue(self):
         # A run destroys an owned Satanic card (a one-run deal);
         # non-Satanic cards survive.
@@ -1809,6 +1956,7 @@ class CardsTests(GameTestCase):
         self.assertIn(cash, values)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_satanic_card_survives_retry(self):
         # Retrying the run discards it, so the Satanic card is kept.
         satanic = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.SATANIC)
@@ -1819,6 +1967,7 @@ class CardsTests(GameTestCase):
         self.assertEqual([card.value for card in self.game.cards], [satanic])
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_same_card_xmult_triggers_multiply(self):
         # A single Sharp card that fires on two pipe hits multiplies twice
         # (1 -> 3 -> 9); xMult always multiplies, never adds (Game._apply_xmult).
@@ -1831,6 +1980,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 9)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_xmult_card_compounds_per_collision(self):
         # A Slope xMult card hitting 2 slopes gives 1.25 * 1.25 = 1.5625: every
         # collision applies the card's own factor again, individually and
@@ -1848,6 +1998,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1.5625 * 1.25)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_card_fires_once_per_block_trigger(self):
         # A collision card rides on the block's triggers: a slope with a limit
         # of 3 feeds the card three times and then stops.
@@ -1865,6 +2016,7 @@ class CardsTests(GameTestCase):
         self.assertNotAlmostEqual(self.game.score_mult, 1.25 ** 4)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_card_needs_a_trigger_left_on_the_block(self):
         # A block that has already spent its triggers (its used-up red state)
         # no longer feeds collision cards.
@@ -1879,6 +2031,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_cards_ignore_role_blocks(self):
         # Start/Finish blocks are not scoring blocks and never spend a trigger,
         # so a collision card must not fire on them at all — otherwise a
@@ -1898,6 +2051,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(finish.triggers_left, 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_cards_ignore_a_scorerless_portal(self):
         # A Portal with no scorer is exempt from the trigger behaviour (its
         # pass-through never spends a trigger), so it would feed a card on
@@ -1923,6 +2077,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1.25)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_end_flat_card_fires_at_run_end(self):
         # A Distance x Cash card banks toward the run award once the run ends;
         # a Distance x Fresh card grants a free reroll. The run has to have
@@ -1943,6 +2098,7 @@ class CardsTests(GameTestCase):
 
     # --- Flat cards honour their condition's gate -------------------------
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_start_card_respects_its_conditions_gate(self):
         # A flat card fires one block-style trigger, but only when its condition
         # actually happened: a Ripped Card (Parts) pays nothing on a board with
@@ -1962,6 +2118,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.free_rerolls, 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_start_card_respects_the_cozy_board_gate(self):
         # Cozy holds while the board has 10 or fewer unlocked units.
         value = main.condition_scorer_card(main.Condition.COZY, main.Scorer.FRESH)
@@ -1976,6 +2133,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.free_rerolls, 1)  # 10 units: Cozy holds
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_end_card_does_not_fire_when_the_run_measured_nothing(self):
         # A run that never travelled has not satisfied the Distance condition,
         # so its flat card pays nothing (the magnitude version scales to zero).
@@ -1991,6 +2149,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.free_rerolls, 1)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_flat_start_block_payoff_card_respects_the_gate(self):
         # A block-relative start card waits for the run's first block, and is
         # still refused when its condition's gate is not met: a Ripped Card
@@ -2036,6 +2195,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cash, cash0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_quick_card_pays_the_speed_of_the_next_block_hit(self):
         # A Pipe x Quick card arms when the pipe is hit; the marble's NEXT
         # fresh block contact pays chips from that block's impact speed.
@@ -2055,6 +2215,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, int(240.0 * main.QUICK_SCALE))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_quick_card_resolves_an_armed_start_quick_on_first_hit(self):
         # A Start x Quick card arms at run start and pays on the first block hit.
         value = main.condition_scorer_card(main.Condition.START, main.Scorer.QUICK)
@@ -2070,6 +2231,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, int(200.0 * main.QUICK_SCALE))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_shape_and_effect_cards_exist_for_every_shape_and_effect(self):
         # Every shape and effect collision condition has a magnitude card for
         # each unit scorer (+Chips / +Mult / xMult), decomposing back into the
@@ -2170,6 +2332,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, before)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_none_effect_card_fires_on_plain_block(self):
         # A "None card" (effect) grants +4 mult when hitting a block with no
         # effect.
@@ -2235,6 +2398,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, before + 8)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_card_area_caps_at_five(self):
         self.game.cash = 100000
         # Own Showman so duplicate Jokers can be bought; the card area still
@@ -2257,6 +2421,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cards[-1].value, main.Card.COUPON)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_recognition_action_v2_duplicates_card_for_its_cost(self):
         card = main.CardItem(main.Card.JOKER, 24)
         self.game.cards.append(card)
@@ -2270,6 +2435,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cash, 100 - 24)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_joker_gives_plus_four_mult_at_run_start(self):
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
@@ -2278,6 +2444,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, 1)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_joker_mult_applies_every_run(self):
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
@@ -2286,6 +2453,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 5)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_banker_card_gives_chip_per_ten_dollars(self):
         self.game.cards.append(main.CardItem(main.Card.BANKER, 25))
         self.game.score_chips = 1
@@ -2294,6 +2462,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_chips, 1 + 555 // 10)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_pillar_card_gives_mult_for_fullest_column(self):
         # Column 3 holds the most blocks (3), so Pillar adds +3 mult.
         self.game.grid[(0, 0)] = main.Block(0, 0)
@@ -2309,6 +2478,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1 + 3)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_pillar_card_with_empty_board_adds_no_mult(self):
         self.game.cards.append(main.CardItem(main.Card.PILLAR, 25))
         self.game.score_mult = 1
@@ -2316,6 +2486,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_wrecking_ball_card_gives_accumulated_mult_at_run_start(self):
         # The wrecking ball's +mult is permanent: whatever bonus has built up
         # from fragile breaks applies at the start of every run.
@@ -2326,6 +2497,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1 + 6)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_wrecking_ball_run_gain_discarded_when_retrying(self):
         # Retrying a run discards the gains the wrecking ball earned during it.
         self.game.cards.append(main.CardItem(main.Card.WRECKING_BALL, 30))
@@ -2339,6 +2511,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 0)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_glitch_card_gives_random_mult_between_zero_and_six_times_base(self):
         # Glitch pays a random 0..6 units, so the +4 mult base gives at most
         # +24 mult (6x base).
@@ -2351,6 +2524,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(self.game.score_particles), 1)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_ripped_card_gives_120_chips_when_fewer_than_five_blocks(self):
         self.game.cards.append(main.CardItem(main.Card.RIPPED_CARD, 20))
         self.game.grid[(0, 0)] = main.Block(0, 0)
@@ -2361,6 +2535,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(self.game.score_particles), 1)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_ripped_card_gives_nothing_with_more_than_five_blocks(self):
         # Ripped card grants 120 chips only with 5 blocks or fewer; with 6 it
         # grants nothing and spawns no particle.
@@ -2373,6 +2548,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(self.game.score_particles), 0)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_plane_card_gives_chips_for_air_time_at_finish(self):
         # Plane gives +15 chips for each second the marble was in the air. The
         # 2.5s of air time pays a fractional 37.5 chips, kept as-is (only the
@@ -2397,6 +2573,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.cash, 1000 - 10)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_blueprint_copies_left_card_at_run_start(self):
         # A Blueprint next to a Joker behaves like a second Joker.
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))      # left
@@ -2414,6 +2591,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_blueprint_copies_finish_card(self):
         # A Blueprint next to an Explorer copies its end-of-run xMult.
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
@@ -2440,6 +2618,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_skater_card_gives_xmult_based_on_slippery_blocks_at_finish(self):
         # Skater gives (1 + 0.2 * slippery blocks owned) xMult at the END of
         # the run: xMult cards apply late, +mult cards apply at the start.
@@ -2459,6 +2638,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.2 * 2)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_skater_card_with_no_slippery_blocks_is_neutral(self):
         # With no slippery blocks, Skater's xMult is exactly 1 (no effect).
         self.game.cards.append(main.CardItem(main.Card.SKATER, 30))
@@ -2468,6 +2648,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(self.game.score_particles), 0)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_astronaut_card_gives_mult_for_black_hole_time(self):
         self.game.cards.append(main.CardItem(main.Card.ASTRONAUT, 30))
         self.game.score_mult = 1
@@ -2476,6 +2657,7 @@ class CardsTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1 + 4 * 2.5)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_card_cutter_trial_disables_random_card(self):
         # With a single owned card, Card cutter always disables it, so its
         # score effect is skipped for the run.
@@ -2521,6 +2703,7 @@ class CardsTests(GameTestCase):
                 self.assertFalse(self.game._has_card(value))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_card_cutter_covers_every_passive_whole_card(self):
         # Every passive whole card is read through _has_card, so cutting it
         # silences it — and cutting one card never silences another.
@@ -2582,6 +2765,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(self.game.cards), 3)   # Showman lifts it again
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_shuffled_trial_reorders_cards(self):
         # Shuffled flips and shuffles the player's cards when the run starts.
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
@@ -2596,6 +2780,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(after, list(reversed(before)))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_deal_breaker_disables_all_cards_of_one_condition(self):
         # Deal breaker picks a condition the player owns and disables every
         # card whose condition matches it.
@@ -2653,6 +2838,7 @@ class CardsTests(GameTestCase):
 
     # --- Synthesizer: a start-of-run payoff scaled by your cards ----------
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_synthesizer_metadata_and_units(self):
         self.assertEqual(main.Condition.name(main.Condition.SYNTHESIZER),
                          "Synthesizer")
@@ -2670,6 +2856,7 @@ class CardsTests(GameTestCase):
             self.game, main.Condition.SYNTHESIZER), 2)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_synthesizer_card_pays_three_mult_per_card_owned(self):
         # Two other cards plus the Synthesizer card itself = 3 cards, and the
         # condition's 3/4 ratio makes the +Mult payoff exactly +3 mult a card.

@@ -556,16 +556,25 @@ class UiTests(GameTestCase):
                                origin=(0, 0)).draw(icon)
 
 
-    def test_every_named_condition_and_whole_card_has_icon_art(self):
-        # Every named condition, whole card and action must draw SOMETHING onto
-        # its icon surface: a new item with no art branch renders as a blank
-        # tile (a condition would fall back to its letter glyph, but an action
+    def test_every_whole_card_match_group_and_action_has_icon_art(self):
+        # Every whole card, match group and action must draw SOMETHING onto its
+        # icon surface: a new item with no art branch renders as a blank tile
+        # (a match-group card falls back to its letter glyph, but an action
         # icon is the only thing on the tile besides the version badge).
-        for condition in components.NAMED_CONDITION_ORDER:
-            art = main.ui._build_named_condition_art(condition)
-            self.assertGreater(art.get_bounding_rect().width, 0,
-                               f"no icon art for condition "
-                               f"{main.Condition.name(condition)}")
+        canvas = pygame.Surface((main.GRID_SIZE, main.GRID_SIZE), pygame.SRCALPHA)
+        for group in components.MATCH_GROUPS:
+            canvas.fill((0, 0, 0, 0))
+            label = components.match_group_label(group)
+            drawn = main.ui._draw_match_group_mini(
+                canvas, group, (main.GRID_SIZE // 2, main.GRID_SIZE // 2),
+                main.GRID_SIZE)
+            if not drawn:
+                # The "No Shape" group has no art of its own: its cards are
+                # drawn with the group's letter glyph instead.
+                self.assertEqual(group, ("shape", (main.Shape.NONE,)), label)
+                continue
+            self.assertGreater(canvas.get_bounding_rect().width, 0,
+                               f"no icon art for the {label} group")
         for card in main.Card.ORDER:
             art = main.ui._build_whole_card_art(card)
             self.assertGreater(art.get_bounding_rect().width, 0,
@@ -682,6 +691,36 @@ class UiTests(GameTestCase):
         self.assertLessEqual(rect.bottom, main.SCREEN_HEIGHT)
 
 
+    def test_the_info_box_takes_the_same_colour_as_the_inventory(self):
+        # The hover box is a panel like the inventory and the shop, so it is
+        # filled with their colour (see panel_fill) — the running trial's own
+        # tint — rather than the game's own panel colour, which under a trial
+        # left it the only red box on a tinted screen.
+        item = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 10, 20, "B")
+        pos = (main.SCREEN_WIDTH // 2, main.SCREEN_HEIGHT // 2)
+        self.game.trials_enabled = True
+        self.game.final_boss = None
+        self.game.current_trial = main.Trial.CRUMBLING
+        self.game.screen.fill(main.BG_COLOR)
+        self.game._draw_item_info(item, "toolbox", pos)
+        rect = self.game._info_box_rect(item, "toolbox", pos)
+        tint = main.ui.panel_fill(self.game)
+        self.assertEqual(tint, main.Trial.panel_color(main.Trial.CRUMBLING))
+        self.assertNotEqual(tint, main.MARBLE_BOX_COLOR)
+        # Just inside the box's 5px black border, clear of the text (which
+        # stops 12px short of the edge, see info_layout).
+        inside = (rect.right - 8, rect.centery)
+        self.assertEqual(tuple(self.game.screen.get_at(inside))[:3], tint)
+        # Without a trial both the inventory and the box go back to the game's
+        # own panel colour.
+        self.game.current_trial = None
+        self.game.screen.fill(main.BG_COLOR)
+        self.game._draw_item_info(item, "toolbox", pos)
+        self.assertEqual(tuple(self.game.screen.get_at(inside))[:3],
+                         main.MARBLE_BOX_COLOR)
+
+
     def test_sidebar_describes_placed_block(self):
         block = main.Block(2, 3, shape=main.Shape.CURVED_SLOPE, effect=main.Effect.GRAVITY,
                            scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
@@ -774,21 +813,20 @@ class UiTests(GameTestCase):
                     main.BLOCK_BORDERS_ON = prev
 
 
-    def test_card_scorer_draw_covers_every_scorer_for_every_phase(self):
-        # The shop's random card scorers are drawn from the full set for every
-        # condition phase (Quick included: an end-phase Quick card pays from the
-        # last block hit), so no scorer is quietly excluded from a phase.
+    def test_card_scorer_draw_covers_every_scorer(self):
+        # The shop's random card scorers are drawn from the full set, so no
+        # scorer is quietly excluded from every card offer. (The per-condition
+        # phase pools went with the conditions: there is one pool now.)
         random.seed(20240607)
-        for cond in (main.Condition.SHAPE_PIPE, main.Condition.START,
-                     main.Condition.DISTANCE, main.Condition.FRAGILE_BREAKS):
-            rolled = {main._random_card_scorer(cond) for _ in range(400)}
-            self.assertEqual(rolled, set(components.CARD_SCORERS))
+        rolled = {main._random_card_scorer() for _ in range(400)}
+        self.assertEqual(rolled, set(components.CARD_SCORERS))
 
 
     def test_xmult_collision_card_particles_are_red(self):
         # xMult rewards always multiply now, so their particle is always RED
         # (the removed add path was the only BLUE one).
-        value = main.condition_scorer_card(main.Condition.SHAPE_SLOPE, main.Scorer.MULT_MUL)
+        value = _group_card(main.match_group_for_shape(main.Shape.SLOPE),
+                            main.Scorer.MULT_MUL)
         self.game.cards = [main.CardItem(value, 40)]
         self.game.score_mult = 1
 
@@ -802,8 +840,8 @@ class UiTests(GameTestCase):
         self.game.toolbox.items.clear()
         self.game.cards.clear()
         self.assertEqual(self.game._resource_display(), [])
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE,
-                                           main.Scorer.IDEAS)
+        value = _group_card(main.match_group_for_shape(main.Shape.PIPE),
+                            main.Scorer.IDEAS)
         self.game.cards.append(main.CardItem(value, 40))
         self.game.idea_run_gain = 1
         self.assertEqual(self.game._resource_display(), [(1, "action")])
@@ -1041,7 +1079,9 @@ class UiTests(GameTestCase):
             for item in (main.CardItem(0, 24), main.ActionItem(0, 24)):
                 main.ui.draw_card(screen, item, rect)
                 main.ui.draw_action(screen, item, rect)
-            main.ui._draw_condition_center(screen, 0, rect)
+            main.ui._draw_match_group_mini(
+                screen, main.match_group_for_shape(main.Shape.PIPE),
+                rect.center, 12)
             main.ui._draw_marble_eight_feature(
                 main.Marble(20, 20), pygame.Surface((40, 40), pygame.SRCALPHA),
                 20, 20, 2 * main.MARBLE_RADIUS)
@@ -1098,6 +1138,7 @@ class UiTests(GameTestCase):
         self.assertIn("fully upgraded", upgraded_row)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_pillar_card_particle_appears_near_fullest_column(self):
         # Pillar's start-phase particle pops when it adds mult for the fullest
         # column's blocks.
@@ -1114,6 +1155,7 @@ class UiTests(GameTestCase):
         self.assertEqual(p.color, main.BLUE)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_cards_spawn_one_particle_each_when_affecting_score(self):
         # Each card emits exactly one particle per score-affecting event, so
         # three cards affecting the score yield exactly three particles.
@@ -1179,6 +1221,7 @@ class UiTests(GameTestCase):
         self.assertEqual(p.color, main.GREEN)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_joker_card_spawns_blue_particle_at_card_area(self):
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
@@ -1191,6 +1234,7 @@ class UiTests(GameTestCase):
         self.assertEqual((p.x, p.y), (expected_x, expected_y))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_explorer_card_spawns_red_particle_at_finish(self):
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
         block = main.Block(0, 0, shape=main.Shape.SLOPE, scorer=main.Scorer.FINISH)
@@ -1253,17 +1297,18 @@ class UiTests(GameTestCase):
 
 
     def test_card_describes_and_draws(self):
-        # A composed magnitude card (Joker condition x +Mult) has a name and
-        # description, draws, and renders in the card area.
-        card = main.CardItem(main.Card.JOKER, 20)
+        # A match-group card (Pipe x +Mult) has a name and description, draws,
+        # and renders in the card area.
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
         rows = self.game._describe_item(card)
-        self.assertTrue(any("Joker" in label for label, _ in rows))
+        self.assertTrue(any("Pipe" in label for label, _ in rows))
         self.assertTrue(any("+4 mult" in text for _, text in rows))
         surface = main.pygame.Surface((main.GRID_SIZE, main.GRID_SIZE))
         main.draw_shop_item(surface, card, surface.get_rect())
         self.game.cards.append(card)
         self.game.draw()  # renders the card area
-        self.assertIn("Joker", self.game._item_name(card))
+        self.assertIn("Pipe", self.game._item_name(card))
 
 
     def test_only_a_rounds_covered_runs_draw_a_trial(self):
@@ -1654,7 +1699,8 @@ class UiTests(GameTestCase):
                 (card_slot.left + px, card_slot.top + py)))[:3], back, (px, py))
 
     def test_disabled_card_draws_dimmed(self):
-        joker = main.CardItem(main.Card.JOKER, 20)
+        joker = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                           main.Scorer.MULT_ADD)
         self.game.cards.append(joker)
         self.game.disabled_card = joker
         self.game.draw()  # renders the dimmed card without raising

@@ -43,33 +43,88 @@ __all__ = [
     "inspect", "itertools", "json", "math", "os", "random", "re", "shutil",
     "tempfile", "unittest", "mock", "np", "pygame", "achievements",
     "collection", "components", "main", "metagame", "profiles", "save_system",
-    "GameTestCase", "_magnitude_card", "_shape_card_value", "_effect_card_value",
+    "GameTestCase", "CONDITIONS_COMMENTED_OUT", "NAMED_CARDS_GONE",
+    "_group_card", "_card_item",
+    "_card_for_block", "_shape_card_value", "_effect_card_value",
 ]
 
 
-def _magnitude_card(condition, scorer):
-    """The composed magnitude card value for (condition x unit scorer)."""
-    return main.condition_scorer_card(condition, scorer)
+# COMMENTED OUT WITH THE CONDITIONS (user request: "comment out all the code for
+# conditions"): every test that exercised the condition system — a composed
+# (condition x scorer) card, the card builder, splitting a card into halves, or
+# the classic card names the conditions were split from — carries
+#
+#     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
+#
+# so it stays in the file, verbatim and ready to run, and is skipped for exactly
+# as long as the condition system is commented out (components.py's
+# `_COMMENTED_OUT_CONDITION_CLASS`). Uncommenting the conditions makes
+# `main.Condition` exist again and these tests run as they always did.
+CONDITIONS_COMMENTED_OUT = ("the condition system is commented out — "
+                            "see components.py and main.py")
+
+# The fourteen NAMED CARDS (Joker, Explorer, Astronaut, ... — see
+# components.Card.NAMED) are the named conditions' whole-card form: the classic
+# cards, unsplittable. A test that only needs a classic card to exist (it uses
+# main.Card.JOKER & friends and the ordinary run hooks) carries
+#
+#     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
+#
+# so it runs while the cards are there and parks itself if they ever go away
+# again. Tests that need the CONDITION SYSTEM (a composed condition x scorer
+# card, the card builder, splitting) carry the CONDITIONS_COMMENTED_OUT marker
+# above instead and stay parked.
+NAMED_CARDS_GONE = ("the named cards (Joker, Explorer, ...) are not defined — "
+                    "see components.Card.NAMED")
 
 
-# The classic whole cards (Joker, Explorer, ...) and the old shape/effect
-# collision cards were removed — every splittable card is now composed from a
-# condition + a scorer (see components.condition_scorer_card). These shims make
-# ``main.Card.JOKER`` & friends point at the composed magnitude card that now
-# plays each removed card's role, so behavior tests keep working unchanged, and
-# keep the legacy SCORE_* aliases resolving to the unit scorers.
+def _group_card(group, scorer):
+    """The card value for a (match group x scorer) pair."""
+    return main.match_group_card(group, scorer)
+
+
+def _card_item(group, scorer, amount=None):
+    """A CardItem for a (match group x scorer) card, at the AVERAGE magnitude.
+
+    Tests read exact payoffs, so the magnitude is the scorer's default unless a
+    test passes its own (a rolled one would make the assertion depend on luck).
+    """
+    value = _group_card(group, scorer)
+    if amount is None:
+        amount = main.Scorer.DEFAULT_AMOUNT.get(scorer, 0)
+    return main.CardItem(value, main.Card.PRICES[value], amount=amount)
+
+
+def _card_for_block(block, scorer, amount=None):
+    """A card item whose match group covers ``block`` (its shape, else effect).
+
+    The shape is tried first — a block is matched by its shape group as well as
+    by every effect group it carries — and an effect is used when the shape is
+    in no group (a plain rect wall). Returns None for a block nothing matches.
+    """
+    group = main.match_group_for_shape(block.shape)
+    if group is None:
+        for effect in getattr(block, "effects", ()):
+            group = main.match_group_for_effect(effect)
+            if group is not None:
+                break
+    return None if group is None else _card_item(group, scorer, amount)
+
+
+# COMMENTED OUT with the conditions (user request: "comment out all the code for
+# conditions"): the composed-card shims. They pointed main.Card.JOKER & friends
+# at the (condition x scorer) card that played each removed classic card's role;
+# a card is a (match group x scorer) pair now, so the classic cards no longer
+# exist in any form and the tests that used them are disabled with the rest of
+# the condition tests.
+#
+# def _magnitude_card(condition, scorer):
+#     """The composed magnitude card value for (condition x unit scorer)."""
+#     return main.condition_scorer_card(condition, scorer)
+#
+
 def _install_card_shims():
-    main.Card.JOKER = _magnitude_card(main.Condition.START, main.Scorer.MULT_ADD)
-    main.Card.EXPLORER = _magnitude_card(main.Condition.DISTANCE, main.Scorer.MULT_MUL)
-    main.Card.ASTRONAUT = _magnitude_card(main.Condition.BLACK_HOLE, main.Scorer.MULT_ADD)
-    main.Card.PLANE = _magnitude_card(main.Condition.AIR_TIME, main.Scorer.CHIPS_ADD)
-    main.Card.PILLAR = _magnitude_card(main.Condition.FULLEST_COLUMN, main.Scorer.MULT_ADD)
-    main.Card.BANKER = _magnitude_card(main.Condition.CASH_HELD, main.Scorer.CHIPS_ADD)
-    main.Card.WRECKING_BALL = _magnitude_card(main.Condition.FRAGILE_BREAKS, main.Scorer.MULT_ADD)
-    main.Card.SKATER = _magnitude_card(main.Condition.SLIPPERY, main.Scorer.MULT_MUL)
-    main.Card.GLITCH = _magnitude_card(main.Condition.RANDOM, main.Scorer.MULT_ADD)
-    main.Card.RIPPED_CARD = _magnitude_card(main.Condition.FEW_BLOCKS, main.Scorer.CHIPS_ADD)
-    # Legacy score-type aliases -> the unit scorers they correspond to.
+    # The legacy score-type aliases -> the unit scorers they correspond to.
     main.Card.SCORE_CHIPS = main.Scorer.CHIPS_ADD
     main.Card.SCORE_MULT = main.Scorer.MULT_ADD
     main.Card.SCORE_XMULT = main.Scorer.MULT_MUL
@@ -80,15 +135,13 @@ _install_card_shims()
 
 
 def _shape_card_value(shape, scorer):
-    """The magnitude card for a shape collision condition and a unit scorer."""
-    cond = main.Condition.SHAPE_BASE + main.Shape.ORDER.index(shape)
-    return main.condition_scorer_card(cond, scorer)
+    """The card value for a shape: the shape group's card for that scorer."""
+    return _group_card(main.match_group_for_shape(shape), scorer)
 
 
 def _effect_card_value(effect, scorer):
-    """The magnitude card for an effect collision condition and a unit scorer."""
-    cond = main.Condition.EFFECT_BASE + main.Effect.ORDER.index(effect)
-    return main.condition_scorer_card(cond, scorer)
+    """The card value for an effect: the effect group's card for that scorer."""
+    return _group_card(main.match_group_for_effect(effect), scorer)
 
 
 class GameTestCase(unittest.TestCase):
@@ -401,8 +454,10 @@ class GameTestCase(unittest.TestCase):
 
 
     def _new_shapes(self):
+        # COMMENTED OUT with the shape itself (user request: "comment out the
+        # cradle shape"): main.Shape.CRADLE was the last entry here.
         return (main.Shape.SPIKE, main.Shape.PLATFORM, main.Shape.CORNER,
-                main.Shape.PEG, main.Shape.SAWTOOTH, main.Shape.CRADLE)
+                main.Shape.PEG, main.Shape.SAWTOOTH)
 
 
     def _new_effects(self):
@@ -410,14 +465,18 @@ class GameTestCase(unittest.TestCase):
                 main.Effect.PHASE, main.Effect.SPLITTER)
 
 
-    def _assign_and_build(self, condition, scorer):
-        """Assign a condition + scorer in the toolbox and press S (build)."""
-        self.game.toolbox.items.clear()
-        self.game.toolbox.add(condition)
-        self.game.toolbox.add(scorer)
-        self.game._select_toolbox_component(condition)
-        self.game._select_toolbox_component(scorer)
-        self.game._build_card()
+    # COMMENTED OUT with the conditions: assigning a condition + scorer in the
+    # toolbox and pressing S built a card. Cards are whole now, so there is
+    # nothing to build (see main.Game's commented-out _build_card).
+    #
+    # def _assign_and_build(self, condition, scorer):
+    #     """Assign a condition + scorer in the toolbox and press S (build)."""
+    #     self.game.toolbox.items.clear()
+    #     self.game.toolbox.add(condition)
+    #     self.game.toolbox.add(scorer)
+    #     self.game._select_toolbox_component(condition)
+    #     self.game._select_toolbox_component(scorer)
+    #     self.game._build_card()
 
 
     def _card_fire(self, block, marble=None):

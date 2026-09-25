@@ -50,6 +50,16 @@ def shade(color, factor):
     return tuple(round(c + (target - c) * amount) for c in color)
 
 
+def color_gap(one, other):
+    """How easy two colours are to tell apart: the biggest channel difference.
+
+    The codebase's one measure of "are these different enough" — two colours
+    are considered tellable apart when some channel differs by 50 or more (see
+    the scorer and rarity colour tables).
+    """
+    return max(abs(a - b) for a, b in zip(one, other))
+
+
 class Shape:
     """The block's hitbox geometry.
 
@@ -73,7 +83,13 @@ class Shape:
     CORNER = 15  # an L bracket: a left column plus a bottom row
     PEG = 16  # a small solid circle (radius PEG_RADIUS / 5 px) at the cell center
     SAWTOOTH = 17  # a row of small upward teeth along the bottom edge
-    CRADLE = 18  # a V-shaped valley (two side wedges) that catches the marble
+    # COMMENTED OUT (user request: "comment out the cradle shape"): the cradle.
+    # Its id stays out of NAMES/ORDER/COMPONENT_PRICES below, so the shape is
+    # never sold, never rolled into a block and never drawn; the collision code
+    # and the block art that built it are commented out in physics.py, main.py
+    # and ui.py. Id 18 is left free rather than reused, because every shape id
+    # is written by hand (adding one never renumbers the others).
+    # CRADLE = 18  # a V-shaped valley (two side wedges) that catches the marble
     BUMP = 19  # a solid half-disc dome along the bottom edge (a speed bump)
     KEY = 20  # a pass-through key pickup: touching it opens its matching lock
     LOCK = 21  # a solid locked door: blocks the marble until its key is touched
@@ -84,11 +100,11 @@ class Shape:
                                        CONVEX_SLOPE: "Convex Slope", FLAT_LINE: "Flat Line", \
                                        CURVED_SLOPE_LINE: "Curved Slope Line", HALF_PIPE: "Half Pipe", \
                                        SPIKE: "Spike", PLATFORM: "Platform", CORNER: "Corner", \
-                                       PEG: "Peg", SAWTOOTH: "Sawtooth", CRADLE: "Cradle", \
+                                       PEG: "Peg", SAWTOOTH: "Sawtooth", \
                                        BUMP: "Bump", KEY: "Key", LOCK: "Lock"}
     ORDER: ClassVar[list[int]] = [RECT, SLOPE, LINE, NONE, CIRCLE, CURVED_SLOPE, PIPE, DRAIN, PIPE_BEND,
                                   CONVEX_SLOPE, FLAT_LINE, CURVED_SLOPE_LINE, HALF_PIPE,
-                                  SPIKE, PLATFORM, CORNER, PEG, SAWTOOTH, CRADLE, BUMP,
+                                  SPIKE, PLATFORM, CORNER, PEG, SAWTOOTH, BUMP,
                                   KEY, LOCK]
 
     @classmethod
@@ -761,28 +777,135 @@ class MarbleType:
         return cls.DESCRIPTIONS.get(marble_type, "Unknown marble.")
 
 
+class Rarity:
+    """How rare a card is: its tier, from Common up to Legendary.
+
+    Every card has one (see Card.RARITIES). The tiers are ORDERED — Common is
+    the most ordinary and Legendary the rarest — and the ORDER is also the
+    display order, so a list of the tiers reads cheapest first.
+
+    The tier sets how often the shop OFFERS it: WEIGHTS is the relative
+    frequency of the TIERS — 1 : 0.7 : 0.5 : 0.3 : 0.2 from Common up to
+    Legendary — and the shop's card offers draw the tier first and the card
+    inside it second (see main.random_card_option_value). An offer is therefore
+    Rare 0.5 times as often as it is Common however many cards carry each tier:
+    the CARD COUNT of a tier must not change the tier's own odds, which is
+    exactly why the tier is drawn first. Every match-group card — the 832
+    shape-group and effect cards — is COMMON, which is what the design asks
+    for; the whole cards are tiered by price, the codebase's usual rarity rule
+    (a dearer card does more, so it is rarer).
+    """
+    COMMON = 0
+    UNUSUAL = 1
+    RARE = 2
+    EPIC = 3
+    LEGENDARY = 4
+
+    NAMES: ClassVar[dict[int, str]] = {
+        COMMON: "Common",
+        UNUSUAL: "Unusual",
+        RARE: "Rare",
+        EPIC: "Epic",
+        LEGENDARY: "Legendary",
+    }
+    # The colour a card's BORDER is drawn in (see ui.draw_card), one per tier:
+    # grey for the everyday cards, then progressively warmer and brighter up to
+    # gold. A face in a colour too close to its own border is moved aside by
+    # Card.face_color, so the border always reads.
+    COLORS: ClassVar[dict[int, tuple]] = {
+        COMMON: (165, 170, 180),    # plain grey
+        UNUSUAL: (80, 200, 110),    # green
+        RARE: (70, 140, 235),       # blue
+        EPIC: (165, 85, 225),       # purple
+        LEGENDARY: (240, 180, 50),  # gold
+    }
+    # How often each TIER is offered in the shop (user request: "make each card
+    # rarity have a relative ratio for shop frequency: for the ratio
+    # common:unusual:rare:epic:legendary, the ratios to their frequencies in the
+    # shop should be 1:0.7:0.5:0.3:0.2"). The numbers are RELATIVE, so what
+    # matters is the ratio between them: the shop draws the tier by these
+    # weights FIRST, then a card flat inside the drawn tier, which is what keeps
+    # a tier's card count out of its odds. A tier's share of the offers is its
+    # weight over the sum of the weights — Common 1/2.7 = 37%, Unusual 26%,
+    # Rare 18.5%, Epic 11.1%, Legendary 0.2/2.7 = 7.4% — so all 26 match groups
+    # PLUS the 3 cheap whole cards share the Common tier rather than each of
+    # them adding a Common-sized chunk of offers.
+    WEIGHTS: ClassVar[dict[int, float]] = {
+        COMMON: 1.0,
+        UNUSUAL: 0.7,
+        RARE: 0.5,
+        EPIC: 0.3,
+        LEGENDARY: 0.2,
+    }
+    ORDER: ClassVar[list[int]] = [COMMON, UNUSUAL, RARE, EPIC, LEGENDARY]
+
+    @classmethod
+    def name(cls, rarity):
+        return cls.NAMES.get(rarity, "Unknown")
+
+    @classmethod
+    def color(cls, rarity):
+        return cls.COLORS.get(rarity, GRAY)
+
+    @classmethod
+    def weight(cls, rarity):
+        """The tier's shop frequency weight (see WEIGHTS); Common if unknown."""
+        return cls.WEIGHTS.get(rarity, cls.WEIGHTS[cls.COMMON])
+
+
 class Card:
     """An indivisible whole card bought from the shop.
 
-    Only the cards that CANNOT be split into a condition + scorer remain whole
-    cards: the ERR 404 joke card (grants a random card when bought), the
-    Blueprint (copies the card to its left in the card area), the Showman
-    (allows buying duplicates), the Garden (doubles Seed payoffs), the Rigged
-    Casino (re-weights Random rolls), and the Conquistador (unlocks board
-    squares after each run). Every other card in the game is composed from a
-    condition + a scorer (see Condition and condition_scorer_card) — the classic
-    splittable cards were removed, with their names and flavor comments now
-    living on the conditions they split into. Each constant is the card's ID.
+    Every card is whole: nothing splits and nothing is assembled, and no card
+    carries a rolled magnitude. Three families live here:
+
+    * the NAMED CARDS (Joker ... Island) — the classic cards. Each is one
+      effect that fires at the start of a run, at the end of it, or when a
+      fragile block breaks (see Card.NAMED and cards.apply_cards), and each
+      keeps the name, the flavour comment and the trigger prose of the named
+      CONDITION it was briefly split into.
+    * the utility cards (ERR 404's random grant, Blueprint's copy, Showman's
+      duplicate rule, Garden's seeds, Coupon's discount, ...), which work
+      through a passive rule read with Game._has_card or through the code that
+      owns the mechanic, and
+    * the MATCH GROUP cards, whose ids are no constants here at all: the
+      catalogue at the end of this file generates one per (group x scorer).
+
+    Each constant is the card's ID.
     """
     ERR_404 = 9
     BLUEPRINT = 10
+    # --- The named cards ---
+    # The fourteen classic cards, each rebuilt as ONE unsplittable card out of
+    # the named condition it had become (user request: "add back the named
+    # conditions you commented out, as unsplittable cards"): the trigger and the
+    # payoff are baked into the card, exactly as the canonical (condition x
+    # scorer) pairing used to play it. The ids are the named conditions' own ids
+    # (START 0 ... FEW_BLOCKS 9, COZY 79, PAINTING 92, SYNTHESIZER 93, ISLAND
+    # 99), so a save or a collection written while the conditions existed still
+    # names the same card; Ripped Card (Few Blocks) is the one exception — 9 is
+    # ERR 404's id — so it takes the first free id in the 11..77 band. What each
+    # one does, and how it is measured, is in Card.NAMED below.
+    JOKER = 0          # +4 mult at the start of the run
+    EXPLORER = 1       # up to x2 mult at the end, by the distance travelled
+    ASTRONAUT = 2      # +4 mult per second pulled by a black hole, at the end
+    PLANE = 3          # +15 chips per second in the air, at the end
+    PILLAR = 4         # +1 mult per block in the fullest column, at the start
+    BANKER = 5         # +1 chip per $10 held, at the start
+    WRECKING_BALL = 6  # +3 mult per fragile break, permanent
+    SKATER = 7         # x1.2 per slippery block owned, at the end
+    GLITCH = 8         # +0..24 mult at random, at the start
+    RIPPED_CARD = 11   # +120 chips at the start, on a board of 5 blocks or fewer
+    COZY = 79          # +90 chips at the start, while 10 units or fewer are unlocked
+    PAINTING = 92      # +3 chips per $1 of the board's sell value, at the start
+    SYNTHESIZER = 93   # +3 mult per card in the card area, at the start
+    ISLAND = 99        # +0.5 xMult per unconnected group of units, at the start
     # Owning the Showman card lets the player buy more than one copy of any
     # other card (duplicates are otherwise blocked).
     SHOWMAN = 78
     # Garden doubles the per-seed payoff of Seed-scorer blocks (+3 -> +6 mult).
-    # New whole-card ids stay in the free 79..99 band (below the collision
-    # condition base) so they never overlap a named-condition id — conditions
-    # and whole cards share the small integer space below Condition.SHAPE_BASE.
+    # New whole-card ids stay in the free 12..77 band, or in the 79..99 one the
+    # newer cards share with the named cards — 0..11 are the named cards'.
     GARDEN = 80
     # Rigged Casino re-weights Random blocks toward +xMult and away from +chips.
     RIGGED_CASINO = 81
@@ -791,9 +914,9 @@ class Card:
     # The nine utility whole cards: run-shape and economy modifiers that no
     # condition + scorer pair can express. Their ids continue the free 83..91
     # band that Garden (80), Rigged Casino (81) and Conquistador (82) opened —
-    # whole cards and named conditions SHARE the small integer space below
-    # Condition.SHAPE_BASE, so a new whole card must never reuse an id already
-    # taken by a condition (0..9, 79, 92) or by another whole card.
+    # every whole card shares one small id space (0..99), so a new card must
+    # never reuse an id already taken: the named cards hold 0..11, and 12..77
+    # are the free ones.
     PEDESTAL = 83  # retriggers the scorer of the first 3 blocks touched per run
     INFERNO = 84  # +0.07 to the total-score exponent
     DOPPELGANGER = 85  # each Start block releases a second marble
@@ -803,8 +926,9 @@ class Card:
     MINESHAFT = 89  # board units cost $5
     MARKET = 90  # selling refunds 75% of the price instead of 50%
     WATCH = 91  # the run ends at the ideal time; only the first 5 blocks score
-    # The newest whole cards. Their ids continue the shared band upward past
-    # Painting (93); the free ids left in that band are 11..77 and 99.
+    # The newest whole cards. Their ids continue the shared band upward;
+    # Painting (92), Synthesizer (93) and Island (99) belong to the named cards,
+    # so the free ids left in the band are 12..77.
     TESSERACT = 94  # permanently +0.1 xMult for every shop reroll
     THOUSAND_HANDED = 95  # creates a random action after every run
     PROCRASTINATION = 96  # ends the run a second late: rewinds it once and refills triggers
@@ -812,6 +936,21 @@ class Card:
     CONCERT = 98  # +1 trigger per run for every block that is not a plain rect
 
     NAMES: ClassVar[dict[int, str]] = {
+        # The named cards (the classic cards).
+        JOKER: "Joker",
+        EXPLORER: "Explorer",
+        ASTRONAUT: "Astronaut",
+        PLANE: "Plane",
+        PILLAR: "Pillar",
+        BANKER: "Banker",
+        WRECKING_BALL: "Wrecking Ball",
+        SKATER: "Skater",
+        GLITCH: "Glitch",
+        RIPPED_CARD: "Ripped Card",
+        COZY: "Cozy",
+        PAINTING: "Painting",
+        SYNTHESIZER: "Synthesizer",
+        ISLAND: "Island",
         ERR_404: "[ERR 404: CARD NOT FOUND]",
         BLUEPRINT: "Blueprint",
         SHOWMAN: "Showman",
@@ -833,8 +972,24 @@ class Card:
         ESSENCE: "Essence",
         CONCERT: "Concert",
     }
-    # Short flavor lines, one per whole card.
+    # Short flavor lines, one per whole card. The named cards' lines are the
+    # ones their named conditions carried, which are in turn the comments the
+    # classic cards had before they were split.
     COMMENTS: ClassVar[dict[int, str]] = {
+        JOKER: "Remember me?",
+        EXPLORER: "The horizon calls.",
+        ASTRONAUT: "Weightless.",
+        PLANE: "Up, up and away.",
+        PILLAR: "Built to last.",
+        BANKER: "Money makes money.",
+        WRECKING_BALL: "Demolition expert.",
+        SKATER: "Radical.",
+        GLITCH: "Now you see me.",
+        RIPPED_CARD: "Barely holding together.",
+        COZY: "Small and warm.",
+        PAINTING: "A masterpiece.",
+        SYNTHESIZER: "A chorus of parts.",
+        ISLAND: "Surrounded by nothing.",
         ERR_404: "This card does not exist.",
         BLUEPRINT: "Copy of a copy.",
         SHOWMAN: "The more the merrier.",
@@ -856,8 +1011,24 @@ class Card:
         ESSENCE: "Distilled to the last drop.",
         CONCERT: "Turn it up to eleven.",
     }
-    # What each whole card does.
+    # What each whole card does. A named card's line states the payoff it pays
+    # at its own magnitude (the card has no scorer half to roll, so the number
+    # is fixed — see Card.NAMED for the arithmetic).
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        JOKER: "Adds 4 mult at the start of the run",
+        EXPLORER: "Multiplies the multiplier by up to x2 at the end of the run, in proportion to the distance the marble travelled",
+        ASTRONAUT: "Adds 4 mult at the end of the run for each second the marble was pulled by a black hole",
+        PLANE: "Adds 15 chips at the end of the run for each second the marble was in the air",
+        PILLAR: "Adds 1 mult at the start of the run for each block in the fullest column of the board",
+        BANKER: "Adds 1 chip at the start of the run for every $10 you hold",
+        WRECKING_BALL: "Adds 3 mult for each fragile block that breaks, permanently (the gains are kept only if the run is continued)",
+        SKATER: "Multiplies the multiplier by 1.2 at the end of the run for each slippery block you own",
+        GLITCH: "Adds a random 0 to 24 mult at the start of the run",
+        RIPPED_CARD: "Adds 120 chips at the start of the run while the board holds 5 blocks or fewer",
+        COZY: "Adds 90 chips at the start of the run while 10 or fewer board units are unlocked",
+        PAINTING: "Adds 3 chips at the start of the run for each $1 of the total sell price of the blocks on your board",
+        SYNTHESIZER: "Adds 3 mult at the start of the run for each card in your card area",
+        ISLAND: "Adds 0.5 xMult at the start of the run for each unconnected group of unlocked board units",
         ERR_404: r"\marblatro\main.py, line 2339: 'self._return_card()' CardNotFoundError: Card was not found [FATAL]",
         BLUEPRINT: "Copies the function of the card to its immediate left in the card area",
         SHOWMAN: "Lets cards you already own show up in the shop again, so you can own more than one of the same card",
@@ -882,7 +1053,23 @@ class Card:
     # All whole-card prices are 20% lower (rounded down): 24->19, 42->33,
     # 60->48, 46->36, 48->38, 56->44. The nine utility cards are priced by how
     # much run they give back (Inferno the most, Market the least).
-    PRICES: ClassVar[dict[int, int]] = {ERR_404: 19, BLUEPRINT: 33, SHOWMAN: 48,
+    #
+    # A named card costs the same 80% of its parts, where its "parts" are the
+    # two halves it used to be composed from: its named condition's price plus
+    # its canonical scorer's (see Card.NAMED; the component prices survive in
+    # COMPONENT_PRICES). Joker 14+17=31 -> $24, Explorer 16+25=41 -> $32,
+    # Astronaut 17+17=34 -> $27, Plane 16+12=28 -> $22, Pillar 16+17=33 -> $26,
+    # Banker 14+12=26 -> $20, Wrecking Ball 17+17=34 -> $27, Skater 16+25=41 ->
+    # $32, Glitch 12+17=29 -> $23, Ripped Card 12+12=24 -> $19, Cozy 17+12=29 ->
+    # $23, Painting 15+12=27 -> $21, Synthesizer 15+17=32 -> $25, Island
+    # 16+25=41 -> $32.
+    PRICES: ClassVar[dict[int, int]] = {JOKER: 24, EXPLORER: 32, ASTRONAUT: 27,
+                                        PLANE: 22, PILLAR: 26, BANKER: 20,
+                                        WRECKING_BALL: 27, SKATER: 32,
+                                        GLITCH: 23, RIPPED_CARD: 19,
+                                        COZY: 23, PAINTING: 21,
+                                        SYNTHESIZER: 25, ISLAND: 32,
+                                        ERR_404: 19, BLUEPRINT: 33, SHOWMAN: 48,
                                         GARDEN: 36, RIGGED_CASINO: 38,
                                         CONQUISTADOR: 44, PEDESTAL: 44,
                                         INFERNO: 50, DOPPELGANGER: 46,
@@ -894,6 +1081,24 @@ class Card:
                                         CONCERT: 44}
     # Face colors and center glyphs for the mini-card look (one per card).
     COLORS: ClassVar[dict[int, tuple]] = {
+        # The named cards: one identity colour each (the jester's violet, the
+        # explorer's teal, the astronaut's space blue, the wrecking ball's iron,
+        # ...). Card.face_color moves any of them that lands too close to its
+        # rarity border.
+        JOKER: (150, 60, 200),      # jester violet
+        EXPLORER: (60, 145, 120),   # compass teal
+        ASTRONAUT: (70, 90, 170),   # space blue
+        PLANE: (120, 195, 235),     # sky blue
+        PILLAR: (150, 145, 135),    # stone
+        BANKER: (200, 165, 40),     # coin gold
+        WRECKING_BALL: (85, 85, 95),  # iron
+        SKATER: (60, 190, 190),     # ice cyan
+        GLITCH: (120, 220, 90),     # glitch green
+        RIPPED_CARD: (205, 175, 150),  # torn paper
+        COZY: (200, 120, 70),       # warm clay
+        PAINTING: (200, 90, 130),   # canvas rose
+        SYNTHESIZER: (140, 90, 210),  # synth violet
+        ISLAND: (230, 200, 120),    # sand
         ERR_404: (150, 40, 50),     # error red
         BLUEPRINT: (60, 110, 200),  # blueprint blue
         SHOWMAN: (210, 60, 90),     # showman red
@@ -915,7 +1120,19 @@ class Card:
         ESSENCE: (60, 150, 175),    # distilled cyan
         CONCERT: (185, 75, 150),    # stage magenta
     }
+    # How far a card's face has to sit from its rarity border to be worth the
+    # name, and the shades that move a face which is too close (smallest first,
+    # lighter before darker). 60 is a little above the codebase's "50 in some
+    # channel is tellable apart" line, because the border is only 2px wide.
+    FACE_GAP = 60
+    FACE_SHADES: ClassVar[tuple] = (0.25, 0.4, 0.55, 0.8, 1.0)
+    # The fallback letter for a card with no art at all; every card here has
+    # art (see ui._build_whole_card_art), so these are a safety net.
     GLYPHS: ClassVar[dict[int, str]] = {
+        JOKER: "?", EXPLORER: "*", ASTRONAUT: "O", PLANE: "P", PILLAR: "I",
+        BANKER: "$", WRECKING_BALL: "H", SKATER: "S", GLITCH: "#",
+        RIPPED_CARD: "R", COZY: "~", PAINTING: "P", SYNTHESIZER: "Y",
+        ISLAND: "L",
         ERR_404: "4", BLUEPRINT: "B", SHOWMAN: "!",
         GARDEN: "G", RIGGED_CASINO: "R", CONQUISTADOR: "C",
         PEDESTAL: "P", INFERNO: "I", DOPPELGANGER: "D",
@@ -926,13 +1143,87 @@ class Card:
         ESSENCE: "E",
         CONCERT: "N",
     }
-    ORDER: ClassVar[list[int]] = [ERR_404, BLUEPRINT, SHOWMAN, GARDEN,
+    # Every whole card, in id order, so the shop pool and the codex list the
+    # named cards first and then the utility cards. The match-group cards are
+    # not here (they are generated below, see MATCH_GROUP_CARD_OFFSET).
+    ORDER: ClassVar[list[int]] = [JOKER, EXPLORER, ASTRONAUT, PLANE, PILLAR,
+                                  BANKER, WRECKING_BALL, SKATER, GLITCH,
+                                  ERR_404, BLUEPRINT, RIPPED_CARD,
+                                  SHOWMAN, COZY, GARDEN,
                                   RIGGED_CASINO, CONQUISTADOR,
                                   PEDESTAL, INFERNO, DOPPELGANGER,
                                   COMPOUND_INTEREST, COUPON, FACTORY,
-                                  MINESHAFT, MARKET, WATCH, TESSERACT,
+                                  MINESHAFT, MARKET, WATCH,
+                                  PAINTING, SYNTHESIZER,
+                                  TESSERACT,
                                   THOUSAND_HANDED, PROCRASTINATION, ESSENCE,
-                                  CONCERT]
+                                  CONCERT, ISLAND]
+    # How rare each whole card is. A whole card's tier follows its price, the
+    # codebase's usual rarity rule (see component_weight): up to $28 Common,
+    # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
+    # cheap economy cards are Common and the cards that rewrite how a run is
+    # played (Showman, Essence, Inferno) are Legendary. Every match-group card is
+    # COMMON instead (set in the MATCH GROUPS catalogue below), so every tier
+    # above Common is a whole card.
+    RARITIES: ClassVar[dict[int, int]] = {
+        # Common: the joke card and the cheap utility.
+        ERR_404: Rarity.COMMON, MARKET: Rarity.COMMON,
+        MINESHAFT: Rarity.COMMON,
+        # The named cards up to $28 are Common too (most of them), the three
+        # dearest ($32) are Unusual.
+        JOKER: Rarity.COMMON, PLANE: Rarity.COMMON, BANKER: Rarity.COMMON,
+        PILLAR: Rarity.COMMON, ASTRONAUT: Rarity.COMMON,
+        WRECKING_BALL: Rarity.COMMON, GLITCH: Rarity.COMMON,
+        RIPPED_CARD: Rarity.COMMON, COZY: Rarity.COMMON,
+        PAINTING: Rarity.COMMON, SYNTHESIZER: Rarity.COMMON,
+        EXPLORER: Rarity.UNUSUAL, SKATER: Rarity.UNUSUAL, ISLAND: Rarity.UNUSUAL,
+        # Unusual: single-mechanic helpers.
+        BLUEPRINT: Rarity.UNUSUAL, GARDEN: Rarity.UNUSUAL,
+        COMPOUND_INTEREST: Rarity.UNUSUAL, RIGGED_CASINO: Rarity.UNUSUAL,
+        # Rare: cards that change a rule for the whole game.
+        WATCH: Rarity.RARE, THOUSAND_HANDED: Rarity.RARE,
+        CONQUISTADOR: Rarity.RARE, PEDESTAL: Rarity.RARE,
+        FACTORY: Rarity.RARE, TESSERACT: Rarity.RARE, CONCERT: Rarity.RARE,
+        # Epic: the economy cards that compound over a whole game.
+        COUPON: Rarity.EPIC, DOPPELGANGER: Rarity.EPIC,
+        PROCRASTINATION: Rarity.EPIC,
+        # Legendary: the most expensive whole cards.
+        SHOWMAN: Rarity.LEGENDARY, ESSENCE: Rarity.LEGENDARY,
+        INFERNO: Rarity.LEGENDARY,
+    }
+    # --- The named cards' effects: id -> (phase, scorer, ratio, measure) ---
+    # Each named card fires ONCE per run (or once per fragile break) and pays a
+    # fixed amount: the canonical pairing it had as a named condition, at the
+    # magnitude model every card in the game used then. ``scorer`` and ``ratio``
+    # together give the payoff through components.magnitude_payoff(scorer, ratio,
+    # units) — the standard bases are +30 chips / +4 mult / +0.25 xMult per unit,
+    # scaled by the ratio — and ``measure`` names the per-run number the card
+    # scales by (see cards._named_card_units). A whole card has no scorer half to
+    # roll, so ``units`` is all that varies: the numbers below are the canonical
+    # ones, e.g. Joker 1 unit x ratio 1.0 = +4 mult, Plane ratio 0.5 = +15 chips
+    # an air second, Pillar ratio 0.25 = +1 mult a column block, Banker ratio
+    # 1/30 = +1 chip per $10, Ripped Card 4.0 = +120 chips, Cozy 3.0 = +90 chips,
+    # Painting 0.1 = +3 chips a dollar, Synthesizer 0.75 = +3 mult a card and
+    # Island 2.0 = +0.5 xMult a group (1 + 0.25 x 2 x groups).
+    #   phase   "start"  -> cards.apply_cards, at the start of every run
+    #           "end"    -> cards.apply_cards_on_finish, once the run is over
+    #           "fragile"-> cards.on_fragile_broken, each fragile break
+    NAMED: ClassVar[dict[int, tuple]] = {
+        JOKER: ("start", Scorer.MULT_ADD, 1.0, "start"),
+        EXPLORER: ("end", Scorer.MULT_MUL, 1.0, "distance"),
+        ASTRONAUT: ("end", Scorer.MULT_ADD, 1.0, "black_hole"),
+        PLANE: ("end", Scorer.CHIPS_ADD, 0.5, "air_time"),
+        PILLAR: ("start", Scorer.MULT_ADD, 0.25, "fullest_column"),
+        BANKER: ("start", Scorer.CHIPS_ADD, 1.0 / 30.0, "cash_held"),
+        WRECKING_BALL: ("fragile", Scorer.MULT_ADD, 0.75, "fragile_breaks"),
+        SKATER: ("end", Scorer.MULT_MUL, 0.8, "slippery"),
+        GLITCH: ("start", Scorer.MULT_ADD, 1.0, "random"),
+        RIPPED_CARD: ("start", Scorer.CHIPS_ADD, 4.0, "few_blocks"),
+        COZY: ("start", Scorer.CHIPS_ADD, 3.0, "cozy"),
+        PAINTING: ("start", Scorer.CHIPS_ADD, 0.1, "painting"),
+        SYNTHESIZER: ("start", Scorer.MULT_ADD, 0.75, "synthesizer"),
+        ISLAND: ("start", Scorer.MULT_MUL, 2.0, "island"),
+    }
 
     @classmethod
     def name(cls, card):
@@ -946,7 +1237,87 @@ class Card:
     def description(cls, card):
         return cls.DESCRIPTIONS.get(card, "Unknown card.")
 
+    @classmethod
+    def rarity(cls, card):
+        """The card's rarity tier (see Rarity); an unknown card is Common."""
+        return cls.RARITIES.get(card, Rarity.COMMON)
 
+    @classmethod
+    def rarity_name(cls, card):
+        return Rarity.name(cls.rarity(card))
+
+    @classmethod
+    def rarity_color(cls, card):
+        return Rarity.color(cls.rarity(card))
+
+    @classmethod
+    def face_color(cls, card):
+        """The colour a card's FACE is drawn in (see ui.draw_card).
+
+        A card is outlined in its RARITY colour, so a face too close to that
+        outline would swallow it — the Unusual Garden card is green on a green
+        border. Such a face is moved away from its border by the SMALLEST shade
+        of its own colour that clears FACE_GAP (lighter first, because the card
+        colours are muted pastels and a lighter shade keeps the card looking
+        like itself), so the tier outline reads while the card stays its own
+        colour. A face that is already far enough from its border — almost every
+        card — is returned untouched.
+        """
+        base = cls.COLORS.get(card, GRAY)
+        border = Rarity.color(cls.rarity(card))
+        if color_gap(base, border) >= cls.FACE_GAP:
+            return base
+        for factor in cls.FACE_SHADES:
+            for direction in (1, -1):
+                moved = shade(base, factor * direction)
+                if color_gap(moved, border) >= cls.FACE_GAP:
+                    return moved
+        # Unreachable: a full white or black shade is far from every tier colour
+        # (the loop's last factor), but never hand back a face that fights its
+        # border.
+        return WHITE if color_gap(WHITE, border) >= color_gap((0, 0, 0), border) else (0, 0, 0)
+
+
+    @classmethod
+    def rarity_weight(cls, card):
+        """The shop-frequency weight of the card's TIER (see Rarity.WEIGHTS).
+
+        The tier is what the shop weighs and draws first; the card inside the
+        tier is then drawn flat, so this is the tier's weight rather than the
+        card's own odds (compare main.random_card_option_value).
+        """
+        return Rarity.weight(cls.rarity(card))
+
+
+# The named cards, in catalogue order — the list the tests and the collection
+# can walk without knowing which ids happen to be named (see Card.NAMED).
+NAMED_CARD_ORDER: list[int] = [card for card in Card.ORDER if card in Card.NAMED]
+
+
+def named_card_meta(card):
+    """(phase, scorer, ratio, measure) for a named card, or None.
+
+    None means the card is not one of the fourteen named cards: the utility
+    whole cards and the match-group cards have no start/end/fragile effect of
+    their own (a match-group card fires on a collision instead).
+    """
+    return Card.NAMED.get(card)
+
+
+def named_card_phase(card):
+    """When a named card fires: "start", "end", "fragile", or None."""
+    meta = named_card_meta(card)
+    return meta[0] if meta is not None else None
+
+
+# ---------------------------------------------------------------------------
+# COMMENTED OUT (user request: "comment out all the code for conditions").
+# The whole condition system below is kept verbatim as a string literal so it
+# can be restored by deleting the two wrapper lines around it; nothing in the
+# game reads it. Cards are made of a MATCH GROUP and a scorer now — see the
+# MATCH GROUPS section at the end of this file.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_CONDITION_CLASS = r'''
 class Condition:
     """The trigger half of a split card.
 
@@ -987,6 +1358,12 @@ class Condition:
     # the +Mult scorer pays +3 mult per card in the card area, so the canonical
     # Synthesizer card is "+3 mult at the start of the run for each card".
     SYNTHESIZER = 93
+    # Island (start of run, scaled by the separate groups the unlocked board
+    # units form): at its 2x ratio the xMult scorer multiplies by 1.5 per
+    # group, so the canonical Island card is "+0.5 xMult for each unconnected
+    # group of unlocked board units". Its id is the last free one in the shared
+    # band below SHAPE_BASE (see class Card).
+    ISLAND = 99
     # Collision conditions start here; ids in the SHAPE_BASE.. range map back to
     # a Shape, ids in EFFECT_BASE.. map back to an Effect. EFFECT_BASE is a
     # FIXED id (not SHAPE_BASE + len(Shape.ORDER)) so that adding new shapes to
@@ -1010,12 +1387,13 @@ class Condition:
         COZY: "Cozy",
         PAINTING: "Painting",
         SYNTHESIZER: "Synthesizer",
+        ISLAND: "Island",
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         START: "?", DISTANCE: "*", BLACK_HOLE: "O", AIR_TIME: "P",
         FULLEST_COLUMN: "I", CASH_HELD: "$", FRAGILE_BREAKS: "H",
         SLIPPERY: "S", RANDOM: "#", FEW_BLOCKS: "R", COZY: "~",
-        PAINTING: "P", SYNTHESIZER: "Y",
+        PAINTING: "P", SYNTHESIZER: "Y", ISLAND: "L",
     }
     # Flavor lines for the named conditions. These are the comments that used
     # to belong to the classic whole cards, moved onto the conditions they were
@@ -1035,6 +1413,7 @@ class Condition:
         COZY: "Small and warm.",
         PAINTING: "A masterpiece.",
         SYNTHESIZER: "A chorus of parts.",
+        ISLAND: "Surrounded by nothing.",
     }
     # The trigger phrase for each named condition, used in the collection and
     # the card builder (collision triggers are built from their shape/effect).
@@ -1052,6 +1431,7 @@ class Condition:
         COZY: "at the start of the run, when the board has 10 unlocked units or fewer",
         PAINTING: "at the start of the run, for each $1 of the total sell price of the blocks on your board",
         SYNTHESIZER: "at the start of the run, for each card in your card area",
+        ISLAND: "at the start of the run, for each unconnected group of unlocked board units",
     }
     # The same phrase for a FLAT card (a generic scorer: Cash, Sharp, Parts,
     # Summit, Voyager, ...). A flat card pays ONE block-style trigger instead of
@@ -1071,6 +1451,7 @@ class Condition:
         RANDOM: "at the start of the run",
         PAINTING: "at the start of the run, if the board is worth anything",
         SYNTHESIZER: "at the start of the run, if you own a card",
+        ISLAND: "at the start of the run",
     }
 
     @classmethod
@@ -1088,6 +1469,8 @@ class Condition:
     def comment(cls, condition):
         """A condition's flavor comment (blank for collision conditions)."""
         return cls.COMMENTS.get(condition, "")
+'''
+# --- end of the commented-out Condition class --------------------------------
 
 
 class Action:
@@ -1108,6 +1491,7 @@ class Action:
     ANOINTMENT = 3
     STRENGTH = 4
     SPIRIT = 5
+    CLEANSWEEP = 6
 
     NAMES: ClassVar[dict[int, str]] = {
         DEATH: "Death",
@@ -1116,6 +1500,7 @@ class Action:
         ANOINTMENT: "Anointment",
         STRENGTH: "Strength",
         SPIRIT: "Spirit",
+        CLEANSWEEP: "Cleansweep",
     }
     # What the v1 action does. The descriptions mention the v2 upgrade so the
     # shop and collection show both versions at a glance.
@@ -1126,6 +1511,8 @@ class Action:
         ANOINTMENT: "Gives a chosen block 2 random effects (v2: gives every block you own one).",
         STRENGTH: "Raises a chosen block's scorer amount by 50% (v2: triples it).",
         SPIRIT: "Destroys a chosen block and applies its scorer at the start of the next 2 runs (v2: permanently).",
+        CLEANSWEEP: "Spends every dollar you hold (cash goes to $0) to fill each empty card slot with a "
+                    "random card (v2: keeps your cash).",
     }
     # What the upgraded (v2) action does.
     V2_DESCRIPTIONS: ClassVar[dict[int, str]] = {
@@ -1135,6 +1522,7 @@ class Action:
         ANOINTMENT: "Gives every block on the board and in the inventory one new random effect.",
         STRENGTH: "Triples a chosen block's scorer amount.",
         SPIRIT: "Destroys a chosen block and applies its scorer at the start of every run, permanently.",
+        CLEANSWEEP: "Fills each empty card slot with a random card, without spending your cash.",
     }
     # Short flavor lines, one per action.
     COMMENTS: ClassVar[dict[int, str]] = {
@@ -1144,14 +1532,18 @@ class Action:
         ANOINTMENT: "Blessed with power.",
         STRENGTH: "Swing harder.",
         SPIRIT: "It lingers on.",
+        CLEANSWEEP: "The house takes the rest.",
     }
     # Actions are cheap one-use power-ups: their prices were halved (48 -> 24,
     # 56 -> 28), so a run can afford one almost any time. Deja Vu costs a little
     # more than the other two: it is worth about one cash trigger-limit
     # upgrade, and its v2 converts a block into a near-inexhaustible scorer.
-    # The three later actions are stronger, so they sit a tier above.
+    # The three later actions are stronger, so they sit a tier above. Cleansweep
+    # sits at the top of that tier: its own price is small next to the purse it
+    # sweeps away, and what it buys is up to five cards.
     PRICES: ClassVar[dict[int, int]] = {DEATH: 24, RECOGNITION: 24, DEJA_VU: 28,
-                                        ANOINTMENT: 32, STRENGTH: 28, SPIRIT: 36}
+                                        ANOINTMENT: 32, STRENGTH: 28, SPIRIT: 36,
+                                        CLEANSWEEP: 70}
     # Face colors and center glyphs for the mini-action look (one per action).
     COLORS: ClassVar[dict[int, tuple]] = {
         DEATH: (120, 45, 45),        # deathly red
@@ -1160,13 +1552,19 @@ class Action:
         ANOINTMENT: (35, 125, 95),   # blessed emerald
         STRENGTH: (175, 85, 35),     # brawny amber
         SPIRIT: (140, 140, 160),     # spectral grey
+        CLEANSWEEP: (40, 140, 160),  # sweeping teal
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         DEATH: "D", RECOGNITION: "R", DEJA_VU: "V",
         ANOINTMENT: "A", STRENGTH: "S", SPIRIT: "P",
+        CLEANSWEEP: "C",
     }
     ORDER: ClassVar[list[int]] = [DEATH, RECOGNITION, DEJA_VU, ANOINTMENT,
-                                  STRENGTH, SPIRIT]
+                                  STRENGTH, SPIRIT, CLEANSWEEP]
+    # Actions that act on the game itself rather than on a chosen block or card:
+    # they need no subject, so selecting one and pressing S uses it straight
+    # away (see Game._apply_action).
+    NO_TARGET: ClassVar[tuple[int, ...]] = (CLEANSWEEP,)
 
     @classmethod
     def name(cls, action):
@@ -1182,6 +1580,15 @@ class Action:
     @classmethod
     def comment(cls, action):
         return cls.COMMENTS.get(action, "")
+
+    @classmethod
+    def needs_target(cls, action):
+        """True when the action must be given a block/card before it fires.
+
+        A target-free action (see NO_TARGET) affects the player rather than one
+        of their pieces, so it can be used the moment it is selected.
+        """
+        return action not in cls.NO_TARGET
 
     @classmethod
     def cycle(cls, action):
@@ -1418,7 +1825,8 @@ def shape_description(shape):
         Shape.CORNER: "An L bracket in the bottom-left: a wall and a floor, for pockets and steps.",
         Shape.PEG: "A small solid circle (5 px): a compact obstacle to bounce around.",
         Shape.SAWTOOTH: "A row of small teeth along the bottom: the marble tumbles unpredictably over them.",
-        Shape.CRADLE: "A V-shaped valley: catches a marble and settles it at the center.",
+        # COMMENTED OUT with the shape itself: Shape.CRADLE would describe a
+        # V-shaped valley that catches a marble and settles it at the center.
         Shape.BUMP: "A solid dome along the bottom: the marble rolls up and over it.",
         Shape.KEY: "A pass-through key: a marble that passes through it opens the Lock "
                    "block with the same key number.",
@@ -1549,19 +1957,18 @@ def scorer_description(scorer, amount=None):
 def card_description(card, amount=None):
     """A one-line description of a card's score effect.
 
-    A composed card (condition x scorer) whose scorer carries a rolled
-    magnitude describes THAT magnitude, with the deviation right after it
-    ("Gives +45 chips (+15) at the start of the run"); a whole card, or a
-    composed card with no magnitude, describes the catalog entry it has always
-    had.
+    A match-group card whose scorer carries a rolled magnitude describes THAT
+    magnitude, with the deviation right after it ("Gives +45 chips (+15) when
+    the marble collides with a Pipe block"); a whole card, or a match-group card
+    with no rolled magnitude, describes the catalogue entry it has always had.
     """
     if not amount:
         return Card.DESCRIPTIONS.get(card, "Unknown card.")
-    parts = splittable_card_condition_scorer(card)
-    if parts is None:
+    meta = match_group_card_meta(card)
+    if meta is None:
         return Card.DESCRIPTIONS.get(card, "Unknown card.")
-    condition, scorer = parts
-    return f"{_card_payoff_text(condition, scorer, amount)}."
+    group, scorer = meta
+    return f"{_match_group_description(group, scorer, amount)}."
 
 
 class Component:
@@ -1573,7 +1980,10 @@ class Component:
     SHAPE = "shape"
     EFFECT = "effect"
     SCORER = "scorer"
-    CONDITION = "condition"
+    # COMMENTED OUT with the conditions: the condition was the trigger half of
+    # a split card. Cards now pair a match group with a scorer instead, and a
+    # group is not a purchasable component (see the MATCH GROUPS section).
+    # CONDITION = "condition"
 
     def __init__(self, kind, value, amount=0, price=0, name="", col=0, row=0):
         self.kind = kind
@@ -1638,11 +2048,14 @@ class Component:
         return cls(cls.SCORER, value, amount=amount, price=price,
                    name=name or Scorer.name(value), col=col, row=row)
 
-    @classmethod
-    def condition_component(cls, value, price=None, name="", col=0, row=0):
-        if price is None:
-            price = COMPONENT_PRICES.get((cls.CONDITION, value), 0)
-        return cls(cls.CONDITION, value, price=price, name=name or condition_name(value), col=col, row=row)
+    # COMMENTED OUT with the conditions: the condition component (the trigger
+    # half a player bought and paired with a scorer in the card builder).
+    #
+    # @classmethod
+    # def condition_component(cls, value, price=None, name="", col=0, row=0):
+    #     if price is None:
+    #         price = COMPONENT_PRICES.get((cls.CONDITION, value), 0)
+    #     return cls(cls.CONDITION, value, price=price, name=name or condition_name(value), col=col, row=row)
 
 
 # Fixed price for every component type. A block's price is 90% of the sum of
@@ -1667,7 +2080,7 @@ COMPONENT_PRICES = {
     (Component.SHAPE, Shape.CORNER): 9,
     (Component.SHAPE, Shape.PEG): 7,
     (Component.SHAPE, Shape.SAWTOOTH): 11,
-    (Component.SHAPE, Shape.CRADLE): 11,
+    # COMMENTED OUT with the shape itself: (Component.SHAPE, Shape.CRADLE): 11,
     (Component.SHAPE, Shape.BUMP): 9,
     (Component.SHAPE, Shape.KEY): 8,
     (Component.SHAPE, Shape.LOCK): 10,
@@ -1728,23 +2141,23 @@ COMPONENT_PRICES = {
     (Component.SCORER, Scorer.COLOSSUS): 26,
     (Component.SCORER, Scorer.UNDERTAKER): 26,
     (Component.SCORER, Scorer.DEBT): 24,
-    (Component.CONDITION, Condition.START): 14,
-    (Component.CONDITION, Condition.DISTANCE): 16,
-    (Component.CONDITION, Condition.BLACK_HOLE): 17,
-    (Component.CONDITION, Condition.AIR_TIME): 16,
-    (Component.CONDITION, Condition.FULLEST_COLUMN): 16,
-    (Component.CONDITION, Condition.CASH_HELD): 14,
-    (Component.CONDITION, Condition.FRAGILE_BREAKS): 17,
-    (Component.CONDITION, Condition.SLIPPERY): 16,
-    (Component.CONDITION, Condition.RANDOM): 12,
-    (Component.CONDITION, Condition.FEW_BLOCKS): 12,
-    (Component.CONDITION, Condition.COZY): 17,
-    (Component.CONDITION, Condition.PAINTING): 15,
-    # Synthesizer scales with the card area (up to 5 cards), like Painting
-    # scales with the board's value, so it sits in the same price tier. Every
-    # named condition MUST have an entry here: a missing one is priced 0, which
-    # makes it free in the shop and the most common draw (weight = 1/price).
-    (Component.CONDITION, Condition.SYNTHESIZER): 15,
+    # COMMENTED OUT with the conditions: the condition component prices, which
+    # were also the collision conditions' rarity axis. A match group is not a
+    # component and is priced by match_group_price instead.
+    # (Component.CONDITION, Condition.START): 14,
+    # (Component.CONDITION, Condition.DISTANCE): 16,
+    # (Component.CONDITION, Condition.BLACK_HOLE): 17,
+    # (Component.CONDITION, Condition.AIR_TIME): 16,
+    # (Component.CONDITION, Condition.FULLEST_COLUMN): 16,
+    # (Component.CONDITION, Condition.CASH_HELD): 14,
+    # (Component.CONDITION, Condition.FRAGILE_BREAKS): 17,
+    # (Component.CONDITION, Condition.SLIPPERY): 16,
+    # (Component.CONDITION, Condition.RANDOM): 12,
+    # (Component.CONDITION, Condition.FEW_BLOCKS): 12,
+    # (Component.CONDITION, Condition.COZY): 17,
+    # (Component.CONDITION, Condition.PAINTING): 15,
+    # (Component.CONDITION, Condition.SYNTHESIZER): 15,
+    # (Component.CONDITION, Condition.ISLAND): 16,
 }
 # A shape/effect collision condition is priced INVERSELY to the shape/effect it
 # matches: a condition about a cheap, common block (a plain Rect, an effect-less
@@ -1767,12 +2180,17 @@ def _condition_price_for(component_price):
                round(CONDITION_PRICE_POOL / max(component_price, 1)))
 
 
-for _i, _s in enumerate(Shape.ORDER):
-    COMPONENT_PRICES[(Component.CONDITION, Condition.SHAPE_BASE + _i)] = \
-        _condition_price_for(COMPONENT_PRICES.get((Component.SHAPE, _s), 8))
-for _i, _e in enumerate(Effect.ORDER):
-    COMPONENT_PRICES[(Component.CONDITION, Condition.EFFECT_BASE + _i)] = \
-        _condition_price_for(COMPONENT_PRICES.get((Component.EFFECT, _e), 8))
+# COMMENTED OUT with the conditions: the two loops that priced every
+# shape/effect collision condition from the component it matched (inverse to
+# the component's price). That formula survives as _condition_price_for, which
+# match_group_price still uses for the shape groups and effect groups.
+#
+# for _i, _s in enumerate(Shape.ORDER):
+#     COMPONENT_PRICES[(Component.CONDITION, Condition.SHAPE_BASE + _i)] = \
+#         _condition_price_for(COMPONENT_PRICES.get((Component.SHAPE, _s), 8))
+# for _i, _e in enumerate(Effect.ORDER):
+#     COMPONENT_PRICES[(Component.CONDITION, Condition.EFFECT_BASE + _i)] = \
+#         _condition_price_for(COMPONENT_PRICES.get((Component.EFFECT, _e), 8))
 
 
 def scorer_component_price(scorer):
@@ -1815,17 +2233,23 @@ def block_price_for(shape, effects, scorer):
 
 
 # --- Whole cards ---
-# Every splittable card is composed from a condition + a scorer, so the only
-# whole cards are the indivisible ones in the Card class above (ERR 404 /
-# Blueprint / Showman / Garden / Rigged Casino / Conquistador). The classic
-# named cards (Joker..Skater) and the old
-# shape/effect cards ("Pipe card (+Mult)" etc.) were removed: each now exists
-# only as a derived (condition x scorer) card — a magnitude card for a unit
-# scorer or a generic card for a flat scorer (see CONDITION_CARD_OFFSET /
-# GENERIC_CARD_OFFSET below). The classic cards' names and flavor comments now
-# live on the conditions they were split into (Condition.NAMES / .COMMENTS).
+# A card is either one of the indivisible cards in the Card class above (ERR
+# 404 / Blueprint / Showman / Garden / Rigged Casino / Conquistador / ...) or a
+# MATCH GROUP card (see the MATCH GROUPS section at the end of this file): a
+# group of shapes, or one effect, paired with one scorer, fired when the marble
+# collides with a block the group matches. Nothing splits and nothing is
+# assembled any more — the condition system that did both is commented out
+# below.
 
-
+# ---------------------------------------------------------------------------
+# COMMENTED OUT with the conditions (user request: "comment out all the code
+# for conditions"): the condition constants, their shape/effect aliases, the
+# catalogue order, and every helper that read a condition (its shape/effect
+# payload, its name, glyph, colour, trigger prose, phase and block match).
+# Kept verbatim inside the string literal so it can be restored by deleting the
+# two wrapper lines; nothing in the game reads it.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_CONDITIONS = r'''
 # --- Conditions: the trigger half of split cards (see class Condition) ---
 # Named-condition constants are in the class; collision conditions (one per
 # shape and per effect) are generated here with ids in Condition.SHAPE_BASE..
@@ -1846,7 +2270,8 @@ CONDITION_ORDER = ([Condition.START, Condition.DISTANCE, Condition.BLACK_HOLE,
                     Condition.AIR_TIME, Condition.FULLEST_COLUMN,
                     Condition.CASH_HELD, Condition.FRAGILE_BREAKS,
                     Condition.SLIPPERY, Condition.RANDOM, Condition.FEW_BLOCKS,
-                    Condition.COZY, Condition.PAINTING, Condition.SYNTHESIZER]
+                    Condition.COZY, Condition.PAINTING, Condition.SYNTHESIZER,
+                    Condition.ISLAND]
                    + [Condition.SHAPE_BASE + _i for _i in range(len(Shape.ORDER))]
                    + [Condition.EFFECT_BASE + _i for _i in range(len(Effect.ORDER))])
 
@@ -1949,7 +2374,7 @@ def condition_phase(condition):
         return "collision"
     if condition in (Condition.START, Condition.FULLEST_COLUMN, Condition.CASH_HELD,
                      Condition.RANDOM, Condition.FEW_BLOCKS, Condition.COZY,
-                     Condition.PAINTING, Condition.SYNTHESIZER):
+                     Condition.PAINTING, Condition.SYNTHESIZER, Condition.ISLAND):
         return "start"
     if condition in (Condition.DISTANCE, Condition.BLACK_HOLE,
                      Condition.AIR_TIME, Condition.SLIPPERY):
@@ -1966,21 +2391,21 @@ def condition_matches_block(condition, block):
     if effect is not None:
         return effect in block.effects
     return False
+'''
+# --- end of the commented-out condition catalogue ----------------------------
 
 
-# --- The card scorers a condition can pair with (shared with block assembly) ---
-# EVERY block payoff scorer is a card scorer, so every (condition x scorer) pair
-# forms a card: the three unit scorers build a magnitude card, and every other
-# scorer builds a generic card that fires one block-style trigger per trigger.
-# The only exclusions are NONE (no payoff at all) and START/FINISH (run roles,
-# not payoffs — a card can't release or finish a marble).
+# --- The card scorers a card can pay with (shared with block assembly) ------
+# EVERY block payoff scorer is a card scorer: the three unit scorers (+Chips,
+# +Mult, xMult) pay one standard unit per trigger, and every other scorer pays
+# one block-style trigger. The only exclusions are NONE (no payoff at all) and
+# START/FINISH (run roles, not payoffs — a card can't release or finish a
+# marble).
 #
 # A card has no position, board context or marble of its own, so the payoffs
-# that read one take them from "the block the condition hands the card": the
-# block the marble collided with (collision conditions), the run's first block
-# (start conditions), the run's last block (end conditions), or the block that
-# shattered (Fragile Breaks). That is the same reference Summit, Airball and
-# Effective already used, and it is what makes Powerline's row, Frontier's
+# that read one take them from the block that fired the card: the block the
+# marble collided with (every card is collision-triggered now, see
+# match_group_matches_block). That is what makes Powerline's row, Frontier's
 # border, Cluster's neighbours, Echo's copied scorer, Bomb's blast and Colossus'
 # marble expressible on a card.
 _ROLE_OR_NONE = (Scorer.NONE, Scorer.START, Scorer.FINISH)
@@ -1996,6 +2421,13 @@ _UNIT_SCORER_META = {
     Scorer.MULT_MUL: "xMult",
 }
 
+# ---------------------------------------------------------------------------
+# COMMENTED OUT with the conditions: the named-condition magnitude model (the
+# ratio table that let one trigger pay every scorer proportionally). A match
+# group's cards pay one standard unit per matching hit instead, so there is no
+# ratio left to look up (see _match_group_description).
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_NAMED_CONDITION_RATIO = r'''
 # --- Named-condition magnitude model ---
 # A named condition fires once per run (or per fragile break) with a per-run
 # measure in "units". The standard per-unit bases are +30 chips, +4 mult, and
@@ -2022,6 +2454,13 @@ NAMED_CONDITION_RATIO = {
     # exactly +3 mult for each card in the card area (+chips pays 22, xMult
     # multiplies by 1.1875 per card).
     Condition.SYNTHESIZER: 0.75,
+    # Island is 2x the base, so its canonical xMult pairing multiplies by 1.5
+    # per island — "+0.5 xMult for each unconnected group of unlocked board
+    # units" (+Chips pays 60 a group, +Mult 8). The count is of GROUPS, not
+    # units, so it is the same 1 on the starter 2x3 board as on a board that
+    # has been unlocked into one big continent: what it rewards is a board left
+    # broken into separate islands.
+    Condition.ISLAND: 2.0,
 }
 # The named conditions, in a stable display order (collision conditions follow
 # them in CONDITION_ORDER).
@@ -2030,7 +2469,8 @@ NAMED_CONDITION_ORDER = [Condition.START, Condition.DISTANCE,
                          Condition.FULLEST_COLUMN, Condition.CASH_HELD,
                          Condition.FRAGILE_BREAKS, Condition.SLIPPERY,
                          Condition.RANDOM, Condition.FEW_BLOCKS, Condition.COZY,
-                         Condition.PAINTING, Condition.SYNTHESIZER]
+                         Condition.PAINTING, Condition.SYNTHESIZER,
+                         Condition.ISLAND]
 
 
 def condition_ratio(condition):
@@ -2041,6 +2481,8 @@ def condition_ratio(condition):
     the base (see NAMED_CONDITION_RATIO).
     """
     return NAMED_CONDITION_RATIO.get(condition, 1.0)
+'''
+# --- end of the commented-out named-condition model --------------------------
 
 
 def magnitude_payoff(scorer, ratio, units, scale=1.0):
@@ -2082,6 +2524,13 @@ def _format_amount(scorer, ratio, scale=1.0, dev=""):
     return f"x{s} mult{dev}"
 
 
+# ---------------------------------------------------------------------------
+# COMMENTED OUT with the conditions: the magnitude-card catalogue (the ids for
+# every (condition x unit scorer) card) and the prose helper that named the
+# block a condition handed the card. A match-group card names the collided
+# block instead — see COLLISION_REFERENCE and _match_group_description.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_MAGNITUDE_CARDS = r'''
 # --- Magnitude cards ---
 # Every condition (the named triggers and the collision conditions) pairs with
 # every unit scorer to build a "magnitude" card: the scorer's base (+30 chips /
@@ -2121,16 +2570,20 @@ def _reference_block_phrase(condition):
     if phase == "end":
         return "the last block the marble hits this run"
     return "the shattered block"
+'''
+# --- end of the commented-out magnitude-card catalogue -----------------------
 
 
-def _generic_effect_phrase(scorer, amount=None, dev="", condition=None):
+def _generic_effect_phrase(scorer, amount=None, dev="", block_phrase=None):
     """A flat scorer card's short payoff phrase, at its own magnitude.
 
     The phrases are the average-magnitude text; a card carrying a rolled
     magnitude substitutes its own amount ("$22" for a Cash half rolled up from
     $15), so the description always matches what the card actually pays, with
-    ``dev`` (the "(+2)" token) right after it. Block-relative scorers name
-    ``condition``'s reference block (see _reference_block_phrase). The
+    ``dev`` (the "(+2)" token) right after it. A block-relative scorer names
+    ``block_phrase`` in its text — a match-group card passes
+    COLLISION_REFERENCE, because it fires on the block the marble collided with
+    — and falls back to "its block" when the caller names none. The
     fixed-payoff scorers (Quick, Random, Echo, Gilded, Lucky) have no amount and
     keep their catalog phrase.
     """
@@ -2141,7 +2594,7 @@ def _generic_effect_phrase(scorer, amount=None, dev="", condition=None):
     # supplied a magnitude — which is exactly what a non-empty dev means (see
     # _card_payoff_text).
     pdev = resource_points_deviation(scorer, amount) if dev else ""
-    block = _reference_block_phrase(condition) if condition is not None else "its block"
+    block = block_phrase or "its block"
     if scorer == Scorer.CASH:
         return f"${int(amount)}{dev}"
     if scorer == Scorer.SHARP:
@@ -2201,10 +2654,12 @@ def _generic_effect_phrase(scorer, amount=None, dev="", condition=None):
     if scorer == Scorer.COLOSSUS:
         return (f"{amount:g} xMult{dev} for each pixel the marble's radius is "
                 "above its base size (8 px)")
-    if scorer == Scorer.QUICK and condition_phase(condition) == "end":
-        # There is no NEXT block after the run, so an end-condition Quick card
-        # measures the run's LAST block instead.
-        return f"chips from the speed of the last block hit{dev}"
+    # COMMENTED OUT with the conditions: an end-phase Quick card measured the
+    # run's LAST block, because there is no next block after a run. Every card
+    # is collision-triggered now, so Quick always means "the next block hit"
+    # (see _GENERIC_SCORER_EFFECT).
+    # if scorer == Scorer.QUICK and condition_phase(condition) == "end":
+    #     return f"chips from the speed of the last block hit{dev}"
     if scorer == Scorer.BOMB:
         return (f"a bomb on {block}, unlocking the units around it after a run")
     return _GENERIC_SCORER_EFFECT.get(scorer, "")
@@ -2224,6 +2679,12 @@ def _trigger_suffix(trigger):
     return f" {trigger}"
 
 
+# ---------------------------------------------------------------------------
+# COMMENTED OUT with the conditions: the composed-card text builder and the
+# loop that catalogued every (condition x unit scorer) pair as a card. A
+# match-group card's text comes from _match_group_description instead.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_CARD_PAYOFF_TEXT = r'''
 def _card_payoff_text(condition, scorer, amount=None):
     """The body text of a composed card's description, at its own magnitude.
 
@@ -2265,21 +2726,21 @@ for _cond in CONDITION_ORDER:
         # condition's (rendered by ui._draw_card_icon).
         Card.COLORS[_value] = Scorer.color(_scorer)
         Card.GLYPHS[_value] = condition_glyph(_cond)
+'''
+# --- end of the commented-out magnitude-card catalogue -----------------------
+
 
 # --- Generic flat-scorer cards ---
 # Every other block scorer (Cash, Sharp, Quick, Parts/Shreds/Rubble/Ideas) is a
-# card scorer too. Each pairs with every condition to build a new generic card,
-# including Quick with a run-END condition: there is no "next block" after the
-# run, so an end-phase Quick card pays from the speed of the run's LAST block
-# hit instead. These ids sit far past every other card and,
-# like the custom magnitude cards, are NOT in the fixed Card.ORDER catalog —
-# but they can still appear pre-built as random (condition x scorer) shop
-# offers, so a pre-built splittable card can carry any scorer. The runtime is
-# generic: the scorer fires one block-style trigger each time the condition is
-# satisfied (cards.py).
-GENERIC_CARD_OFFSET = 2000
-_GENERIC_CARD_CARDS = {}   # (condition, scorer) -> card id
-_GENERIC_CARD_META = {}    # card id -> (condition, scorer)
+# card scorer too, and each pairs with every match group to build a card (see
+# the MATCH GROUPS section at the end of this file) — one block-style trigger
+# per matching collision.
+#
+# COMMENTED OUT with the conditions: the generic-card id range and the two maps
+# that recorded which (condition, scorer) pair each generic card stood for.
+# GENERIC_CARD_OFFSET = 2000
+# _GENERIC_CARD_CARDS = {}   # (condition, scorer) -> card id
+# _GENERIC_CARD_META = {}    # card id -> (condition, scorer)
 # A short phrase for each flat scorer's payoff, used in card descriptions for
 # the scorers whose payoff is fixed (no magnitude): Quick, Random, Echo,
 # Gilded, Bomb, Lucky. Everything with an amount builds its phrase in
@@ -2293,7 +2754,14 @@ _GENERIC_SCORER_EFFECT = {
     Scorer.LUCKY: "a 1/3 chance of 130 chips and a 1/9 chance of $40",
 }
 
-
+# ---------------------------------------------------------------------------
+# COMMENTED OUT with the conditions: the three condition-specific card texts
+# (Summit naming the block a condition handed it, Satanic and Bomb describing
+# their one-run deal) and the loop that catalogued every (condition x flat
+# scorer) pair. _match_group_description writes the same three texts for a
+# match-group card.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_GENERIC_CARD_TEXT = r'''
 def _summit_card_description(condition, amount=None, dev=""):
     """A generic Summit card's description: mult per row above the bottom.
 
@@ -2375,8 +2843,19 @@ for _scorer in FLAT_CARD_SCORERS:
         # Face = the scorer's color, icon = the condition's (see ui.py).
         Card.COLORS[_value] = Scorer.color(_scorer)
         Card.GLYPHS[_value] = condition_glyph(_cond)
+'''
+# --- end of the commented-out generic-card catalogue -------------------------
 
 
+# ---------------------------------------------------------------------------
+# COMMENTED OUT with the conditions: the condition card lookups (the pair to
+# card id mapping, its reverse, and the "is this card splittable" tests) plus
+# the old card_scorer / card_price_for, which read the scorer and the condition
+# out of a card's condition half. Every card is unsplittable now, and a
+# match-group card's scorer and price come from _MATCH_GROUP_META and
+# Card.PRICES: see the MATCH GROUPS section below.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_CONDITION_CARD_LOOKUPS = r'''
 def condition_scorer_card(condition, scorer):
     """The card id produced by building (condition, scorer), or None if the
     pair does not describe a card.
@@ -2461,4 +2940,249 @@ def card_price_for(card):
     condition, scorer = parts
     return max(1, COMPONENT_PRICES.get((Component.CONDITION, condition), 0)
                + scorer_component_price(scorer))
+'''
+# --- end of the commented-out condition card lookups -------------------------
+
+
+# =============================================================================
+# MATCH GROUPS: the collision a card triggers on
+# =============================================================================
+# (User request: "create an unsplittable card for each combination of (a group
+# of shapes plus each effect that is not the none effect) and all scorers ...
+# for each combination, the card makes all blocks that have a shape in the
+# given group, or have the given effect, act as if the block also has the given
+# scorer. do not give the block a scorer, only trigger the scorer when the
+# marble collides with the block. the rarity of these cards should be based
+# only on the shape group or effect.")
+#
+# A MATCH GROUP is either a group of SHAPES — colliding with a block of any
+# shape in it fires the card — or one EFFECT — colliding with any block that
+# carries it fires the card. Every (group x card scorer) pair is ONE
+# UNSPlITTABLE card: there is nothing to split it into, and nothing to combine,
+# because the group and the scorer are baked in. A card never changes a block:
+# it only fires its scorer when the marble collides with a block the group
+# matches, so a block's own scorer (or lack of one) is untouched.
+#
+# Rect is deliberately in no group (a plain rect wall with no effects is the
+# game's inert block) and so is Effect.NONE, so such a block matches nothing at
+# all. The nine shape groups cover every other shape — the commented-out cradle
+# is in none of them. NONE is a group of its own, for blocks built with the
+# no-hitbox Shape.NONE field: the marble passes straight THROUGH such a block,
+# but physics still registers a field contact for as long as the marble is
+# inside its cell (see physics._collect_field_contacts), so these cards fire on
+# a pass-through exactly as every other group's cards fire on a hit.
+#
+# Every card built here is COMMON (see Rarity and Card.RARITIES): the tier of a
+# match-group card belongs to the group, and all 26 groups are common — the
+# tiers above Common are the whole cards. Since the shop draws the TIER first
+# (Common weighs 1 against a Legendary's 0.2 — see Rarity.WEIGHTS) and the card
+# inside it flat, all 26 groups share the ONE Common slice of the offers along
+# with the 3 cheap whole cards, instead of each group adding its own.
+SHAPE_GROUPS = (
+    (Shape.PIPE, Shape.DRAIN, Shape.PIPE_BEND),
+    (Shape.PLATFORM, Shape.CORNER),
+    (Shape.KEY, Shape.LOCK),
+    (Shape.BUMP, Shape.CIRCLE),
+    (Shape.CURVED_SLOPE, Shape.CONVEX_SLOPE),
+    (Shape.PEG, Shape.SPIKE, Shape.SAWTOOTH),
+    (Shape.SLOPE, Shape.LINE),
+    (Shape.NONE,),
+    (Shape.FLAT_LINE, Shape.CURVED_SLOPE_LINE, Shape.HALF_PIPE),
+)
+# Every group, as (kind, values): "shape" carries a tuple of shapes, "effect" a
+# one-effect tuple. The ORDER here is the display order (the collection, and the
+# shop's card offers, which draw one entry of this list at random).
+MATCH_GROUPS = (tuple(("shape", _group) for _group in SHAPE_GROUPS)
+                + tuple(("effect", (_effect,)) for _effect in Effect.REAL_ORDER))
+# A card's text says which block its payoff reads. Every card is triggered by a
+# collision, so it is always the block that was hit.
+COLLISION_REFERENCE = "the collided block"
+
+
+def match_group_label(group):
+    """A match group's short display name (used in card names and the codex)."""
+    kind, values = group
+    if kind == "effect":
+        return Effect.name(values[0])
+    if values == (Shape.NONE,):
+        return "No Shape"
+    return "/".join(Shape.name(shape) for shape in values)
+
+
+def match_group_trigger(group):
+    """The "when the marble collides with ..." clause a card's text ends with."""
+    kind, values = group
+    if kind == "effect":
+        return f"when the marble collides with a {Effect.name(values[0])} block"
+    if values == (Shape.NONE,):
+        return "when the marble collides with a block with no shape"
+    names = [Shape.name(shape) for shape in values]
+    if len(names) == 1:
+        return f"when the marble collides with a {names[0]} block"
+    return (f"when the marble collides with a {', '.join(names[:-1])} "
+            f"or {names[-1]} block")
+
+
+def match_group_glyph(group):
+    """A match group's fallback letter (its icon art is the real marker)."""
+    label = match_group_label(group)
+    return label[0].upper() if label else "?"
+
+
+def match_group_for_shape(shape):
+    """The shape group that contains ``shape``, or None.
+
+    Rect is in no group at all, so a plain rect wall returns None; every other
+    shape (the commented-out cradle excepted) is in exactly one group.
+    """
+    for group in MATCH_GROUPS:
+        if group[0] == "shape" and shape in group[1]:
+            return group
+    return None
+
+
+def match_group_for_effect(effect):
+    """The effect group for ``effect``, or None (Effect.NONE has no group)."""
+    for group in MATCH_GROUPS:
+        if group[0] == "effect" and group[1] == (effect,):
+            return group
+    return None
+
+
+def match_group_matches_block(group, block):
+    """True when the collided block is one this group's cards trigger on.
+
+    A shape group matches the block's SHAPE; an effect group matches any of the
+    block's EFFECTS (a block with two effects is matched by both effect groups).
+    """
+    kind, values = group
+    if kind == "effect":
+        return any(effect in block.effects for effect in values)
+    return block.shape in values
+
+
+def match_group_price(group):
+    """A match group's price — the group half of its cards' price.
+
+    Priced inversely to what it matches, exactly as the collision conditions
+    were (see _condition_price_for): a group of cheap, common shapes is a dear
+    card, while a rare component's effect is cheap. A shape group is priced off
+    its CHEAPEST member, so the commonest shape in the group decides the
+    price. The card's rarity does not read this: every group is Common, so they
+    all carry one and the same weight in the offer pool (see
+    main.random_card_option_value).
+    """
+    kind, values = group
+    if kind == "effect":
+        component_price = COMPONENT_PRICES.get((Component.EFFECT, values[0]), 8)
+    else:
+        component_price = min(COMPONENT_PRICES.get((Component.SHAPE, shape), 8)
+                              for shape in values)
+    return _condition_price_for(component_price)
+
+
+def _match_group_description(group, scorer, amount=None):
+    """The description text for one (match group x scorer) card.
+
+    Built from the same phrase helpers every other card uses, so a Cash card
+    states its own rolled dollars, a Summit card names the row the collided
+    block sits on, and so on; the trigger clause is the group's (see
+    match_group_trigger).
+    """
+    dev = scorer_magnitude_deviation(scorer, amount) if amount else ""
+    trigger = match_group_trigger(group)
+    if scorer in UNIT_CARD_SCORERS:
+        # A unit scorer pays ONE standard unit per matching hit: +chips /
+        # +mult / xMult, scaled by the card's own rolled magnitude.
+        scale = scorer_magnitude_scale(scorer, amount)
+        return f"Gives {_format_amount(scorer, 1.0, scale, dev)} {trigger}"
+    if scorer == Scorer.SUMMIT:
+        # Summit measures the row the collided block sits on.
+        gain = amount or Scorer.DEFAULT_AMOUNT.get(Scorer.SUMMIT, 0.75)
+        return (f"Gives {gain:g} mult{dev} for each row above the bottom row "
+                f"that {COLLISION_REFERENCE} sits on, {trigger}")
+    if scorer == Scorer.SATANIC:
+        return (f"Gives {_generic_effect_phrase(scorer, amount, dev)}"
+                f"{_trigger_suffix(trigger)}, then is permanently destroyed "
+                "after one run")
+    if scorer == Scorer.BOMB:
+        return (f"Gives {_generic_effect_phrase(scorer, amount, dev, COLLISION_REFERENCE)}"
+                f"{_trigger_suffix(trigger)}, then is permanently destroyed "
+                "after one run")
+    return (f"Gives {_generic_effect_phrase(scorer, amount, dev, COLLISION_REFERENCE)}"
+            f"{_trigger_suffix(trigger)}")
+
+
+# The card ids for (match group x scorer). Like the old composed-card ids these
+# sit far past every whole card, so they can never collide with a Card.ORDER id,
+# and they are NOT in Card.ORDER: Card.ORDER stays the catalogue of the cards
+# that are not built on a match group (Coupon, Showman, Tesseract, ...), which
+# is the "original cards" pool the shop draws from alongside the groups.
+MATCH_GROUP_CARD_OFFSET = 3000
+_MATCH_GROUP_CARDS = {}   # (group, scorer) -> card id
+_MATCH_GROUP_META = {}    # card id -> (group, scorer)
+
+for _group in MATCH_GROUPS:
+    for _scorer in CARD_SCORERS:
+        _value = (MATCH_GROUP_CARD_OFFSET + MATCH_GROUPS.index(_group) * len(CARD_SCORERS)
+                  + CARD_SCORERS.index(_scorer))
+        _MATCH_GROUP_CARDS[(_group, _scorer)] = _value
+        _MATCH_GROUP_META[_value] = (_group, _scorer)
+        Card.NAMES[_value] = f"{match_group_label(_group)} card ({Scorer.name(_scorer)})"
+        Card.COMMENTS[_value] = ("Bound to the effect it matches."
+                                 if _group[0] == "effect"
+                                 else "Bound to the shapes it matches.")
+        Card.DESCRIPTIONS[_value] = _match_group_description(_group, _scorer)
+        Card.PRICES[_value] = match_group_price(_group) + scorer_component_price(_scorer)
+        # The face is its scorer's colour and the icon is its group's (see
+        # ui._draw_card_icon), exactly as a composed card used to be drawn.
+        Card.COLORS[_value] = Scorer.color(_scorer)
+        Card.GLYPHS[_value] = match_group_glyph(_group)
+        # Every match-group card is Common: the tier belongs to the GROUP the
+        # card is built on, and the design puts all of them in the common tier.
+        Card.RARITIES[_value] = Rarity.COMMON
+
+
+def match_group_card(group, scorer):
+    """The card id for (match group, scorer), or None when there is no card."""
+    return _MATCH_GROUP_CARDS.get((group, scorer))
+
+
+def match_group_card_meta(value):
+    """(group, scorer) for a card built on a match group, or None.
+
+    None means the card is not collision-triggered at all: it is one of the
+    Card.ORDER cards, whose effect lives in cards.py or in the code that owns
+    the mechanic (Tesseract's reroll bonus, Coupon's discount, ...).
+    """
+    return _MATCH_GROUP_META.get(value)
+
+
+def match_group_card_values():
+    """Every match-group card id, in catalogue order."""
+    return list(_MATCH_GROUP_META)
+
+
+def card_scorer(value):
+    """The scorer a card pays with, or None for a card that has no scorer.
+
+    A match-group card carries its scorer's own rolled magnitude, which is why
+    the shop rolls one when it builds the offer (see main.make_card_item): the
+    card pays, prices and describes itself at the strength it actually has. The
+    Card.ORDER cards (Coupon, Showman, Garden, ...) have no scorer at all, so
+    there is nothing to roll and nothing to scale.
+    """
+    meta = match_group_card_meta(value)
+    return meta[1] if meta is not None else None
+
+
+def card_price_for(card):
+    """A card's price: its catalog price, which is all it has.
+
+    A match-group card's price is its group's plus its scorer half's, and a
+    Card.ORDER card's is its own; both are written into Card.PRICES when the
+    catalogue is built, so there is nothing left to compute here. A rolled
+    magnitude never changes a price (see scorer_component_price).
+    """
+    return Card.PRICES.get(card, 20)
 

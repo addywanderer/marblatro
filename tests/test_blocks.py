@@ -797,7 +797,8 @@ class BlocksTests(GameTestCase):
             main.Shape.CORNER: lambda b: (b.rect.left + 4, b.rect.centery),
             main.Shape.PEG: lambda b: (b.rect.centerx, b.rect.centery),
             main.Shape.SAWTOOTH: lambda b: (b.rect.left + 5, b.rect.bottom - 4),
-            main.Shape.CRADLE: lambda b: (b.rect.centerx, b.rect.bottom - 4),
+            # COMMENTED OUT with the shape itself: CRADLE -> a point on its floor.
+            # main.Shape.CRADLE: lambda b: (b.rect.centerx, b.rect.bottom - 4),
         }
         for shape in self._new_shapes():
             block = main.Block(5, 5, shape=shape, scorer=main.Scorer.NONE)
@@ -821,15 +822,18 @@ class BlocksTests(GameTestCase):
                                 f"{shape} let the marble fall through")
 
 
-    def test_cradle_catches_and_settles_a_marble(self):
-        # The cradle's wide floor catches a dropped marble and settles it there.
-        block = main.Block(5, 5, shape=main.Shape.CRADLE, scorer=main.Scorer.NONE)
-        marble = main.Marble(block.rect.centerx, block.rect.top - 70)
-        for _ in range(300):
-            marble.physics.update(marble, main.DT, [block])
-        rest_y = block.rect.top + main.CRADLE_FLOOR_DEPTH - marble.radius
-        self.assertAlmostEqual(marble.position[1], rest_y, delta=1.0)
-        self.assertLess(abs(marble.velocity[1]), 1.0)
+    # COMMENTED OUT with the shape itself (user request: "comment out the cradle
+    # shape"): the cradle's catch-and-settle test.
+    #
+    # def test_cradle_catches_and_settles_a_marble(self):
+    #     # The cradle's wide floor catches a dropped marble and settles it there.
+    #     block = main.Block(5, 5, shape=main.Shape.CRADLE, scorer=main.Scorer.NONE)
+    #     marble = main.Marble(block.rect.centerx, block.rect.top - 70)
+    #     for _ in range(300):
+    #         marble.physics.update(marble, main.DT, [block])
+    #     rest_y = block.rect.top + main.CRADLE_FLOOR_DEPTH - marble.radius
+    #     self.assertAlmostEqual(marble.position[1], rest_y, delta=1.0)
+    #     self.assertLess(abs(marble.velocity[1]), 1.0)
 
 
     def test_peg_is_a_small_circle_smaller_than_the_circle_shape(self):
@@ -842,10 +846,9 @@ class BlocksTests(GameTestCase):
         # The A-key angle (and ROTATE spin) rotates the hitbox: a marble at the
         # image of a solid point under that rotation still collides. This
         # exercises the oriented-rect path (platform) and the rotated-polygon
-        # path (spike/cradle).
+        # path (spike; the cradle joined it until the shape was commented out).
         for shape, local in ((main.Shape.PLATFORM, (0.5, 0.8)),
-                             (main.Shape.SPIKE, (0.5, 0.9)),
-                             (main.Shape.CRADLE, (0.5, 0.9))):
+                             (main.Shape.SPIKE, (0.5, 0.9))):
             block = main.Block(5, 5, shape=shape, scorer=main.Scorer.NONE)
             block.angle = 90
             px = block.rect.left + local[0] * block.rect.width
@@ -970,10 +973,11 @@ class BlocksTests(GameTestCase):
                 f"the zipper door opened {offset}px off centre")
 
 
-    def test_component_images_of_corner_and_cradle_have_no_inner_lines(self):
+    def test_component_image_of_the_corner_has_no_inner_lines(self):
         # A component/ghost image draws the shape's own outline: the corner's
-        # two legs and the cradle's pieces used to be outlined one by one, which
-        # drew a seam inside the shape where they overlap.
+        # two legs used to be outlined one by one, which drew a seam inside the
+        # shape where they overlap. (The cradle was the other half of this test
+        # until the shape was commented out.)
         surface = pygame.Surface([main.GRID_SIZE] * 2)
 
         corner = main.Block(0, 0, shape=main.Shape.CORNER, origin=(0, 0))
@@ -986,15 +990,17 @@ class BlocksTests(GameTestCase):
             surface.get_at((corner.rect.width // 2, corner.rect.height // 4))[:3],
             main.WHITE, "the corner's L outline is missing")
 
-        cradle = main.Block(0, 0, shape=main.Shape.CRADLE, origin=(0, 0))
-        surface.fill(main.BLACK)
-        main.ui.draw_block_shape_only(cradle, surface)
-        self.assertNotEqual(
-            surface.get_at((2, main.CRADLE_FLOOR_DEPTH))[:3], main.WHITE,
-            "the cradle's wedges still show a seam on the floor slab")
-        self.assertEqual(
-            surface.get_at((cradle.rect.width // 2, main.CRADLE_FLOOR_DEPTH))[:3],
-            main.WHITE, "the cradle's flat floor outline is missing")
+        # COMMENTED OUT with the shape itself: the same seam check for the
+        # cradle's wedges and its flat floor outline.
+        # cradle = main.Block(0, 0, shape=main.Shape.CRADLE, origin=(0, 0))
+        # surface.fill(main.BLACK)
+        # main.ui.draw_block_shape_only(cradle, surface)
+        # self.assertNotEqual(
+        #     surface.get_at((2, main.CRADLE_FLOOR_DEPTH))[:3], main.WHITE,
+        #     "the cradle's wedges still show a seam on the floor slab")
+        # self.assertEqual(
+        #     surface.get_at((cradle.rect.width // 2, main.CRADLE_FLOOR_DEPTH))[:3],
+        #     main.WHITE, "the cradle's flat floor outline is missing")
 
 
     def test_phase_grants_one_second_of_no_collisions(self):
@@ -1100,18 +1106,18 @@ class BlocksTests(GameTestCase):
 
     def test_bump_shape_is_a_half_disc_dome(self):
         # The bump is a first-class shape: named, described, priced, drawing
-        # both ways, and auto-generating a collision condition that builds a
-        # card — the same treatment as the other shapes.
+        # both ways, and a member of a match group that builds a card — the
+        # same treatment as the other shapes.
         shape = main.Shape.BUMP
         self.assertIn(shape, main.Shape.ORDER)
         self.assertNotEqual(main.Shape.name(shape), "Unknown")
         self.assertTrue(main.shape_description(shape))
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SHAPE, shape)], 0)
-        cond = main.Condition.SHAPE_BASE + main.Shape.ORDER.index(shape)
-        self.assertIn(cond, main.CONDITION_ORDER)
-        self.assertEqual(components.condition_shape(cond), shape)
-        self.assertGreaterEqual(main.condition_scorer_card(cond, main.Scorer.MULT_ADD),
-                                components.CONDITION_CARD_OFFSET)
+        group = main.match_group_for_shape(shape)
+        self.assertIsNotNone(group)
+        self.assertIn(shape, group[1])
+        self.assertGreaterEqual(main.match_group_card(group, main.Scorer.MULT_ADD),
+                                components.MATCH_GROUP_CARD_OFFSET)
         for borders in (True, False):
             prev = main.BLOCK_BORDERS_ON
             main.BLOCK_BORDERS_ON = borders
@@ -1161,6 +1167,7 @@ class BlocksTests(GameTestCase):
         self.assertLess(balanced.position[1], block.rect.bottom)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_pillar_plus_chips_scales_proportionally_per_column_block(self):
         # Fullest Column (Pillar) has ratio 0.25, so +Chips pays round(0.25*30)
         # = +8 chips per block in the fullest column at the start of the run.
@@ -1206,6 +1213,7 @@ class BlocksTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 9)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_wrecking_ball_bonus_grows_when_fragile_block_breaks(self):
         # Each fragile block break adds 3 to the run's mult gain (applied to
         # the current run live) and pops its particle near the block. It only
@@ -1224,6 +1232,7 @@ class BlocksTests(GameTestCase):
         self.assertEqual((p.x, p.y), (block.rect.centerx, block.rect.centery))
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_fragile_break_sets_flag_and_grows_wrecking_ball_in_update(self):
         # A real physics shatter marks the block; the game's update() then
         # tracks the wrecking ball's run gain and spawns its particle at the

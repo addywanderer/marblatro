@@ -121,11 +121,12 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(loaded_comp.amount, 4)
         self.assertEqual(loaded_comp.price, 20)
 
-        card = main.CardItem(main.Card.EXPLORER, 25)
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
         loaded_card = save_system._deserialize_item(save_system._serialize_item(card))
         self.assertIsInstance(loaded_card, main.CardItem)
-        self.assertEqual(loaded_card.value, main.Card.EXPLORER)
-        self.assertEqual(loaded_card.price, 25)
+        self.assertEqual(loaded_card.value, card.value)
+        self.assertEqual(loaded_card.price, card.price)
 
     def test_p_key_saves_to_active_slot(self):
         self.game.save_slot = 1
@@ -133,7 +134,9 @@ class SaveSystemTests(unittest.TestCase):
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.toolbox.add(main.BlockItem(0, 0, main.Shape.PIPE, main.Effect.NONE,
                                              main.Scorer.CHIPS_ADD, 30, 50, "Pipe"))
-        self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
+        self.game.cards.append(card)
 
         self._press(main.pygame.K_p)
 
@@ -143,7 +146,7 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(len(data["grid"]), 1)
         self.assertEqual(len(data["toolbox"]), 3)  # start + finish + pipe
         self.assertEqual(len(data["cards"]), 1)
-        self.assertEqual(data["cards"][0]["value"], main.Card.JOKER)
+        self.assertEqual(data["cards"][0]["value"], card.value)
         self.assertTrue(save_system._slot_has_save(1))
 
     def test_save_records_required_fields(self):
@@ -183,7 +186,8 @@ class SaveSystemTests(unittest.TestCase):
         self.game.current_trial = main.Trial.CARD_CUTTER
         self.game.grid[(1, 2)] = main.Block(1, 2, shape=main.Shape.DRAIN,
                                             scorer=main.Scorer.MULT_ADD, scorer_amount=4)
-        self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
+        self.game.cards.append(_card_item(
+            main.match_group_for_shape(main.Shape.PIPE), main.Scorer.MULT_ADD))
         self.game.toolbox.add(main.Component.shape_component(main.Shape.PIPE))
         save_system.save_game(self.game)
 
@@ -201,7 +205,10 @@ class SaveSystemTests(unittest.TestCase):
         self.assertIn((1, 2), fresh.grid)
         self.assertEqual(fresh.grid[(1, 2)].shape, main.Shape.DRAIN)
         self.assertEqual(len(fresh.cards), 1)
-        self.assertEqual(fresh.cards[0].value, main.Card.EXPLORER)
+        self.assertEqual(fresh.cards[0].value,
+                         main.match_group_card(
+                             main.match_group_for_shape(main.Shape.PIPE),
+                             main.Scorer.MULT_ADD))
         self.assertTrue(any(i.kind == main.Component.SHAPE for i in fresh.toolbox.items))
         self.assertEqual(fresh.save_slot, 3)
         self.assertFalse(fresh.run_active)
@@ -414,6 +421,7 @@ class SaveSystemTests(unittest.TestCase):
         # The shop is synced to show the banked bonus slots on refresh.
         self.assertEqual(fresh.shop.bonus_slots, 3)
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_condition_component_and_built_card_save_and_load(self):
         # A condition component in the toolbox and a build-only card value
         # round-trip through a save.
@@ -434,6 +442,7 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(len(fresh.cards), 1)
         self.assertEqual(fresh.cards[0].value, value)
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_wrecking_ball_bonus_saves_and_loads(self):
         # The Fragile Breaks (Wrecking Ball) permanent bonuses persist with the
         # save, one per unit scorer.
@@ -784,7 +793,8 @@ class SaveSystemTests(unittest.TestCase):
         self.game.save_slot = 1
         self.game.cash = 432
         self.game.grid[(2, 2)] = main.Block(2, 2, scorer=main.Scorer.CHIPS_ADD)
-        value = main.condition_scorer_card(main.Condition.START, main.Scorer.MULT_ADD)
+        value = main.match_group_card(main.match_group_for_shape(main.Shape.PIPE),
+                                      main.Scorer.MULT_ADD)
         self.game.cards.append(main.CardItem(value, 50))
         self.game.run_complete = True
         self.game.awaiting_after_run = True
@@ -1071,9 +1081,11 @@ class SaveSystemTests(unittest.TestCase):
         self.assertTrue(any(p.title == "New trial" for p in self.game.popups))
 
     def test_collection_persists_across_reload(self):
-        collection.discover_card(main.Card.JOKER)
+        value = main.match_group_card(main.match_group_for_shape(main.Shape.PIPE),
+                                      main.Scorer.MULT_ADD)
+        collection.discover_card(value)
         collection.reset()  # drop the in-memory cache
-        self.assertTrue(collection.is_card_discovered(main.Card.JOKER))
+        self.assertTrue(collection.is_card_discovered(value))
 
 
 class PlayerDataPathTests(unittest.TestCase):
@@ -1194,7 +1206,10 @@ class ProfileTests(unittest.TestCase):
         # A fake pre-profile layout at the game root: the shared saves folder
         # plus the three global json files.
         self._write_json(self._tmp, "achievements.json", {"unlocked": ["rich"]})
-        self._write_json(self._tmp, "collection.json", {"cards": [main.Card.JOKER]})
+        self._write_json(self._tmp, "collection.json",
+                         {"cards": [main.match_group_card(
+                             main.match_group_for_shape(main.Shape.PIPE),
+                             main.Scorer.MULT_ADD)]})
         self._write_json(self._tmp, "metagame.json", {"dice": 5})
         os.makedirs(os.path.join(self._tmp, "saves"))
         for slot in range(1, 7):

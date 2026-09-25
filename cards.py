@@ -1,23 +1,23 @@
 """Card score-effect logic for Marblatro.
 
-The owned-card score effects live here: the start-of-run (+mult / +chips)
-cards, the end-of-run (xMult / data-dependent) cards, Blueprint copying, and
-the small block/board helpers they use. Each function takes the ``Game`` as
-its first argument (mirroring the physics.py pattern); main.py's Game keeps
-thin wrappers (_apply_cards / _apply_cards_on_finish / _on_fragile_broken)
-that delegate to this module, so the rest of the code and the tests call them
-as before.
+The owned-card score effects live here: the named cards that fire at the start
+of a run, at the end of it or on a fragile break (see components.Card.NAMED),
+the collision-triggered scorer cards (a match group plus a scorer — see
+components' MATCH GROUPS section), Blueprint copying, and the small
+block/board helpers and per-run measures they use. Each function takes the
+``Game`` as its first argument (mirroring the physics.py pattern); main.py's
+Game keeps thin wrappers (_apply_cards, _apply_cards_on_finish,
+_apply_cards_on_collision, _on_fragile_broken) that delegate to this module, so
+the rest of the code and the tests call them as before.
 """
 
 import sys
 
 from components import (
-    condition_card_meta,
-    condition_matches_block,
-    condition_phase,
-    condition_ratio,
-    generic_card_meta,
+    UNIT_CARD_SCORERS,
     magnitude_payoff,
+    match_group_card_meta,
+    match_group_matches_block,
     points_text,
     resource_points_for,
     scorer_magnitude_scale,
@@ -36,7 +36,6 @@ else:  # pragma: no cover - only when cards.py is imported standalone
 BLUE = _card_source.BLUE
 block_resale_price = _card_source.block_resale_price
 Card = _card_source.Card
-Condition = _card_source.Condition
 Effect = _card_source.Effect
 GREEN = _card_source.GREEN
 GRID_HEIGHT = _card_source.GRID_HEIGHT
@@ -65,34 +64,39 @@ def _card_disabled(game, card):
 
 
 def apply_cards(game):
-    """Apply every owned card's score effect at the start of a run.
+    """Apply the start-of-run card effects.
 
     A Fragile Breaks (Wrecking Ball) card first applies its permanent, saved
-    bonus (chips/mult/xMult that have accumulated across the game from fragile
-    breaks). A Blueprint copies the card to its immediate left; a card disabled
-    by the Card cutter or Deal breaker trial is skipped (and can't be copied).
+    bonus (the +3 mult a break has banked across the game), then Tesseract's
+    reroll bonus, then every owned card whose effect fires at the START of a run
+    (Joker's +4 mult, Pillar's fullest column, Banker's cash, Glitch's random
+    mult, Ripped Card, Cozy, Painting, Synthesizer, Island) in card-area order,
+    so a card's particle pops on the card that paid. End-of-run and
+    fragile-break cards fire elsewhere (see apply_cards_on_finish /
+    on_fragile_broken).
     """
-    if _owns_fragile_breaks_card(game):
+    if _owns_wrecking_ball_card(game):
         _apply_wrecking_bonus(game)
-    # Tesseract's bonus is an aggregate too (one factor per reroll, whole card
-    # or not), so it is applied once here rather than per card in the loop.
     _apply_tesseract_bonus(game)
     for i, card in enumerate(game.cards):
         if _card_disabled(game, card):
             continue
         value = effective_card_value(game, i)
         if value is not None:
-            apply_card_start(game, card, value, effective_card_amount(game, i))
+            apply_card_start(game, card, value)
 
 
-def _owns_fragile_breaks_card(game):
-    """True when the player owns a Fragile Breaks magnitude card (any scorer)."""
+def _owns_wrecking_ball_card(game):
+    """True when the player owns a live Wrecking Ball card.
+
+    A Blueprint copy counts (it plays the card it sits next to), and a card the
+    run's trial disabled does not — the same rule every other card effect
+    follows.
+    """
     for i, card in enumerate(game.cards):
         if _card_disabled(game, card):
             continue
-        value = effective_card_value(game, i)
-        meta = condition_card_meta(value)
-        if meta is not None and meta[2] == Condition.FRAGILE_BREAKS:
+        if effective_card_value(game, i) == Card.WRECKING_BALL:
             return True
     return False
 
@@ -100,9 +104,10 @@ def _owns_fragile_breaks_card(game):
 def _apply_wrecking_bonus(game):
     """Apply the permanent Fragile Breaks (Wrecking Ball) bonus at run start.
 
-    The bonus has grown by 3/4 of each scorer's base per fragile break across
-    the whole game (saved with the game): chips are added, mult is added, and
-    xMult multiplies by the accumulated factor.
+    The bonus has grown by +3 mult for every fragile block that broke across the
+    whole game (saved with the game, see Game.wrecking_bonus), and applies to
+    the multiplier once at the start of each run. The chips/xMult keys are still
+    carried in that dict for old saves; a Wrecking Ball card only pays mult now.
     """
     bonus = getattr(game, "wrecking_bonus", None)
     if not bonus:
@@ -116,6 +121,120 @@ def _apply_wrecking_bonus(game):
         game.score_mult += mult
     if factor != 1.0:
         game.score_mult *= factor
+
+
+def _named_card_units(game, measure):
+    """A named card's magnitude in card-scorer units this run.
+
+    One unit is one standard payoff (+30 chips / +4 mult / +0.25 xMult) and the
+    card's own ratio scales it (see components.Card.NAMED). A return of 0 means
+    the card's measure came to nothing, which is its gate: no units, no payoff,
+    no particle (a Ripped Card on a board of 6 blocks, a Skater with no slippery
+    blocks, an empty board for Pillar). The measures are the ones the named
+    conditions used:
+
+    * start = 1 (the card simply fires);
+    * distance = 4 x the fraction of the board the marble(s) travelled;
+    * black_hole / air_time = seconds pulled by a black hole / spent airborne;
+    * fullest_column = the blocks in the fullest column;
+    * cash_held = whole $10 held;  slippery = slippery blocks owned;
+    * random = the run RNG's 0..6 (so replaying a run pays the same amount —
+      see Game.run_rng, the same rule every random output follows);
+    * few_blocks = 1 while the board holds 5 blocks or fewer;
+    * cozy = 1 while 10 or fewer board units are unlocked;
+    * painting = the board's total sell price in whole dollars;
+    * synthesizer = the cards in the card area;  island = the groups the
+      unlocked board units form.
+    """
+    if measure == "start":
+        return 1.0
+    if measure == "distance":
+        return 4 * card_distance_fraction(game)
+    if measure == "black_hole":
+        return getattr(game, "black_hole_time", 0.0)
+    if measure == "air_time":
+        return getattr(game, "air_time", 0.0)
+    if measure == "fullest_column":
+        return fullest_column_count(game)
+    if measure == "cash_held":
+        return max(0, game.cash) // 10
+    if measure == "slippery":
+        return owned_slippery_block_count(game)
+    if measure == "random":
+        # Glitch's 0..6 units come from the RUN's own RNG (see Game.run_rng),
+        # so replaying the run pays the same amount instead of rerolling until
+        # it lands high.
+        return game.run_rng.uniform(0, 6.0)
+    if measure == "fragile_breaks":
+        return 1.0
+    if measure == "few_blocks":
+        return 1.0 if len(game.grid) <= 5 else 0.0
+    if measure == "cozy":
+        return 1.0 if len(getattr(game, "unlocked_cells", set())) <= 10 else 0.0
+    if measure == "painting":
+        return board_sell_total(game)
+    if measure == "synthesizer":
+        return len(game.cards)
+    if measure == "island":
+        return island_group_count(game)
+    return 0.0
+
+
+def _apply_named_card(game, card, value, fx=None, fy=None, units=None):
+    """Pay one named card's payoff, and say whether it paid anything.
+
+    The card's table row gives the scorer, the ratio and the measure (see
+    components.Card.NAMED), and magnitude_payoff turns those into chips / mult /
+    an xMult factor. A whole card has no rolled scorer half, so the scale is
+    always 1.0: a Joker adds exactly +4 mult. A card whose measure came to 0
+    pays nothing and pops nothing. ``fx``/``fy`` place the particle where the
+    run ended (an end-of-run card); with none it pops on the card area.
+    """
+    meta = Card.NAMED.get(value)
+    if meta is None:
+        return False
+    _phase, scorer, ratio, measure = meta
+    if units is None:
+        units = _named_card_units(game, measure)
+    if not units:
+        return False
+    # The three standard bases, at scale 1.0 (a whole card has no scorer half to
+    # roll) — the same arithmetic _apply_unit_card pays for a unit card. The
+    # per-unit chip count is whole, but a fractional unit count (Plane's air
+    # time, Astronaut's black-hole seconds, Explorer's distance) keeps its
+    # fractional payoff: nothing is rounded internally, only the particle text.
+    if scorer == Scorer.CHIPS_ADD:
+        gained = int(30 * ratio + 0.5) * units
+        text, color = game._particle_amount_text(gained), GREEN
+        game.score_chips += gained
+    elif scorer == Scorer.MULT_ADD:
+        gained = 4 * ratio * units
+        text, color = game._particle_amount_text(gained), BLUE
+        game.score_mult += gained
+    else:  # Scorer.MULT_MUL
+        factor = 1 + 0.25 * ratio * units
+        text, color = game._particle_amount_text(factor), RED
+        game._apply_xmult(factor)
+    if fx is None:
+        game._spawn_card_particle(card, text, color)
+    else:
+        game._spawn_score_particle(fx, fy, text, color)
+    return True
+
+
+def apply_card_start(game, card, value):
+    """Apply one card value's start-of-run effect (from ``card``).
+
+    Only the named cards do anything here (see Card.NAMED), and only the ones
+    whose phase is "start": Joker, Pillar, Banker, Glitch, Ripped Card, Cozy,
+    Painting, Synthesizer and Island. `card` is the card that triggers the
+    effect (possibly a Blueprint copying its left neighbour), so the particle
+    appears on that card in the card area.
+    """
+    meta = Card.NAMED.get(value)
+    if meta is None or meta[0] != "start":
+        return
+    _apply_named_card(game, card, value)
 
 
 def _apply_tesseract_bonus(game):
@@ -177,58 +296,44 @@ def effective_card_amount(game, index):
     return getattr(source, "amount", 0) or 0 if source is not None else 0
 
 
-def _condition_units(game, condition):
-    """A named condition's magnitude in card-scorer units this run.
+# ---------------------------------------------------------------------------
+# The per-run measures the named cards scale by (see _named_card_units): the
+# islands the unlocked board units form, the board's total sell value, the
+# distance the marble travelled, the fullest column, the slippery blocks owned,
+# ... A match-group card measures nothing — it pays one standard unit per
+# matching collision.
+#
+# They used to be read through `_condition_units(game, condition)`: one
+# condition id in, a unit count out. The named conditions are whole cards now
+# (see components.Card.NAMED), so that dispatch is _named_card_units above and
+# only the measures themselves are left here.
+# ---------------------------------------------------------------------------
+def island_group_count(game):
+    """How many separate islands the unlocked board units form.
 
-    One unit equals one standard payoff (+30 chips / +4 mult / +0.25 xMult),
-    scaled by the condition's ratio (see components.condition_ratio). Start = 1;
-    Fullest Column = its block count; Distance = 4x the board-travel fraction
-    (so a full board is 4 units, matching Explorer's max x2); Black Hole and
-    Air Time = seconds spent pulled / airborne; Cash Held = dollars held / 10;
-    Slippery = owned slippery blocks; Random = a random 0..6 (0 to 6x base); Few Blocks = 1
-    when the board has 5 blocks or fewer, else 0 (it never fires otherwise);
-    Painting = the board's total sell price in whole dollars (see
-    board_sell_total); Synthesizer = the cards in the card area. A return of 0
-    means the condition did not happen, which is the gate a FLAT card checks
-    (see _condition_fired) and what a magnitude card scales its payoff to.
+    An island is a group of unlocked units that reach each other through shared
+    SIDES (up/down/left/right). Two groups that only touch at a CORNER are
+    different islands — the corner between them is water — so a board cut along
+    a diagonal counts as two. The count is of GROUPS, not units: the starter
+    2x3 region is one island, and so is the whole board once it has been
+    unlocked into one continent. A board with nothing unlocked has none.
+
+    Counted with a flood fill rather than by walking the board in order, so a
+    group is followed around corners of its own shape (an L-shaped island is
+    one, however the rows happen to be ordered).
     """
-    if condition == Condition.START:
-        return 1
-    if condition == Condition.FULLEST_COLUMN:
-        return fullest_column_count(game)
-    if condition == Condition.DISTANCE:
-        return 4 * card_distance_fraction(game)
-    if condition == Condition.BLACK_HOLE:
-        return getattr(game, "black_hole_time", 0.0)
-    if condition == Condition.AIR_TIME:
-        return getattr(game, "air_time", 0.0)
-    if condition == Condition.CASH_HELD:
-        # One unit per $10 held (a card pays per whole $10, mirroring the old
-        # Banker card's "1 chip for every 10 dollars").
-        return max(0, game.cash) // 10
-    if condition == Condition.SLIPPERY:
-        return owned_slippery_block_count(game)
-    if condition == Condition.RANDOM:
-        # Glitch pays a random 0..6 units (between 0 and 6x the base payoff).
-        # The roll comes from the RUN's own RNG (see Game.run_rng), so replaying
-        # the run pays the same amount instead of rerolling until it lands high.
-        return game.run_rng.uniform(0, 6.0)
-    if condition == Condition.FEW_BLOCKS:
-        return 1.0 if len(game.grid) <= 5 else 0.0
-    if condition == Condition.COZY:
-        # One unit (at Cozy's 3x base ratio) when the board has 10 or fewer
-        # unlocked squares; 0 units once the board has been expanded past 10.
-        return 1.0 if len(getattr(game, "unlocked_cells", set())) <= 10 else 0.0
-    if condition == Condition.PAINTING:
-        # One unit per whole dollar of the board's total sell price; Painting's
-        # 1/10 ratio then pays 1/10 of the base per dollar.
-        return board_sell_total(game)
-    if condition == Condition.SYNTHESIZER:
-        # One unit per card in the card area; Synthesizer's 3/4 ratio then pays
-        # +3 mult per card (+22 chips, or x1.1875 per card for the other unit
-        # scorers), so the Synthesizer card is "+3 mult per card owned".
-        return len(game.cards)
-    return 0
+    remaining = set(getattr(game, "unlocked_cells", ()))
+    islands = 0
+    while remaining:
+        islands += 1
+        stack = [remaining.pop()]
+        while stack:
+            x, y = stack.pop()
+            for neighbour in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if neighbour in remaining:
+                    remaining.discard(neighbour)
+                    stack.append(neighbour)
+    return islands
 
 
 def board_sell_total(game):
@@ -249,24 +354,22 @@ def board_sell_total(game):
     return total
 
 
-def _apply_condition_card(game, card, value, scorer, condition, fx, fy, units=None,
-                          amount=None):
-    """Apply a built condition card: the scorer's payoff x the condition's units.
+def _apply_unit_card(game, card, value, scorer, fx, fy, units=None, amount=None):
+    """Apply one match-group card's UNIT-scorer payoff (+Chips/+Mult/xMult).
 
-    Called once at the card's trigger (run start or end, or once per matching
-    collision hit). Every scorer stays proportional to the standard base: chips
-    add round(ratio*30) per unit, +Mult adds ratio*4 per unit, and xMult
-    multiplies the multiplier by (1 + ratio*0.25 per unit) — the xMult per unit
-    is an ADD, never a stack of x1.25s. ``amount`` is the card's own scorer
-    magnitude, which scales the whole payoff (a 45-chip +Chips half pays 45 a
-    unit instead of 30). ``units`` defaults to the condition's measured
-    magnitude (_condition_units); a collision card passes units=1 (one standard
-    payoff per matching hit). Start-phase/collision popups appear on the card in
-    the card area; end-phase popups appear where the run ended.
+    Called once per matching collision (units = 1, see apply_card_on_collision).
+    Every unit scorer stays proportional to the standard base: chips add
+    round(30 * scale) a unit, +Mult adds 4 * scale a unit, and xMult multiplies
+    the multiplier by (1 + 0.25 * scale a unit) — the xMult is an ADD, never a
+    stack of x1.25s. ``amount`` is the card's own scorer magnitude, which scales
+    the whole payoff (a +Chips card rolled to 45 pays 45 a hit instead of 30),
+    and the popup appears on the card in the card area.
     """
     if units is None:
-        units = _condition_units(game, condition)
-    ratio = condition_ratio(condition)
+        units = 1.0
+    # A match-group card pays ONE standard unit per matching hit: the ratio the
+    # old conditions carried (some paid a fraction, some a multiple) is gone.
+    ratio = 1.0
     scale = scorer_magnitude_scale(scorer, amount)
     if scorer == Scorer.CHIPS_ADD:
         per_unit = int(30 * scale * ratio + 0.5)
@@ -330,8 +433,8 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         text, color = game._particle_amount_text(game._apply_xmult(factor)), RED
     elif scorer == Scorer.QUICK:
         # Payoff is deferred: chips come from the speed of the NEXT block the
-        # marble hits after this condition was satisfied (see cards.py on how
-        # the armed card resolves in _handle_block_contacts).
+        # marble hits after this card fired (see cards.py on how the armed card
+        # resolves in _handle_block_contacts).
         armed = getattr(game, "armed_quick", None)
         if armed is not None:
             armed.add(card)
@@ -475,25 +578,10 @@ _BLOCK_PAYOFF_SCORERS = (Scorer.EFFECTIVE, Scorer.SUMMIT, Scorer.AIRBALL,
                          Scorer.COLOSSUS, Scorer.ECHO, Scorer.BOMB)
 
 
-def _condition_fired(game, condition, units=None):
-    """True when a named condition actually happened at this trigger.
-
-    A magnitude (unit-scorer) card scales to zero when its condition measured
-    nothing, so it already pays nothing for an unmet gate. A FLAT card fires
-    one block-style trigger regardless of how much the condition measured, so
-    it has to be told: a Ripped Card (Parts) pays nothing on a board with more
-    than 5 blocks, a Cozy card nothing once the board has grown past 10 units,
-    a Banker card nothing with less than $10 held, and an end-phase card
-    nothing on a run that never travelled / flew / got caught by a black hole.
-
-    Collision and Fragile Breaks triggers are their own gate — the marble hit
-    the block, or the block broke — so they always pass.
-    """
-    if condition_phase(condition) not in ("start", "end"):
-        return True
-    if units is None:
-        units = _condition_units(game, condition)
-    return units > 0
+# The gate a card used to check ("did the condition happen at all") is gone: a
+# named card's own unit count IS its gate (a Ripped Card on a board of six
+# blocks measures 0 and pays nothing — see _named_card_units), and a match-group
+# card's gate is the collision itself (match_group_matches_block).
 
 
 def _fire_card_scorer(game, card, scorer, amount=None, block=None, marble=None,
@@ -695,65 +783,14 @@ def _fire_airball(game, card, air_streak, fx=None, fy=None, block=None, amount=N
         game._spawn_score_particle(fx, fy, text, color)
 
 
-def fire_first_block_cards(game, block, marble=None):
-    """Fire start-condition cards whose payoff reads a block.
-
-    A start-phase block-relative card cannot decide at run start (no block has
-    been hit yet), so main.py calls this once the run's first block is
-    contacted. Each such card resolves with that block as its reference block:
-    Effective grants its xMult when that first block has 2+ effects, Summit
-    grants its mult per row it sits above the bottom row, Airball its mult per
-    second of ``marble``'s airborne streak before the touch, Powerline its
-    chips per block in that block's row, and so on (see _fire_block_payoff).
-    """
-    for i, card in enumerate(game.cards):
-        if _card_disabled(game, card):
-            continue
-        value = effective_card_value(game, i)
-        gmeta = generic_card_meta(value)
-        if gmeta is not None:
-            condition, scorer = gmeta
-            if condition_phase(condition) != "start":
-                continue
-            amount = effective_card_amount(game, i)
-            if scorer not in _BLOCK_PAYOFF_SCORERS:
-                continue  # it waits for a block (see _fire_card_scorer)
-            if not _condition_fired(game, condition):
-                continue  # the start condition did not happen this run
-            _fire_card_scorer(game, card, scorer, amount, block=block, marble=marble)
-
-
-def apply_card_start(game, card, value, amount=None):
-    """Apply one card value's start-of-run score effect (from ``card``).
-
-    Magnitude cards whose condition fires at the start of the run apply their
-    scaled payoff; generic flat-scorer start cards fire their scorer once, and
-    only while their condition's gate is met (see _condition_fired — a Ripped
-    Card pays nothing on a board with more than 5 blocks). Effective/Summit
-    start cards wait for the run's first block (see fire_first_block_cards).
-    The whole cards (ERR 404 / Blueprint / Showman)
-    do nothing here — Blueprints are resolved by ``effective_card_value`` and
-    Showman only enables buying duplicates. ``card`` is the card that triggers
-    the effect (possibly a Blueprint copying a neighbor), so its popup appears
-    on that card in the card area. ``value`` is the effective card value, and
-    ``amount`` the effective scorer magnitude it pays with.
-    """
-    meta = condition_card_meta(value)
-    if meta is not None:
-        trigger, scorer, condition = meta
-        if trigger == "start":
-            _apply_condition_card(game, card, value, scorer, condition, None, None,
-                                  amount=amount)
-        return
-    gmeta = generic_card_meta(value)
-    if gmeta is not None:
-        condition, scorer = gmeta
-        # A flat card pays one block-style trigger, so it only fires when the
-        # condition actually measured something (see _condition_fired).
-        if (condition_phase(condition) == "start"
-                and scorer not in _BLOCK_PAYOFF_SCORERS
-                and _condition_fired(game, condition)):
-            _fire_flat_scorer(game, card, scorer, amount=amount)
+# The start-of-run path is live again for the named cards (apply_cards /
+# apply_card_start, at the top of this file). What is NOT back is
+# `fire_first_block_cards`: it existed because a start-phase card could carry a
+# BLOCK-relative flat scorer (Effective, Summit, Airball, ...), which cannot
+# decide at run start because no block has been hit yet. No named card reads a
+# block — they read the run's board, cash, cards and time — so nothing waits for
+# the first block any more, and a match-group card fires on a collision when it
+# needs a block (see _BLOCK_PAYOFF_SCORERS).
 
 
 def _block_feeds_collision_cards(block):
@@ -783,16 +820,17 @@ def _block_feeds_collision_cards(block):
 def apply_card_on_collision(game, block, marble=None):
     """Apply owned cards when the marble collides with a block.
 
-    Collision-condition cards matching the block's shape or any of its effects
-    fire: a magnitude (unit scorer) card adds +30 chips / +4 mult / x1.25 mult,
-    and a generic card fires its scorer (Cash, Sharp, Quick, a resource point,
-    or any board/run/block-relative scorer — the collided block is the card's
-    reference block). A card only fires while the collided block can still spend
-    a trigger (see _block_feeds_collision_cards), so a block feeds cards once
-    per trigger it has. A Blueprint copies the card to its immediate left; a
-    card disabled by the Card cutter trial is skipped. Called once per fresh
-    collision (the marble newly entering contact with the block). ``marble``
-    is the touching marble (an Airball card rewards its airborne streak).
+    Every card is built on a MATCH GROUP — a group of shapes, or one effect — so
+    this fires each owned card whose group matches the collided block: a unit
+    scorer (+Chips/+Mult/xMult) pays one standard unit, and every other scorer
+    fires one block-style trigger (Cash, Sharp, Quick, a resource point, or any
+    board/run/block-relative scorer, with the collided block as its reference
+    block). A card only fires while the collided block can still spend a trigger
+    (see _block_feeds_collision_cards), so a block feeds cards once per trigger
+    it has. A Blueprint copies the card to its immediate left; a card disabled
+    by the Card cutter or Deal breaker trial is skipped. Called once per fresh
+    collision (the marble newly entering contact with the block). ``marble`` is
+    the touching marble (an Airball card rewards its airborne streak).
     """
     if not _block_feeds_collision_cards(block):
         return
@@ -802,23 +840,30 @@ def apply_card_on_collision(game, block, marble=None):
         value = effective_card_value(game, i)
         if value is None:
             continue
-        amount = effective_card_amount(game, i)
-        meta = condition_card_meta(value)
-        if meta is not None:
-            trigger, scorer, condition = meta
-            if trigger == "collision" and condition_matches_block(condition, block):
-                _apply_condition_card(game, card, value, scorer, condition, None, None,
-                                      units=1.0, amount=amount)
+        meta = match_group_card_meta(value)
+        if meta is None:
+            # A card that is not built on a match group is passive: it pays
+            # nothing on a collision (Coupon, Tesseract, Showman, ...).
             continue
-        gmeta = generic_card_meta(value)
-        if gmeta is not None:
-            condition, scorer = gmeta
-            if (condition_phase(condition) == "collision"
-                    and condition_matches_block(condition, block)):
-                _fire_card_scorer(game, card, scorer, amount, block=block,
-                                  marble=marble)
+        group, scorer = meta
+        if not match_group_matches_block(group, block):
+            continue
+        amount = effective_card_amount(game, i)
+        if scorer in UNIT_CARD_SCORERS:
+            _apply_unit_card(game, card, value, scorer, None, None, units=1.0,
+                             amount=amount)
+        else:
+            _fire_card_scorer(game, card, scorer, amount, block=block,
+                              marble=marble)
 
 
+# ---------------------------------------------------------------------------
+# The moments that are NOT a collision: the end of the run and a fragile block
+# breaking. The named cards that fire then are Explorer, Astronaut, Plane and
+# Skater (at the end) and Wrecking Ball (on each break); main.py calls
+# apply_cards_on_finish once the run is over and on_fragile_broken from the
+# block-shatter path.
+# ---------------------------------------------------------------------------
 def run_finish_pos(game):
     """A screen position where the run ended, for the end-of-run popup.
 
@@ -834,10 +879,15 @@ def run_finish_pos(game):
 
 
 def apply_cards_on_finish(game):
-    """Apply owned cards that trigger when a run ends (e.g. Explorer).
+    """Apply the end-of-run card effects.
 
-    A Blueprint copies the card to its immediate left; a card disabled by the
-    Card cutter trial is skipped (and can't be copied either).
+    The named cards whose phase is "end" pay here — Explorer's distance xMult,
+    Astronaut's black-hole mult, Plane's air-time chips and Skater's slippery
+    xMult — because their measures are only final once the marbles have
+    stopped. A Blueprint copies the card to its immediate left; a card disabled
+    by the Card cutter or Deal breaker trial is skipped (and can't be copied
+    either). Their popups appear where the run ended (on the finished marble),
+    so they are visible instead of lost at the top-of-screen card area.
     """
     fx, fy = run_finish_pos(game)
     for i, card in enumerate(game.cards):
@@ -845,58 +895,29 @@ def apply_cards_on_finish(game):
             continue
         value = effective_card_value(game, i)
         if value is not None:
-            apply_card_finish(game, card, value, fx, fy, effective_card_amount(game, i))
+            apply_card_finish(game, card, value, fx, fy)
 
 
-def apply_card_finish(game, card, value, fx, fy, amount=None):
-    """Apply one card value's end-of-run score effect (from ``card``).
+def apply_card_finish(game, card, value, fx, fy):
+    """Apply one card value's end-of-run effect (from ``card``).
 
-    Holds the multiplicative (xMult) cards plus the additive cards whose
-    values are only known once the run is over (Astronaut's black-hole time,
-    Plane's air time). A flat end card whose condition measured nothing this
-    run does not fire at all (see _condition_fired). End-of-run popups appear
-    where the run ended (on the
-    finished marble), so they are visible instead of lost at the top-of-screen
-    card area.
+    Only the named cards do anything here, and only the ones whose phase is
+    "end" (see components.Card.NAMED). Every other card is either a start or a
+    fragile-break card, a collision card, or one of the passive whole cards
+    (ERR 404 / Blueprint / Showman / Coupon / ...), which do nothing at the end
+    of a run.
     """
-    meta = condition_card_meta(value)
-    if meta is not None:
-        trigger, scorer, condition = meta
-        if trigger == "end":
-            _apply_condition_card(game, card, value, scorer, condition, fx, fy,
-                                  amount=amount)
+    meta = Card.NAMED.get(value)
+    if meta is None or meta[0] != "end":
         return
-    gmeta = generic_card_meta(value)
-    if gmeta is not None:
-        condition, scorer = gmeta
-        if condition_phase(condition) == "end":
-            # The run has to have measured something for the end condition to
-            # have happened at all (see _condition_fired).
-            if not _condition_fired(game, condition):
-                return
-            if scorer == Scorer.QUICK:
-                # There is no NEXT block after the run, so an end-condition
-                # Quick card pays from the speed of the run's LAST block
-                # contact instead of arming for a next one.
-                _fire_quick_card(game, card,
-                                 getattr(game, "_last_contact_speed", 0.0), fx, fy)
-            else:
-                # An End-condition block-relative card checks the last block the
-                # marble hit before finishing (Airball also rewards the
-                # airborne streak that marble had before that touch).
-                _fire_card_scorer(game, card, scorer, amount,
-                                  block=getattr(game, "_last_contact_block", None),
-                                  air=getattr(game, "_last_contact_air", 0.0),
-                                  fx=fx, fy=fy)
-        return
-    # The whole cards (ERR 404 / Blueprint / Showman) do nothing at run end.
+    _apply_named_card(game, card, value, fx, fy)
 
 
 def card_distance_fraction(game):
     """The fraction of the marble box's total grid units the marble(s) travelled.
 
-    A Distance-condition magnitude card's units are 4x this fraction (so a full
-    board is 4 units of payoff).
+    Explorer's units are 4x this fraction (so a full board is 4 units, i.e. the
+    x2 the card tops out at).
     """
     total_px = sum(getattr(m, "distance", 0.0) for m in game.marbles)
     total_grid_units = GRID_WIDTH * GRID_HEIGHT
@@ -913,25 +934,6 @@ def fullest_column_count(game):
     for (gx, _) in game.grid:
         counts[gx] = counts.get(gx, 0) + 1
     return max(counts.values()) if counts else 0
-
-
-def fullest_column_block(game):
-    """A block in the marble box's fullest column (Pillar's trigger block).
-
-    Returns the first block found in the column with the most blocks, or None
-    when the board is empty. A block-based card's particle should appear near
-    this block instead of in the card area.
-    """
-    counts = {}
-    first_in_column = {}
-    for (gx, _), block in game.grid.items():
-        if gx not in counts:
-            first_in_column[gx] = block
-        counts[gx] = counts.get(gx, 0) + 1
-    if not counts:
-        return None
-    fullest = max(counts, key=counts.get)
-    return first_in_column[fullest]
 
 
 def owned_slippery_block_count(game):
@@ -952,47 +954,32 @@ def owned_slippery_block_count(game):
 
 
 def on_fragile_broken(game, block):
-    """A fragile block broke: Fragile Breaks (Wrecking Ball) cards fire.
+    """A fragile block broke: Wrecking Ball cards fire.
 
-    A Fragile Breaks magnitude card permanently grows its saved bonus by 3/4 of
-    its scorer's base per break (+3 mult / +23 chips / x1.19). The gain applies
-    live to the running score and is banked into the per-run gain, which only
-    becomes permanent after a run — retrying discards it. Generic Fragile
-    Breaks flat cards (Cash, Sharp, Quick, resource) fire their scorer once
-    per break too.
+    The Wrecking Ball card permanently grows its saved bonus by +3 mult a break
+    (its table row: ratio 0.75 of the +4 mult base — see components.Card.NAMED).
+    The gain applies live to the running score and is banked into the per-run
+    gain, which only becomes permanent when the run is continued — retrying
+    discards it (main._commit_wrecking_run_gain / _reset_wrecking_run_gain). A
+    Blueprint copy plays the card it sits next to, so it banks a second +3.
     """
     for i, card in enumerate(game.cards):
         if _card_disabled(game, card):
             continue
-        value = effective_card_value(game, i)
-        amount = effective_card_amount(game, i)
-        meta = condition_card_meta(value)
-        if meta is not None:
-            _trigger, scorer, condition = meta
-            if condition == Condition.FRAGILE_BREAKS:
-                _accumulate_wrecking_break(game, card, scorer, block, amount=amount)
-            continue
-        gmeta = generic_card_meta(value)
-        if gmeta is not None:
-            condition, scorer = gmeta
-            if condition == Condition.FRAGILE_BREAKS:
-                _fire_card_scorer(game, card, scorer, amount, block=block,
-                                  air=getattr(block, "touch_air_streak", 0.0))
+        if effective_card_value(game, i) == Card.WRECKING_BALL:
+            _accumulate_wrecking_break(game, card, block)
 
 
-def _accumulate_wrecking_break(game, card, scorer, block, amount=None):
-    """A Fragile Breaks (Wrecking Ball) magnitude card earned one break.
+def _accumulate_wrecking_break(game, card, block):
+    """A Wrecking Ball card earned one break: +3 mult, live and banked.
 
-    Each break adds 3/4 of the scorer's OWN magnitude to the card's permanent
-    reward: +3 mult (0.75 x 4), +23 chips (0.75 x 30, rounded up), and x1.19
-    mult (multiplies by 1 + 0.75 x 0.25) at the averages — so a Wrecking Ball
-    whose +Mult half rolled to 6 banks +4.5 a break instead of +3. The gain
-    applies live to the running score and is banked into the per-run gain,
-    which is folded into the permanent saved bonus only after a run.
+    The gain is the card's own payoff (magnitude_payoff of its table row at one
+    unit), so the number that pops, the score it adds and the amount it banks
+    can never drift apart. It applies to the running score only while the run is
+    active — a break outside a run (a board edit) still banks for the next one.
     """
-    ratio = 0.75
-    scale = scorer_magnitude_scale(scorer, amount)
-    chips, mult, factor = magnitude_payoff(scorer, ratio, 1.0, scale)
+    _phase, scorer, ratio, _measure = Card.NAMED[Card.WRECKING_BALL]
+    chips, mult, factor = magnitude_payoff(scorer, ratio, 1.0)
     if scorer == Scorer.CHIPS_ADD:
         text, color = str(chips), GREEN
     elif scorer == Scorer.MULT_ADD:

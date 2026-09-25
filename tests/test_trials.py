@@ -254,14 +254,15 @@ class TrialsTests(GameTestCase):
         # the trial (R, T, a retry) must not shuffle the cards a second time, or
         # the player could keep re-rolling the order (and the Blueprint that
         # depends on it) for free.
-        self.game.cards = [main.CardItem(value, 40) for value in
-                           (main.Card.JOKER, main.Card.MINESHAFT,
-                            main.Card.COUPON, main.Card.MARKET)]
+        values = [main.match_group_card(main.match_group_for_shape(shape),
+                                        main.Scorer.MULT_ADD)
+                  for shape in (main.Shape.PIPE, main.Shape.SLOPE)]
+        values += [main.Card.COUPON, main.Card.MARKET]
+        self.game.cards = [main.CardItem(value, 40) for value in values]
         self.game.current_trial = main.Trial.SHUFFLED
         self.game._apply_trial()
         order = [card.value for card in self.game.cards]
-        self.assertCountEqual(order, (main.Card.JOKER, main.Card.MINESHAFT,
-                                      main.Card.COUPON, main.Card.MARKET))
+        self.assertCountEqual(order, values)
         for _ in range(3):
             self.game._apply_trial()
             self.assertEqual([card.value for card in self.game.cards], order)

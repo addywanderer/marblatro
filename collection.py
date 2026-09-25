@@ -27,7 +27,7 @@ ALWAYS_DISCOVERED_COMPONENTS = frozenset({
     (components.Component.SCORER, components.Scorer.FINISH),
 })
 
-_DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "conditions": set, "trials": set, "final_bosses": set}
+_DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "match_groups": set, "trials": set, "final_bosses": set}
 
 
 def _load():
@@ -36,14 +36,14 @@ def _load():
     if _DATA is not None:
         return
     _DATA = {"cards": set(), "actions": set(), "components": set(),
-             "conditions": set(), "trials": set(), "final_bosses": set()}
+             "match_groups": set(), "trials": set(), "final_bosses": set()}
     try:
         with open(FILE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
         _DATA["cards"] = set(data.get("cards", []))
         _DATA["actions"] = set(data.get("actions", []))
         _DATA["components"] = {(k, v) for k, v in data.get("components", [])}
-        _DATA["conditions"] = set(data.get("conditions", []))
+        _DATA["match_groups"] = set(data.get("match_groups", []))
         _DATA["trials"] = set(data.get("trials", []))
         _DATA["final_bosses"] = set(data.get("final_bosses", []))
     except (OSError, ValueError):
@@ -58,7 +58,7 @@ def _save():
             "cards": sorted(_DATA["cards"]),
             "actions": sorted(_DATA["actions"]),
             "components": sorted([list(c) for c in _DATA["components"]]),
-            "conditions": sorted(_DATA["conditions"]),
+            "match_groups": sorted(_DATA["match_groups"]),
             "trials": sorted(_DATA["trials"]),
             "final_bosses": sorted(_DATA["final_bosses"]),
         }, f)
@@ -101,14 +101,31 @@ def discover_component(kind, value):
     return True
 
 
-def discover_condition(value):
-    """Record a discovered condition; returns True only if it was new."""
+def discover_match_group(index):
+    """Record a discovered match group (a shape group or an effect); True if new.
+
+    A match group is a card's trigger half (see components' MATCH GROUPS
+    section), recorded by its index in components.MATCH_GROUPS.
+    """
     _load()
-    if value in _DATA["conditions"]:
+    if index in _DATA["match_groups"]:
         return False
-    _DATA["conditions"].add(value)
+    _DATA["match_groups"].add(index)
     _save()
     return True
+
+
+# COMMENTED OUT with the conditions (user request: "comment out all the code for
+# conditions"): the condition codex entry, replaced by the match-group one above.
+#
+# def discover_condition(value):
+#     """Record a discovered condition; returns True only if it was new."""
+#     _load()
+#     if value in _DATA["conditions"]:
+#         return False
+#     _DATA["conditions"].add(value)
+#     _save()
+#     return True
 
 
 def discover_trial(value):
@@ -147,9 +164,16 @@ def is_component_discovered(kind, value):
             or (kind, value) in _DATA["components"])
 
 
-def is_condition_discovered(value):
+def is_match_group_discovered(index):
     _load()
-    return value in _DATA["conditions"]
+    return index in _DATA["match_groups"]
+
+
+# COMMENTED OUT with the conditions: the condition lookup, replaced above.
+#
+# def is_condition_discovered(value):
+#     _load()
+#     return value in _DATA["conditions"]
 
 
 def is_trial_discovered(value):

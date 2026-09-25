@@ -140,21 +140,19 @@ def block_borders_on():
     return _ui_source.BLOCK_BORDERS_ON
 
 from components import (
+    MATCH_GROUPS,
     Action,
     Card,
     Component,
-    Condition,
     Effect,
     FinalBoss,
+    Rarity,
     Scorer,
     Shape,
     Trial,
-    condition_color,
-    condition_effect,
-    condition_glyph,
-    condition_shape,
+    match_group_card_meta,
+    match_group_label,
     shade,
-    splittable_card_condition_scorer,
 )
 
 
@@ -362,12 +360,15 @@ def draw_shop_item(screen, item, rect):
     elif item.kind == Component.SCORER:
         pygame.draw.rect(screen, Scorer.color(item.value), rect)
         pygame.draw.rect(screen, WHITE, rect, 2)
-    elif item.kind == Component.CONDITION:
-        # A condition is a trigger tile: its white face with a center mini
-        # shape/effect (collision conditions) or letter glyph (named ones).
-        pygame.draw.rect(screen, condition_color(item.value), rect)
-        pygame.draw.rect(screen, WHITE, rect, 2)
-        _draw_condition_center(screen, item.value, rect)
+    # COMMENTED OUT with the conditions: a condition component was drawn as a
+    # trigger tile (a white face with a mini shape/effect or a letter glyph).
+    #
+    # elif item.kind == Component.CONDITION:
+    #     # A condition is a trigger tile: its white face with a center mini
+    #     # shape/effect (collision conditions) or letter glyph (named ones).
+    #     pygame.draw.rect(screen, condition_color(item.value), rect)
+    #     pygame.draw.rect(screen, WHITE, rect, 2)
+    #     _draw_condition_center(screen, item.value, rect)
     elif getattr(item, "kind", None) == "card":
         draw_card(screen, item, rect)
     elif getattr(item, "kind", None) == "action":
@@ -437,6 +438,14 @@ def _icon_art_drawers(art, ink=_ICON_INK):
     return circle, rect, outline, line, polygon, arc
 
 
+# ---------------------------------------------------------------------------
+# PARKED HISTORY: the name-based icon art for the fourteen named conditions,
+# kept verbatim in the codebase's parked-code style. The fourteen named CARDS
+# wear these very drawings now — they are LIVE in _build_whole_card_art above,
+# which is the copy to edit (each branch there is keyed on the card id instead
+# of the condition id); this string is the condition-era original.
+# ---------------------------------------------------------------------------
+_COMMENTED_OUT_NAMED_CONDITION_ART = r'''
 def _build_named_condition_art(condition):
     """Draw the name-based icon art for a NAMED condition (a fresh surface)."""
     art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
@@ -501,6 +510,22 @@ def _build_named_condition_art(condition):
            (10, 23), (8, 28), (7, 24), (7, 9)])
         p([(23, 9), (33, 9), (33, 24), (31, 28), (30, 23), (28, 28),
            (26, 22), (24, 28), (23, 22), (23, 9)])
+    elif condition == Condition.ISLAND:       # Island -> a palm on a lone island
+        # The island is a mound sitting on the waterline, with a palm on it and
+        # open water on both sides — one small group of land, which is exactly
+        # what the card counts on the board. The palm's fronds are thin lines
+        # rather than shapes: drawn as filled polygons they merge with the
+        # trunk into one blob at icon size, while four strokes radiating from
+        # the crown read as a palm tree.
+        p([(6, 30), (12, 24), (28, 24), (34, 30)])   # the mound
+        r(6, 29, 28, 3)                 # its flat top
+        l(4, 36, 15, 36, 2)             # water (left)
+        l(25, 36, 36, 36, 2)            # water (right)
+        l(20, 29, 20, 11, 3)            # the palm's trunk
+        l(20, 12, 9, 6, 3)              # frond (up-left)
+        l(20, 12, 31, 6, 3)             # frond (up-right)
+        l(20, 13, 13, 18, 3)            # frond (low-left)
+        l(20, 13, 27, 18, 3)            # frond (low-right)
     elif condition == Condition.COZY:         # Cozy -> a small warm house
         p([(7, 20), (20, 9), (33, 20)])
         r(12, 20, 16, 14)
@@ -525,6 +550,8 @@ def _build_named_condition_art(condition):
         r(20, 21, 3, 8)
         r(28, 21, 3, 8)
     return art
+'''
+# --- end of the commented-out named-condition art ----------------------------
 
 
 def _build_action_art(action):
@@ -582,6 +609,14 @@ def _build_action_art(action):
            (18, 27), (14, 33), (10, 27), (10, 20), (11, 11)])
         punch_circle(16, 17, 3)         # eyes, cut out of the body
         punch_circle(24, 17, 3)
+    elif action == Action.CLEANSWEEP:         # a broom sweeping cards away
+        p([(30, 2), (34, 6), (22, 21), (18, 18)])   # the handle
+        p([(22, 21), (13, 31), (29, 32)])           # the broom head
+        r(12, 31, 18, 3)                # its flat edge
+        for i in range(5):              # ...and its bristles
+            r(13 + i * 4, 34, 2, 5)
+        rr(3, 5, 9, 12, 2)              # a card being swept away
+        rr(2, 21, 9, 12, 2)             # ...and another
     return art
 
 
@@ -938,7 +973,7 @@ def _trial_background(trial):
 
 
 def panel_fill(game):
-    """The fill for the board, inventory and shop panels of a run.
+    """The fill for the board, inventory, shop and info-box panels of a run.
 
     While a trial is running these panels are filled with that trial's tile
     colour, a little lighter (components.Trial.panel_color), so the play areas
@@ -981,10 +1016,114 @@ def draw_background(game):
 
 
 def _build_whole_card_art(card):
-    """Draw the name-based icon art for an indivisible whole card."""
+    """Draw the name-based icon art for an indivisible whole card.
+
+    The named cards' art is the art their named conditions were drawn with (the
+    Joker's jester hat, the Explorer's compass rose, the Pillar's column, ...),
+    so the classic cards look the way they always did.
+    """
     art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
     c, r, rr, l, p, _arc = _icon_art_drawers(art)
-    if card == Card.ERR_404:                  # a card that was not found
+    if card == Card.JOKER:                    # a jester's hat
+        p([(20, 3), (14, 19), (26, 19)])
+        p([(6, 10), (10, 19), (17, 19)])
+        p([(34, 10), (30, 19), (23, 19)])
+        r(5, 19, 30, 4)
+        c(8, 25, 3)
+        c(32, 25, 3)
+    elif card == Card.EXPLORER:               # a compass rose
+        p([(20, 4), (15, 19), (25, 19)])
+        p([(20, 36), (15, 21), (25, 21)])
+        p([(36, 20), (21, 15), (21, 25)])
+        p([(4, 20), (19, 15), (19, 25)])
+        c(20, 20, 2)
+    elif card == Card.ASTRONAUT:              # a suited astronaut figure
+        c(20, 9, 5)                     # helmet (filled)
+        r(14, 13, 12, 9)                # torso
+        l(14, 15, 10, 21, 3)            # arm (left)
+        l(26, 15, 30, 21, 3)            # arm (right)
+        r(16, 22, 3, 7)                 # leg (left)
+        r(21, 22, 3, 7)                 # leg (right)
+        l(20, 4, 20, 1, 2)              # antenna
+    elif card == Card.PLANE:                  # a paper plane
+        p([(36, 10), (6, 27), (21, 33)])
+        p([(36, 10), (21, 33), (11, 25)])
+    elif card == Card.PILLAR:                 # a fluted column
+        r(10, 4, 20, 3)                 # abacus
+        p([(13, 7), (27, 7), (29, 13), (11, 13)])  # capital (flares down)
+        l(15, 13, 15, 26, 2)            # shaft flute
+        l(20, 13, 20, 26, 2)            # shaft flute
+        l(25, 13, 25, 26, 2)            # shaft flute
+        p([(11, 26), (29, 26), (31, 30), (9, 30)])  # base (flares down)
+        r(8, 30, 24, 4)                 # plinth
+    elif card == Card.BANKER:                 # a coin
+        c(20, 20, 13, 4)                # raised edge
+        c(20, 20, 9, 2)                 # inner rim
+    elif card == Card.WRECKING_BALL:          # a ball smashing a wall
+        r(30, 6, 6, 28)                 # the wall being broken
+        l(32, 12, 34, 16, 2)            # cracks in the wall
+        l(34, 16, 31, 21, 2)
+        l(31, 21, 33, 25, 2)
+        l(15, 4, 20, 11, 2)             # chain from a crane
+        c(20, 20, 9)                    # the heavy ball
+        l(4, 14, 10, 16, 2)             # motion lines behind the swing
+        l(3, 22, 9, 23, 2)
+    elif card == Card.SKATER:                 # a skateboard
+        pygame.draw.rect(art, _ICON_INK, (6, 14, 28, 6), border_radius=3)  # deck
+        c(13, 26, 3)                    # wheel (back)
+        c(29, 26, 3)                    # wheel (front)
+        l(20, 20, 20, 23, 2)            # truck between the wheels
+    elif card == Card.GLITCH:                 # corrupted scan bars
+        r(6, 8, 27, 5)                  # long bar
+        r(5, 17, 12, 5)                 # middle row is split by a gap
+        r(23, 17, 10, 5)
+        r(13, 26, 22, 5)                # lower bar
+    elif card == Card.RIPPED_CARD:            # a card torn in two
+        # Two separated card halves whose facing edges are jagged tears.
+        p([(7, 9), (18, 9), (18, 22), (16, 28), (14, 22), (12, 28),
+           (10, 23), (8, 28), (7, 24), (7, 9)])
+        p([(23, 9), (33, 9), (33, 24), (31, 28), (30, 23), (28, 28),
+           (26, 22), (24, 28), (23, 22), (23, 9)])
+    elif card == Card.ISLAND:                 # a palm on a lone island
+        # The island is a mound sitting on the waterline, with a palm on it and
+        # open water on both sides — one small group of land, which is exactly
+        # what the card counts on the board. The palm's fronds are thin lines
+        # rather than shapes: drawn as filled polygons they merge with the
+        # trunk into one blob at icon size, while four strokes radiating from
+        # the crown read as a palm tree.
+        p([(6, 30), (12, 24), (28, 24), (34, 30)])   # the mound
+        r(6, 29, 28, 3)                 # its flat top
+        l(4, 36, 15, 36, 2)             # water (left)
+        l(25, 36, 36, 36, 2)            # water (right)
+        l(20, 29, 20, 11, 3)            # the palm's trunk
+        l(20, 12, 9, 6, 3)              # frond (up-left)
+        l(20, 12, 31, 6, 3)             # frond (up-right)
+        l(20, 13, 13, 18, 3)            # frond (low-left)
+        l(20, 13, 27, 18, 3)            # frond (low-right)
+    elif card == Card.COZY:                   # a small warm house
+        p([(7, 20), (20, 9), (33, 20)])
+        r(12, 20, 16, 14)
+        r(24, 11, 5, 9)
+        c(26, 8, 2)
+        c(30, 5, 2)
+    elif card == Card.PAINTING:               # a canvas on an easel
+        rr(8, 6, 24, 19, 3)             # canvas
+        p([(13, 22), (20, 12), (27, 22)])   # a painted landscape on it
+        c(25, 11, 2)                    # a painted sun
+        l(20, 25, 13, 37, 3)            # easel leg (left)
+        l(20, 25, 27, 37, 3)            # easel leg (right)
+        l(20, 25, 20, 33, 2)            # easel leg (centre)
+    elif card == Card.SYNTHESIZER:            # a waveform over a keyboard
+        l(5, 13, 11, 6, 2)              # the waveform it generates
+        l(11, 6, 17, 16, 2)
+        l(17, 16, 23, 6, 2)
+        l(23, 6, 29, 16, 2)
+        l(29, 16, 35, 9, 2)
+        rr(5, 21, 30, 13, 2)            # the keyboard body
+        r(12, 21, 3, 8)                 # black keys
+        r(20, 21, 3, 8)
+        r(28, 21, 3, 8)
+    elif card == Card.ERR_404:                # a card that was not found
         rr(11, 8, 18, 24, 3)
         l(15, 12, 25, 28, 3)
         l(25, 12, 15, 28, 3)
@@ -1125,15 +1264,18 @@ def _build_whole_card_art(card):
     return art
 
 
-def _named_condition_art(condition):
-    """The cached 40x40 art icon for a named condition (None when unknown)."""
-    if condition not in Condition.NAMES:
-        return None
-    art = _ICON_ART_CACHE.get(("cond", condition))
-    if art is None:
-        art = _build_named_condition_art(condition)
-        _ICON_ART_CACHE[("cond", condition)] = art
-    return art
+# COMMENTED OUT with the conditions: the cached-art and drawing wrappers for
+# the named conditions above.
+#
+# def _named_condition_art(condition):
+#     """The cached 40x40 art icon for a named condition (None when unknown)."""
+#     if condition not in Condition.NAMES:
+#         return None
+#     art = _ICON_ART_CACHE.get(("cond", condition))
+#     if art is None:
+#         art = _build_named_condition_art(condition)
+#         _ICON_ART_CACHE[("cond", condition)] = art
+#     return art
 
 
 def _whole_card_art(card):
@@ -1173,10 +1315,13 @@ def _blit_icon_art(surface, art, center, size):
     return True
 
 
-def _draw_named_condition_icon(surface, condition, center, size):
-    """Blit a named condition's name-based icon (scaled) onto ``surface``."""
-    return _blit_icon_art(surface, _named_condition_art(condition),
-                          center, size)
+# COMMENTED OUT with the conditions: the named-condition icon blitter and the
+# condition-tile center art (a mini shape/effect, or the named icon above).
+#
+# def _draw_named_condition_icon(surface, condition, center, size):
+#     """Blit a named condition's name-based icon (scaled) onto ``surface``."""
+#     return _blit_icon_art(surface, _named_condition_art(condition),
+#                           center, size)
 
 
 def _draw_whole_card_icon(surface, card, center, size):
@@ -1184,51 +1329,68 @@ def _draw_whole_card_icon(surface, card, center, size):
     return _blit_icon_art(surface, _whole_card_art(card), center, size)
 
 
-def _draw_condition_center(screen, condition, rect):
-    """A condition tile's center art: a mini image of the shape/effect a
-    collision condition acts on, or a name-based icon for the named ones (the
-    Joker's jester hat, the Pillar condition's pillar, ...)."""
-    shape = condition_shape(condition)
-    effect = condition_effect(condition)
-    if shape is None and effect is None:
-        # A named condition carries a small icon drawn from its name; the old
-        # letter glyph remains only as a fallback for an unknown condition.
-        if _draw_named_condition_icon(
-                screen, condition, center=rect.center,
-                size=max(6, int(rect.width * 0.66))):
-            return
-        glyph = font("tile").render(condition_glyph(condition), True, BLACK)
-        screen.blit(glyph, glyph.get_rect(center=rect.center))
-        return
-    _draw_condition_mini(screen, shape=shape, effect=effect,
-                         center=rect.center, size=max(6, int(rect.width * 0.66)))
+# COMMENTED OUT with the conditions: the condition-tile center art. A tile used
+# to show a mini shape/effect (a collision condition) or the named condition's
+# icon; the mini shape/effect drawer survives as _draw_condition_mini, which a
+# match-group card uses for its own icon.
+#
+# def _draw_condition_center(screen, condition, rect):
+#     """A condition tile's center art: a mini image of the shape/effect a
+#     collision condition acts on, or a name-based icon for the named ones (the
+#     Joker's jester hat, the Pillar condition's pillar, ...)."""
+#     shape = condition_shape(condition)
+#     effect = condition_effect(condition)
+#     if shape is None and effect is None:
+#         if _draw_named_condition_icon(
+#                 screen, condition, center=rect.center,
+#                 size=max(6, int(rect.width * 0.66))):
+#             return
+#         glyph = font("tile").render(condition_glyph(condition), True, BLACK)
+#         screen.blit(glyph, glyph.get_rect(center=rect.center))
+#         return
+#     _draw_condition_mini(screen, shape=shape, effect=effect,
+#                          center=rect.center, size=max(6, int(rect.width * 0.66)))
+
+
+def _draw_match_group_mini(screen, group, center, size):
+    """Draw a match group's art: a mini shape (its first member) or effect.
+
+    The group is what the card triggers on, so it is what the card's face
+    shows, exactly as a splittable card used to show its condition. A shape
+    group draws its FIRST member as the plain-block silhouette (a Pipe group
+    shows a pipe; the other members are named in the card's text), and the
+    No Shape group draws nothing at all, so the caller falls back to the card's
+    letter glyph.
+    """
+    kind, values = group
+    if kind == "effect":
+        _draw_condition_mini(screen, shape=None, effect=values[0],
+                             center=center, size=size)
+        return True
+    if values == (Shape.NONE,):
+        return False
+    _draw_condition_mini(screen, shape=values[0], effect=None,
+                         center=center, size=size)
+    return True
 
 
 def _draw_card_icon(screen, value, rect):
     """Draw a card's center art.
 
-    A splittable card (a condition + scorer combo) shows its CONDITION's icon:
-    a mini image of the shape/effect a collision condition acts on, or the
-    named condition's name-based icon (a jester hat for the Joker, ...). Every
-    indivisible whole card (ERR 404, Blueprint, Showman, ... the Essence card's
-    stoppered vial) shows its own name-based icon too, and only an id with no
-    art at all falls back to its letter glyph.
+    A match-group card shows its GROUP's icon: a mini image of the first shape
+    in the group, or of the effect it triggers on (see _draw_match_group_mini).
+    Every card that is not built on a group (ERR 404, Blueprint, Showman, ...
+    the Essence card's stoppered vial) shows its own name-based icon, and only
+    an id with no art at all falls back to its letter glyph.
     """
-    pair = splittable_card_condition_scorer(value)
-    if pair is not None:
-        condition, _scorer = pair
-        shape = condition_shape(condition)
-        effect = condition_effect(condition)
-        if shape is not None or effect is not None:
-            _draw_condition_mini(screen, shape=shape, effect=effect,
-                                 center=(rect.centerx, rect.centery + 4),
-                                 size=int(GRID_SIZE * 0.62))
+    meta = match_group_card_meta(value)
+    if meta is not None:
+        group, _scorer = meta
+        if _draw_match_group_mini(
+                screen, group,
+                center=(rect.centerx, rect.centery + 4),
+                size=int(GRID_SIZE * 0.62)):
             return
-        _draw_named_condition_icon(
-            screen, condition,
-            center=(rect.centerx, rect.centery + 4),
-            size=int(GRID_SIZE * 0.62))
-        return
     if _draw_whole_card_icon(
             screen, value,
             center=(rect.centerx, rect.centery + 4),
@@ -1242,17 +1404,23 @@ def _draw_card_icon(screen, value, rect):
 def draw_card(screen, item, rect, selected=False):
     """Draw a card as a mini playing card.
 
-    A colored face with a thin inner border and center art (a shape/effect icon
-    for shape/effect cards, or a letter glyph). A green outline marks the
-    selected card.
+    A colored face with a center art (a shape/effect icon for shape/effect
+    cards, or a letter glyph) and a BORDER IN THE CARD'S RARITY COLOUR (see
+    components.Rarity — grey for the common match-group cards, gold for a
+    legendary whole card), plus a green outline when the card is selected. The
+    face is components.Card.face_color, which moves a colour that is too close
+    to that border aside so the border still reads.
     """
-    color = Card.COLORS.get(getattr(item, "value", None), CARD_COLOR)
-    pygame.draw.rect(screen, color, rect, border_radius=6)
-    pygame.draw.rect(screen, WHITE, rect, 1, border_radius=6)
-    pygame.draw.rect(screen, WHITE, rect, 2, border_radius=6)
+    value = getattr(item, "value", None)
+    pygame.draw.rect(screen, Card.face_color(value), rect, border_radius=6)
+    # The 2px frame is the card's tier; the 1px pass under it rounds the corners
+    # of the same ring, as the white frame used to.
+    border = Card.rarity_color(value)
+    pygame.draw.rect(screen, border, rect, 1, border_radius=6)
+    pygame.draw.rect(screen, border, rect, 2, border_radius=6)
     if selected:
         pygame.draw.rect(screen, GREEN, rect, 3, border_radius=6)
-    _draw_card_icon(screen, getattr(item, "value", None), rect)
+    _draw_card_icon(screen, value, rect)
 
 
 def draw_card_back(screen, rect):
@@ -1728,12 +1896,13 @@ def _draw_block_shape(block, surface, outline, fill):
             pygame.draw.polygon(surface, fill, pts)
             if block_borders_on():
                 pygame.draw.polygon(surface, outline, pts, 3)
-    elif block.shape == Shape.CRADLE:
-        # Two side wedges framing a downward V valley, backed by a floor slab.
-        for pts in block.get_cradle_pieces:
-            pygame.draw.polygon(surface, fill, pts)
-            if block_borders_on():
-                pygame.draw.polygon(surface, outline, pts, 3)
+    # COMMENTED OUT with the shape itself: two side wedges framing a downward V
+    # valley, backed by a floor slab.
+    # elif block.shape == Shape.CRADLE:
+    #     for pts in block.get_cradle_pieces:
+    #         pygame.draw.polygon(surface, fill, pts)
+    #         if block_borders_on():
+    #             pygame.draw.polygon(surface, outline, pts, 3)
     elif block.shape == Shape.BUMP:
         # A solid dome (half-disc) sitting on the cell's bottom edge.
         pts = block.get_bump_points
@@ -2015,10 +2184,10 @@ def draw_block_shape_only(block, surface):
     elif block.shape == Shape.SAWTOOTH:
         for pts in block.get_sawtooth_teeth:
             pygame.draw.polygon(surface, WHITE, pts, 3)
-    elif block.shape == Shape.CRADLE:
-        # ONE silhouette: a component/ghost image shows the shape alone, with no
-        # line drawn where either wedge meets the floor slab.
-        pygame.draw.polygon(surface, WHITE, block.get_cradle_silhouette, 3)
+    # COMMENTED OUT with the shape itself: ONE silhouette (a component/ghost
+    # image showed the shape alone, with no line where a wedge met the slab).
+    # elif block.shape == Shape.CRADLE:
+    #     pygame.draw.polygon(surface, WHITE, block.get_cradle_silhouette, 3)
     elif block.shape == Shape.BUMP:
         pygame.draw.polygon(surface, WHITE, block.get_bump_points, 3)
     elif block.shape == Shape.KEY:
@@ -2915,10 +3084,15 @@ def info_box_rect(game, item, source, mouse_pos):
 
 
 def draw_item_info(game, item, source, mouse_pos):
-    """Draw a content-sized info box for the given item near the cursor."""
+    """Draw a content-sized info box for the given item near the cursor.
+
+    The box is a panel like the inventory and the shop, so it is filled with
+    the same colour they are (see panel_fill) — the running trial's own tint —
+    and outlined in black.
+    """
     rect = info_box_rect(game, item, source, mouse_pos)
     _, _, name_lines, desc_lines, hint = info_layout(game, item, source)
-    pygame.draw.rect(game.screen, MARBLE_BOX_COLOR, rect)
+    pygame.draw.rect(game.screen, panel_fill(game), rect)
     pygame.draw.rect(game.screen, BLACK, rect, 5)
     x = rect.x + 12
     y = rect.y + 12
@@ -3119,13 +3293,27 @@ def draw_collection_icon(game, kind, value, rect):
     if kind == "action":
         draw_action(game.screen, ActionItem(value, 0), rect)
         return
-    if kind == "condition":
-        # A condition tile: its white face with a center mini shape/effect
-        # (collision conditions) or letter glyph (named ones).
-        pygame.draw.rect(game.screen, condition_color(value), rect)
+    if kind == "match_group":
+        # A match group's icon: the mini shape (its first member) or effect its
+        # cards trigger on, on a white tile like the condition tiles used to be.
+        pygame.draw.rect(game.screen, WHITE, rect)
         pygame.draw.rect(game.screen, BLACK, rect, 2)
-        _draw_condition_center(game.screen, value, rect)
+        if not _draw_match_group_mini(
+                game.screen, MATCH_GROUPS[value], center=rect.center,
+                size=int(rect.width * 0.66)):
+            glyph = font("tile").render(
+                match_group_label(MATCH_GROUPS[value])[0].upper(), True, BLACK)
+            game.screen.blit(glyph, glyph.get_rect(center=rect.center))
         return
+    # COMMENTED OUT with the conditions: a condition tile's icon (its white face
+    # with a mini shape/effect or a letter glyph). A match group's icon above
+    # replaces it.
+    #
+    # if kind == "condition":
+    #     pygame.draw.rect(game.screen, condition_color(value), rect)
+    #     pygame.draw.rect(game.screen, BLACK, rect, 2)
+    #     _draw_condition_center(game.screen, value, rect)
+    #     return
     if kind == Component.SCORER:
         if value == Scorer.START:
             # A Start block: an empty unit with a marble in its center.
@@ -3200,6 +3388,22 @@ def draw_collection(game):
             _draw_description_line(game, line, desc_color, rect.left + 54, dy,
                                    game.tiny_font)
             dy += 14
+        # A card or match-group entry names its rarity tier under its text, in
+        # the tier's own colour (the same colour the card's face wears — see
+        # draw_card), so the codex is where a player learns what the stripe on a
+        # card means. A match-group entry's value is the GROUP's index, not a
+        # card id, so its tier is read from the group (every card built on a
+        # group is Common — see Card.RARITIES).
+        if discovered and kind == "card":
+            rarity = Card.rarity(value)
+        elif discovered and kind == "match_group":
+            rarity = Rarity.COMMON
+        else:
+            rarity = None
+        if rarity is not None:
+            tag = game.tiny_font.render(
+                Rarity.name(rarity), True, Rarity.color(rarity))
+            game.screen.blit(tag, (rect.left + 54, rect.top + 76))
     pygame.draw.rect(game.screen, BG_COLOR, (0, 0, SCREEN_WIDTH, 110))
     pygame.draw.rect(game.screen, BG_COLOR, (0, SCREEN_HEIGHT - 96, SCREEN_WIDTH, 96))
     heading = game.main_title_font.render("COLLECTION", True, (255, 215, 0))

@@ -129,14 +129,15 @@ class ShopTests(GameTestCase):
         self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.FRESH], 1)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.FRESH)], 0)
         self.assertIn("reroll", main.scorer_description(main.Scorer.FRESH).lower())
-        # Fresh is also a card scorer: it builds a generic card with any
-        # condition (a card that grants a free reroll per trigger).
+        # Fresh is also a card scorer: every match group can offer it (a card
+        # that grants a free reroll when the marble collides with the block).
         self.assertIn(main.Scorer.FRESH, components.CARD_SCORERS)
         self.assertIn(main.Scorer.FRESH, components.FLAT_CARD_SCORERS)
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.FRESH)
-        self.assertGreaterEqual(value, components.GENERIC_CARD_OFFSET)
-        self.assertEqual(main.generic_card_meta(value), (main.Condition.SHAPE_PIPE,
-                                                          main.Scorer.FRESH))
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        value = main.match_group_card(group, main.Scorer.FRESH)
+        self.assertGreaterEqual(value, components.MATCH_GROUP_CARD_OFFSET)
+        self.assertEqual(components.match_group_card_meta(value),
+                         (group, main.Scorer.FRESH))
 
 
     def test_fresh_scorer_gives_a_free_reroll_per_hit(self):
@@ -185,14 +186,15 @@ class ShopTests(GameTestCase):
         self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.PICKY], 1)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.PICKY)], 0)
         self.assertIn("slot", main.scorer_description(main.Scorer.PICKY).lower())
-        # Picky is also a card scorer: it builds a generic card with any
-        # condition (a card that banks an option point per trigger).
+        # Picky is also a card scorer: every match group can offer it (a card
+        # that banks an option point when the marble collides with the block).
         self.assertIn(main.Scorer.PICKY, components.CARD_SCORERS)
         self.assertIn(main.Scorer.PICKY, components.FLAT_CARD_SCORERS)
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.PICKY)
-        self.assertGreaterEqual(value, components.GENERIC_CARD_OFFSET)
-        self.assertEqual(main.generic_card_meta(value), (main.Condition.SHAPE_PIPE,
-                                                          main.Scorer.PICKY))
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        value = main.match_group_card(group, main.Scorer.PICKY)
+        self.assertGreaterEqual(value, components.MATCH_GROUP_CARD_OFFSET)
+        self.assertEqual(components.match_group_card_meta(value),
+                         (group, main.Scorer.PICKY))
 
 
     def test_bonus_slots_add_extra_random_shop_offers(self):
@@ -858,6 +860,7 @@ class ShopTests(GameTestCase):
         self.assertEqual(block.triggers_left, 2)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_board_sell_total_adds_up_each_blocks_sell_price(self):
         priced = main.Block(0, 5, scorer=main.Scorer.NONE)
         priced.resale_price = 30
@@ -910,7 +913,8 @@ class ShopTests(GameTestCase):
 
 
     def test_card_description_follows_the_magnitude_but_its_price_does_not(self):
-        value = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
+        value = main.match_group_card(main.match_group_for_shape(main.Shape.PIPE),
+                                      main.Scorer.CHIPS_ADD)
         catalog = main.Card.PRICES[value]
         strong = main.make_card_item(value, amount=45)
         weak = main.make_card_item(value, amount=15)
@@ -1091,6 +1095,7 @@ class ShopTests(GameTestCase):
         self.assertIn("2 or more effects", main.scorer_description(main.Scorer.EFFECTIVE))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_every_condition_and_component_has_a_price(self):
         # A component missing from COMPONENT_PRICES is priced 0, which makes it
         # free in the shop and the most common draw (rarity weight = 1/price).
@@ -1342,7 +1347,8 @@ class ShopTests(GameTestCase):
     def test_clicking_owned_card_selects_it_for_selling(self):
         # Left-clicking an owned card selects it as the active item, so pressing
         # B sells it for half its original price.
-        card = main.CardItem(main.Card.JOKER, 20)
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
         self.game.cards.append(card)
         x = main.CARD_AREA_COORDS[0] + main.GRID_SIZE // 2
         y = main.CARD_AREA_COORDS[1] + main.GRID_SIZE // 2
@@ -1351,7 +1357,8 @@ class ShopTests(GameTestCase):
 
 
     def test_b_key_sells_selected_card_for_half_price(self):
-        card = main.CardItem(main.Card.JOKER, 20)
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
         self.game.cards.append(card)
         self.game.cash = 50
         self.game.selected_toolbox_item = card
@@ -1363,6 +1370,7 @@ class ShopTests(GameTestCase):
         self.assertIsNone(self.game.selected_toolbox_item)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_s_key_disassembles_splittable_card_into_halves(self):
         # Pressing S on a selected splittable card (e.g. Joker = START x
         # +Mult) pays $70 and returns its condition + scorer to the toolbox.
@@ -1387,6 +1395,7 @@ class ShopTests(GameTestCase):
         self.assertEqual(scorer.value, main.Scorer.MULT_ADD)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_s_key_cannot_disassemble_whole_card(self):
         # Whole cards (ERR 404 / Blueprint / Showman) have no halves to split.
         card = main.CardItem(main.Card.BLUEPRINT, 35)
@@ -1399,6 +1408,7 @@ class ShopTests(GameTestCase):
         self.assertIn("cannot be split", self.game.shop_message)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_s_key_card_disassemble_requires_cash(self):
         card = main.CardItem(main.Card.JOKER, 20)
         self.game.cards.append(card)
@@ -1645,19 +1655,26 @@ class ShopTests(GameTestCase):
                             for item in blocks))
 
 
-    def test_shop_has_two_blocks_and_two_of_each_component_plus_third_scorer(self):
+    def test_shop_has_two_blocks_two_of_each_component_and_four_cards(self):
         kinds = [item.kind for item in self.game.shop.items]
 
         self.assertEqual(len(self.game.shop.items), 15)
-        self.assertEqual(kinds.count("block"), 2)
-        self.assertEqual(kinds.count("card"), 2)
+        # Four card slots: each offer is a match-group (or whole) card with its
+        # scorer already attached, so no condition components are sold any more
+        # (see Shop.refresh).
+        self.assertEqual(kinds.count("card"), 4)
         # One shop slot per offered action (the catalogue is bigger than the
         # room, so a refresh shows SHOP_ACTION_SLOTS of them).
         self.assertEqual(kinds.count("action"), main.SHOP_ACTION_SLOTS)
         self.assertEqual(kinds.count(main.Component.SHAPE), 2)
         self.assertEqual(kinds.count(main.Component.EFFECT), 2)
-        self.assertEqual(kinds.count(main.Component.SCORER), 3)
-        self.assertEqual(kinds.count(main.Component.CONDITION), 2)
+        # The two block slots and the three scorer slots are five items between
+        # them: a scorer slot that rolls a run ROLE (Start/Finish) is sold as a
+        # ready-made block instead of a loose scorer piece (see _scorer_offer),
+        # so how those five split between the two kinds depends on the roll.
+        self.assertEqual(kinds.count(main.Component.SCORER) + kinds.count("block"),
+                         5)
+        self.assertFalse(hasattr(main.Component, "CONDITION"))
 
 
     def test_shop_never_offers_the_free_default_parts(self):
@@ -1675,25 +1692,26 @@ class ShopTests(GameTestCase):
                     self.assertNotEqual(item.value, main.Scorer.NONE)
 
 
-    def test_shop_always_offers_two_cards(self):
+    def test_shop_always_offers_four_cards(self):
         cards = [item for item in self.game.shop.items if item.kind == "card"]
-        self.assertEqual(len(cards), 2)
-        # Two distinct cards are chosen at random from the pre-built pool (the
-        # indivisible whole cards plus random (condition x scorer) combos).
-        self.assertEqual(len({item.value for item in cards}), 2)
+        self.assertEqual(len(cards), 4)
+        # Four distinct cards are chosen at random from the pre-built pool (the
+        # whole Card.ORDER cards plus the (match group x scorer) cards).
+        self.assertEqual(len({item.value for item in cards}), 4)
         self.assertTrue(all(item.value in main.Card.NAMES for item in cards))
-        # The cards sit in the shop's bottom item row (with the conditions,
-        # actions, and pre-built blocks).
+        # The four cards open the shop's bottom item row, to the left of the
+        # actions and pre-built blocks.
+        self.assertEqual({item.col for item in cards}, {1, 2, 3, 4})
         self.assertTrue(all(item.row == 3 for item in cards))
 
 
-    def test_shop_cards_are_two_random_distinct_every_refresh(self):
-        # Every reroll yields exactly two DIFFERENT cards from the pre-built pool.
+    def test_shop_cards_are_four_random_distinct_every_refresh(self):
+        # Every reroll yields exactly four DIFFERENT cards from the pre-built pool.
         for _ in range(40):
             self.game.shop.refresh()
             cards = [item for item in self.game.shop.items if item.kind == "card"]
-            self.assertEqual(len(cards), 2)
-            self.assertEqual(len({item.value for item in cards}), 2)
+            self.assertEqual(len(cards), 4)
+            self.assertEqual(len({item.value for item in cards}), 4)
             self.assertTrue(all(item.value in main.Card.NAMES for item in cards))
 
 
@@ -1721,6 +1739,7 @@ class ShopTests(GameTestCase):
             main.COMPONENT_PRICES[(main.Component.EFFECT, main.Effect.SPLITTER)], 124)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_shop_offers_two_conditions_next_to_cards(self):
         # Two random conditions sit next to the two whole cards in the shop.
         conds = [i for i in self.game.shop.items if i.kind == main.Component.CONDITION]
@@ -1729,6 +1748,7 @@ class ShopTests(GameTestCase):
         self.assertTrue(all(i.value in main.CONDITION_ORDER for i in conds))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_buying_condition_adds_to_toolbox_and_discovers(self):
         # Buying a condition puts it in the toolbox and reveals it.
         self.game.cash = 1000
@@ -1740,6 +1760,7 @@ class ShopTests(GameTestCase):
         self.assertTrue(any(p.title == "New condition" for p in self.game.popups))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_buying_splittable_card_reveals_its_halves(self):
         # Buying a whole splittable card (Joker) reveals its condition + scorer
         # halves instead of the card itself.
@@ -1769,7 +1790,8 @@ class ShopTests(GameTestCase):
 
 
     def test_fresh_card_gives_a_free_reroll_on_matching_collision(self):
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.FRESH)
+        value = _group_card(main.match_group_for_shape(main.Shape.PIPE),
+                            main.Scorer.FRESH)
         self.game.cards.append(main.CardItem(value, 40))
         self.game.free_rerolls = 0
         pipe = main.Block(0, 0, shape=main.Shape.PIPE, scorer=main.Scorer.NONE)
@@ -1788,14 +1810,15 @@ class ShopTests(GameTestCase):
         self.assertIn("traveled", desc.lower())
         self.assertIn("0.01 mult", desc)
         self.assertIn("pixel", desc.lower())
-        # Voyager is also a card scorer: it builds a generic card with any
-        # condition (a card that adds mult from the run's total travel).
+        # Voyager is also a card scorer: every match group can offer it (a card
+        # that adds mult from the run's total travel).
         self.assertIn(main.Scorer.VOYAGER, components.CARD_SCORERS)
         self.assertIn(main.Scorer.VOYAGER, components.FLAT_CARD_SCORERS)
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.VOYAGER)
-        self.assertGreaterEqual(value, components.GENERIC_CARD_OFFSET)
-        self.assertEqual(main.generic_card_meta(value), (main.Condition.SHAPE_PIPE,
-                                                          main.Scorer.VOYAGER))
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        value = main.match_group_card(group, main.Scorer.VOYAGER)
+        self.assertGreaterEqual(value, components.MATCH_GROUP_CARD_OFFSET)
+        self.assertEqual(components.match_group_card_meta(value),
+                         (group, main.Scorer.VOYAGER))
 
 
     def test_summit_scorer_is_defined_and_shop_available(self):
@@ -1806,14 +1829,15 @@ class ShopTests(GameTestCase):
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.SUMMIT)], 0)
         self.assertIn("above the bottom row",
                       main.scorer_description(main.Scorer.SUMMIT, 0.75).lower())
-        # Summit is also a card scorer: it builds a generic card with any
-        # condition (the card measures the triggering block's row).
+        # Summit is also a card scorer: every match group can offer it (the card
+        # measures the triggering block's row).
         self.assertIn(main.Scorer.SUMMIT, components.CARD_SCORERS)
         self.assertIn(main.Scorer.SUMMIT, components.FLAT_CARD_SCORERS)
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.SUMMIT)
-        self.assertGreaterEqual(value, components.GENERIC_CARD_OFFSET)
-        self.assertEqual(main.generic_card_meta(value), (main.Condition.SHAPE_PIPE,
-                                                         main.Scorer.SUMMIT))
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        value = main.match_group_card(group, main.Scorer.SUMMIT)
+        self.assertGreaterEqual(value, components.MATCH_GROUP_CARD_OFFSET)
+        self.assertEqual(components.match_group_card_meta(value),
+                         (group, main.Scorer.SUMMIT))
 
 
     def test_airball_scorer_is_defined_and_shop_available(self):
@@ -1823,18 +1847,19 @@ class ShopTests(GameTestCase):
         self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.AIRBALL], 8)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.AIRBALL)], 0)
         self.assertIn("airborne", main.scorer_description(main.Scorer.AIRBALL, 8).lower())
-        # Airball is also a card scorer (it builds a generic card with any
-        # condition; the card rewards the touching marble's air streak).
+        # Airball is also a card scorer (every match group can offer it; the
+        # card rewards the touching marble's air streak).
         self.assertIn(main.Scorer.AIRBALL, components.CARD_SCORERS)
         self.assertIn(main.Scorer.AIRBALL, components.FLAT_CARD_SCORERS)
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.AIRBALL)
-        self.assertGreaterEqual(value, components.GENERIC_CARD_OFFSET)
-        self.assertEqual(main.generic_card_meta(value), (main.Condition.SHAPE_PIPE,
-                                                         main.Scorer.AIRBALL))
-        # A splittable card's icon is its CONDITION's symbol (not the scorer's),
-        # so this Pipe x Airball generic card carries the Pipe condition glyph.
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        value = main.match_group_card(group, main.Scorer.AIRBALL)
+        self.assertGreaterEqual(value, components.MATCH_GROUP_CARD_OFFSET)
+        self.assertEqual(components.match_group_card_meta(value),
+                         (group, main.Scorer.AIRBALL))
+        # A match-group card's glyph is its GROUP's (not the scorer's), so this
+        # Pipe card carries the Pipe group's glyph.
         self.assertEqual(main.Card.GLYPHS.get(value),
-                         components.condition_glyph(main.Condition.SHAPE_PIPE))
+                         components.match_group_glyph(group))
         # ... and its face color is the scorer's own color.
         self.assertEqual(main.Card.COLORS[value], main.Scorer.color(main.Scorer.AIRBALL))
 
@@ -1848,18 +1873,19 @@ class ShopTests(GameTestCase):
         self.assertIn("destroyed", main.scorer_description(main.Scorer.SATANIC).lower())
         # A Satanic CARD says it is destroyed after one run (the block's own
         # description is about a marble leaving it).
-        card_desc = main.Card.description(
-            main.condition_scorer_card(main.Condition.SHAPE_PIPE,
-                                       main.Scorer.SATANIC))
+        card_desc = main.Card.description(main.match_group_card(
+            main.match_group_for_shape(main.Shape.PIPE), main.Scorer.SATANIC))
         self.assertIn("x6.66 mult", card_desc)
         self.assertIn("destroyed after one run", card_desc)
-        # Satanic is also a card scorer (its card is destroyed after a run).
+        # Satanic is also a card scorer: every match group can offer it (its
+        # card is destroyed after a run).
         self.assertIn(main.Scorer.SATANIC, components.CARD_SCORERS)
         self.assertIn(main.Scorer.SATANIC, components.FLAT_CARD_SCORERS)
-        value = main.condition_scorer_card(main.Condition.SHAPE_PIPE, main.Scorer.SATANIC)
-        self.assertGreaterEqual(value, components.GENERIC_CARD_OFFSET)
-        self.assertEqual(main.generic_card_meta(value), (main.Condition.SHAPE_PIPE,
-                                                          main.Scorer.SATANIC))
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        value = main.match_group_card(group, main.Scorer.SATANIC)
+        self.assertGreaterEqual(value, components.MATCH_GROUP_CARD_OFFSET)
+        self.assertEqual(components.match_group_card_meta(value),
+                         (group, main.Scorer.SATANIC))
 
 
     def test_magnitude_card_prices_scale_with_scorer_and_condition(self):
@@ -1884,6 +1910,7 @@ class ShopTests(GameTestCase):
         self.assertGreater(circle, pipe_bend)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_condition_prices_run_inversely_to_their_component(self):
         # A shape/effect collision condition costs the inverse of the component
         # it matches: the cheapest block's condition is the dearest, and the
@@ -1936,9 +1963,12 @@ class ShopTests(GameTestCase):
     def test_cannot_buy_duplicate_card_without_showman(self):
         # You can't buy a second copy of a card you already own unless you own
         # the Showman card.
-        self.game.cards.append(main.CardItem(main.Card.JOKER, 40))
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
+        self.game.cards.append(card)
         self.game.cash = 1000
-        self.game._buy_shop_item(main.CardItem(main.Card.JOKER, 40))
+        self.game._buy_shop_item(main.CardItem(card.value, card.price,
+                                               amount=card.amount))
         self.assertEqual(len(self.game.cards), 1)  # no duplicate added
         self.assertEqual(self.game.cash, 1000)     # not charged
         self.assertEqual(self.game.shop_message, "Already own this card")
@@ -1946,12 +1976,15 @@ class ShopTests(GameTestCase):
 
     def test_can_buy_duplicate_card_with_showman(self):
         # Owning the Showman card lets you buy duplicates of any card.
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.MULT_ADD)
         self.game.cards.append(main.CardItem(main.Card.SHOWMAN, 100))
-        self.game.cards.append(main.CardItem(main.Card.JOKER, 40))
+        self.game.cards.append(card)
         self.game.cash = 1000
-        self.game._buy_shop_item(main.CardItem(main.Card.JOKER, 40))
-        self.assertEqual(len(self.game.cards), 3)  # Showman + 2 Jokers
-        self.assertEqual(self.game.cash, 1000 - 40)
+        self.game._buy_shop_item(main.CardItem(card.value, card.price,
+                                               amount=card.amount))
+        self.assertEqual(len(self.game.cards), 3)  # Showman + 2 cards
+        self.assertEqual(self.game.cash, 1000 - card.price)
 
 
     def test_the_shop_skips_cards_the_player_already_owns(self):
@@ -1964,7 +1997,7 @@ class ShopTests(GameTestCase):
             self.game.shop.refresh()
             offered = [item for item in self.game.shop.items
                        if item.kind == "card"]
-            self.assertEqual(len(offered), 2)  # both slots still fill
+            self.assertEqual(len(offered), 4)  # all four slots still fill
             self.assertNotIn(main.Card.GARDEN, {item.value for item in offered})
 
 
@@ -1989,6 +2022,7 @@ class ShopTests(GameTestCase):
         self.game.disabled_card = None
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_shop_card_slots_combine_conditions_and_unsplittables_equally(self):
         # Each card slot draws equally from a combined pool of conditions and
         # the indivisible whole cards; a condition draw gets a random scorer
@@ -2028,7 +2062,7 @@ class ShopTests(GameTestCase):
 
     def test_shop_always_offers_some_actions(self):
         actions = [item for item in self.game.shop.items if item.kind == "action"]
-        conds = [item for item in self.game.shop.items if item.kind == main.Component.CONDITION]
+        cards = [item for item in self.game.shop.items if item.kind == "card"]
         # The catalogue is bigger than the room left in the shop's bottom row,
         # so each refresh shows a random SHOP_ACTION_SLOTS of them, all
         # different.
@@ -2041,10 +2075,10 @@ class ShopTests(GameTestCase):
             offered = [i for i in self.game.shop.items if i.kind == "action"]
             self.assertEqual(len(offered), 2)
             self.assertEqual(len({a.value for a in offered}), 2)
-        # Actions sit in row 3 to the right of the conditions.
+        # Actions sit in row 3 to the right of the four card slots.
         self.assertTrue(all(a.row == 3 for a in actions))
         self.assertEqual({a.col for a in actions}, {5, 6})
-        self.assertTrue(max(c.col for c in conds) < min(a.col for a in actions))
+        self.assertTrue(max(c.col for c in cards) < min(a.col for a in actions))
         self.assertTrue(all(a.price == main.Action.PRICES[a.value] for a in actions))
         # An action arrives as v1 normally, but now and then it is a free v2.
         self.assertTrue(all(a.version in (1, 2) for a in actions))
@@ -2160,7 +2194,8 @@ class ShopTests(GameTestCase):
 
 
     def test_death_action_sells_card_for_one_and_a_half(self):
-        card = main.CardItem(main.Card.JOKER, 24)
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.CHIPS_ADD)
         self.game.cards.append(card)
         action = main.ActionItem(main.Action.DEATH, 60)
         self.game.actions.append(action)
@@ -2169,7 +2204,7 @@ class ShopTests(GameTestCase):
         self.game.selected_action_subject = card
         self.assertTrue(self.game._apply_action())
         self.assertNotIn(card, self.game.cards)
-        self.assertEqual(self.game.cash, 100 + int(24 * 1.5))
+        self.assertEqual(self.game.cash, 100 + int(card.price * 1.5))
 
 
     def test_buying_action_discovers_it_in_collection(self):

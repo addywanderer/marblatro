@@ -214,6 +214,7 @@ class RunsTests(GameTestCase):
         self.assertTrue(np.allclose(marble.velocity, [7.0, 8.0]))
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_wrecking_ball_banks_three_quarters_of_its_own_magnitude(self):
         # A Fragile Breaks +Mult card rolled to 6 banks 0.75 x 6 = +4.5 mult a
         # break (0.75 x 4 = +3 at the average).
@@ -647,6 +648,7 @@ class RunsTests(GameTestCase):
                         a.radius + b.radius)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_plane_plus_mult_scales_proportionally_with_air_time(self):
         # Air Time (Plane) has ratio 0.5, so +Mult pays half the +4 base = +2
         # mult per air second at the end of the run.
@@ -684,6 +686,7 @@ class RunsTests(GameTestCase):
         self.assertFalse(hasattr(self.game, "_xmult_primed"))
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_wrecking_ball_run_gain_commits_when_continuing(self):
         # The gains earned during a run become permanent only after that run.
         self.game.cards.append(main.CardItem(main.Card.WRECKING_BALL, 30))
@@ -698,6 +701,7 @@ class RunsTests(GameTestCase):
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 0)
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_plane_air_time_accumulates_while_marble_airborne(self):
         # A marble with nothing under it stays airborne, so air time grows.
         self.game.cards.append(main.CardItem(main.Card.PLANE, 25))
@@ -708,6 +712,7 @@ class RunsTests(GameTestCase):
         self.assertGreater(self.game.air_time, 0.2)  # ~0.5s of air time
 
 
+    @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_plane_air_time_stays_zero_while_marble_rests(self):
         # A marble resting on a floor block is in contact, so no air time.
         self.game.cards.append(main.CardItem(main.Card.PLANE, 25))
@@ -734,6 +739,7 @@ class RunsTests(GameTestCase):
         self.assertGreater(self.game.black_hole_time, 0)
 
 
+    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_explorer_applies_when_run_completes(self):
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
         block = main.Block(0, 0, shape=main.Shape.SLOPE, scorer=main.Scorer.FINISH)
