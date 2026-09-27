@@ -949,6 +949,53 @@ class CollisionBehaviorTests(unittest.TestCase):
             marble.physics.update(marble, main.DT, [block])
         self.assertGreater(marble.position[1], block.rect.bottom + 10)
 
+    def test_marble_falls_through_drain_center_and_counts_as_touching(self):
+        # A marble released above the drain's center falls straight through the
+        # funnel and out the marble-width drain at the bottom — and going
+        # through it that way counts as TOUCHING the drain, even though the
+        # marble never grazes the curved walls (the same rule the pipe's central
+        # cavity follows, see physics._inside_drain_cavity).
+        block = main.Block(4, 4, shape=main.Shape.DRAIN, scorer=main.Scorer.NONE)
+        marble = main.Marble(block.rect.centerx, block.rect.top - 30)
+        marble.velocity = np.array([0.0, 0.0])
+        touched = False
+        for _ in range(90):
+            marble.physics.update(marble, main.DT, [block])
+            touched = touched or block in marble.collisions_this_tick
+        self.assertGreater(marble.position[1], block.rect.bottom + 10)
+        self.assertTrue(touched)
+
+    def test_the_drain_cavity_is_exactly_the_gap_the_walls_leave(self):
+        # The tested cavity and the drawn walls come from the same geometry: a
+        # marble centered in the funnel is clear of the walls (and so counts as
+        # passing through, see physics._inside_drain_cavity), while one near the
+        # lower wall is outside the cavity and does collide with it.
+        block = main.Block(4, 4, shape=main.Shape.DRAIN, scorer=main.Scorer.NONE)
+        inside = main.Marble(block.rect.centerx, block.rect.bottom - 3)
+        outside = main.Marble(block.rect.left + 3, block.rect.bottom - 3)
+
+        self.assertTrue(inside.physics._inside_drain_cavity(inside, block))
+        self.assertIsNone(inside.physics._block_collision(inside, block))
+        self.assertFalse(outside.physics._inside_drain_cavity(outside, block))
+        self.assertIsNotNone(outside.physics._block_collision(outside, block))
+
+    def test_a_rotated_drains_cavity_rotates_with_it(self):
+        # A drain turned by the A key has its funnel pointing sideways, so the
+        # cavity test rotates with the drawn walls (the marble is tested in the
+        # drain's own frame).
+        block = main.Block(4, 4, shape=main.Shape.DRAIN, scorer=main.Scorer.NONE)
+        # A point down in the narrow part of the funnel, just off its axis.
+        px, py = block.rect.centerx + 2, block.rect.centery + 17
+        upright = main.Marble(px, py)
+        self.assertTrue(upright.physics._inside_drain_cavity(upright, block))
+
+        block.angle = 90
+        rotated = main.Marble(*block._rotate_point((px, py), 90))
+        self.assertTrue(rotated.physics._inside_drain_cavity(rotated, block))
+        # The upright funnel's throat is no longer a way through once the funnel
+        # itself points sideways.
+        self.assertFalse(upright.physics._inside_drain_cavity(upright, block))
+
     def test_drain_draws_and_rotates_without_raising(self):
         surface = main.pygame.Surface((main.GRID_SIZE, main.GRID_SIZE))
         block = main.Block(0, 0, shape=main.Shape.DRAIN, scorer=main.Scorer.NONE, origin=(0, 0))

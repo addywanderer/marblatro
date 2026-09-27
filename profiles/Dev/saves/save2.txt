@@ -1,20 +1,81 @@
 {
   "version": 1,
-  "cash": 60,
-  "run_number": 0,
-  "round_index": 0,
+  "cash": 0,
+  "run_number": 3,
+  "round_index": 1,
   "run_in_round": 0,
-  "required_score": 1,
+  "required_score": 800,
   "required_scores": [
-    1
+    100,
+    200,
+    400,
+    800
   ],
-  "run_results": [],
-  "runs_cleared": 0,
+  "run_results": [
+    true,
+    true,
+    true
+  ],
+  "runs_cleared": 3,
   "failed_runs": 0,
-  "current_trial": 12,
+  "current_trial": 11,
+  "trial_decision": {
+    "trial": 11
+  },
   "difficulty": 4,
   "final_boss": null,
-  "cards": [],
+  "cards": [
+    {
+      "kind": "card",
+      "value": 3187,
+      "price": 53,
+      "amount": 0,
+      "col": 0,
+      "row": 0,
+      "name": "Peg/Spike/Sawtooth card (Bomb)",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 87,
+      "price": 46,
+      "amount": 0,
+      "col": 0,
+      "row": 0,
+      "name": "Coupon",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 86,
+      "price": 36,
+      "amount": 0,
+      "col": 0,
+      "row": 0,
+      "name": "Compound Interest",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 1,
+      "price": 32,
+      "amount": 0,
+      "col": 0,
+      "row": 0,
+      "name": "Explorer",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 83,
+      "price": 44,
+      "amount": 0,
+      "col": 0,
+      "row": 0,
+      "name": "Pedestal",
+      "random_rolls": null
+    }
+  ],
   "actions": [],
   "toolbox": [
     {
@@ -22,191 +83,282 @@
       "placed": false,
       "col": 0,
       "row": 0,
-      "shape": 0,
+      "shape": 19,
       "effects": [],
       "effect_amounts": {},
-      "scorer": 4,
+      "scorer": 0,
       "scorer_amount": 0.0,
-      "price": 109,
-      "name": "Start Block",
+      "price": 6,
+      "name": "Bump None",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
-    },
+      "trigger_paid": 0,
+      "angle": 180,
+      "triggers_left": 0,
+      "random_rolls": null
+    }
+  ],
+  "grid": [
     {
       "kind": "block",
-      "placed": false,
-      "col": 0,
-      "row": 1,
+      "placed": true,
+      "x": 4,
+      "y": 9,
       "shape": 0,
       "effects": [],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
-      "price": 53,
-      "name": "Finish Block",
+      "angle": 0,
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 53,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 8,
+      "y": 6,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 109,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 8,
+      "y": 7,
+      "shape": 0,
+      "effects": [
+        14
+      ],
+      "effect_amounts": {
+        "14": 296.2
+      },
+      "scorer": 34,
+      "scorer_amount": 90.55,
+      "angle": 180,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 33,
+      "random_rolls": null
     }
   ],
-  "grid": [],
   "shop": [
     {
       "kind": "shape",
-      "value": 2,
+      "value": 3,
       "amount": 0,
-      "price": 12,
-      "name": "Line",
+      "price": 10,
+      "name": "None",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 4,
+      "value": 12,
       "amount": 0,
-      "price": 8,
-      "name": "Circle",
+      "price": 12,
+      "name": "Half Pipe",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 9,
+      "value": 11,
       "amount": 0,
-      "price": 20,
-      "name": "Fragile",
+      "price": 24,
+      "name": "Shrinking",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 12,
-      "amount": 0.3264,
-      "price": 22,
-      "name": "Sticky",
+      "value": 5,
+      "amount": 3642.0,
+      "price": 23,
+      "name": "Black Hole",
       "col": 4,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 22,
-      "amount": 2.319,
+      "value": 24,
+      "amount": 2.227,
       "price": 24,
-      "name": "Drill",
+      "name": "Roomy",
       "col": 5,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 28,
-      "amount": 3.153,
-      "price": 22,
-      "name": "Frontier",
+      "value": 2,
+      "amount": 4.543,
+      "price": 17,
+      "name": "+Mult",
       "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 11,
-      "amount": 0.874,
-      "price": 12,
-      "name": "Rubble",
+      "value": 10,
+      "amount": 1.052,
+      "price": 16,
+      "name": "Shreds",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 3482,
-      "price": 35,
-      "amount": 1.688,
+      "value": 3635,
+      "price": 37,
+      "amount": 0,
       "col": 1,
       "row": 3,
-      "name": "Rotate card (xMult)"
+      "name": "Shrinking card (Bomb)",
+      "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 1,
-      "price": 32,
-      "amount": 0,
+      "value": 3462,
+      "price": 29,
+      "amount": 0.01031,
       "col": 2,
       "row": 3,
-      "name": "Explorer"
+      "name": "Portal card (Voyager)",
+      "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 86,
-      "price": 36,
+      "value": 83,
+      "price": 44,
       "amount": 0,
       "col": 3,
       "row": 3,
-      "name": "Compound Interest"
+      "name": "Pedestal",
+      "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 87,
-      "price": 46,
+      "value": 88,
+      "price": 44,
       "amount": 0,
       "col": 4,
       "row": 3,
-      "name": "Coupon"
+      "name": "Factory",
+      "random_rolls": null
+    },
+    {
+      "kind": "action",
+      "value": 0,
+      "price": 24,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Death"
     },
     {
       "kind": "action",
       "value": 6,
       "price": 70,
       "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Cleansweep"
-    },
-    {
-      "kind": "action",
-      "value": 1,
-      "price": 24,
-      "version": 1,
       "col": 6,
       "row": 3,
-      "name": "Recognition"
+      "name": "Cleansweep"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 7,
+      "shape": 14,
       "effects": [],
       "effect_amounts": {},
-      "scorer": 1,
-      "scorer_amount": 32.85,
+      "scorer": 7,
+      "scorer_amount": 12.56,
       "price": 16,
-      "name": "Drain +Chips",
+      "name": "Platform Cash",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
     },
     {
       "kind": "block",
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 6,
-      "effects": [],
+      "shape": 3,
+      "effects": [
+        15,
+        6
+      ],
       "effect_amounts": {},
-      "scorer": 20,
-      "scorer_amount": 6.554,
-      "price": 24,
-      "name": "Pipe Airball",
+      "scorer": 15,
+      "scorer_amount": 1.262,
+      "price": 57,
+      "name": "None Fresh",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
     }
   ],
-  "component_purchases": [],
+  "component_purchases": [
+    [
+      "scorer",
+      34,
+      1
+    ],
+    [
+      "effect",
+      14,
+      1
+    ],
+    [
+      "scorer",
+      30,
+      1
+    ],
+    [
+      "shape",
+      19,
+      1
+    ]
+  ],
   "wrecking_bonus": [
     [
       1,
@@ -235,13 +387,33 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 1,
-  "score_mult": 1,
+  "score_chips": 30,
+  "score_mult": 4,
   "last_run_cash_gained": 0,
   "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
+      8,
+      8
+    ],
+    [
+      7,
+      7
+    ],
+    [
       5,
+      8
+    ],
+    [
+      4,
+      9
+    ],
+    [
+      8,
+      7
+    ],
+    [
+      6,
       8
     ],
     [
@@ -253,6 +425,14 @@
       7
     ],
     [
+      6,
+      7
+    ],
+    [
+      7,
+      6
+    ],
+    [
       5,
       6
     ],
@@ -261,8 +441,20 @@
       8
     ],
     [
+      8,
+      6
+    ],
+    [
+      6,
+      6
+    ],
+    [
       4,
       7
+    ],
+    [
+      7,
+      8
     ]
   ],
   "board_units": 0

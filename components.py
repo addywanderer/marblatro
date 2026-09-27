@@ -901,7 +901,7 @@ class Card:
     COZY = 79          # +90 chips at the start, while 10 units or fewer are unlocked
     PAINTING = 92      # +3 chips per $1 of the board's sell value, at the start
     SYNTHESIZER = 93   # +3 mult per card in the card area, at the start
-    ISLAND = 99        # +0.5 xMult per unconnected group of units, at the start
+    ISLAND = 99        # +0.5 xMult per unconnected group of units, at the end
     # The measured family's newest member, and the first one that never was a
     # named condition: a whole card whose payoff is a per-run MEASUREMENT,
     # exactly like the named cards above (see Card.NAMED), so it plays through
@@ -909,6 +909,9 @@ class Card:
     # band: the named conditions' ids are all taken, and Fountain was never one
     # of them.
     FOUNTAIN = 12      # +0.25 xMult per 3 different pipe-group blocks in a row
+    # The second measured card that never was a named condition: it pays mult
+    # for the TIME a marble spends inside things (see Card.NAMED).
+    INTANGIBLE = 13    # +0.5 mult a second inside a block, +15 inside a locked unit
     # Owning the Showman card lets the player buy more than one copy of any
     # other card (duplicates are otherwise blocked).
     SHOWMAN = 78
@@ -961,6 +964,7 @@ class Card:
         SYNTHESIZER: "Synthesizer",
         ISLAND: "Island",
         FOUNTAIN: "Fountain",
+        INTANGIBLE: "Intangible",
         ERR_404: "[ERR 404: CARD NOT FOUND]",
         BLUEPRINT: "Blueprint",
         SHOWMAN: "Showman",
@@ -1001,6 +1005,7 @@ class Card:
         SYNTHESIZER: "A chorus of parts.",
         ISLAND: "Surrounded by nothing.",
         FOUNTAIN: "Water always finds a way.",
+        INTANGIBLE: "Not all there.",
         ERR_404: "This card does not exist.",
         BLUEPRINT: "Copy of a copy.",
         SHOWMAN: "The more the merrier.",
@@ -1039,8 +1044,9 @@ class Card:
         COZY: "Adds 90 chips at the start of the run while 10 or fewer board units are unlocked",
         PAINTING: "Adds 3 chips at the start of the run for each $1 of the total sell price of the blocks on your board",
         SYNTHESIZER: "Adds 3 mult at the start of the run for each card in your card area",
-        ISLAND: "Adds 0.5 xMult at the start of the run for each unconnected group of unlocked board units",
+        ISLAND: "Adds 0.5 xMult at the end of the run for each unconnected group of unlocked board units",
         FOUNTAIN: "Adds 0.25 xMult at the end of the run for every 3 different Pipe, Drain or Pipe Bend blocks the marble touches in a row",
+        INTANGIBLE: "Adds 0.5 mult at the end of the run for each second the marble is inside a block, and 15 mult for each second it is inside a locked board unit",
         ERR_404: r"\marblatro\main.py, line 2339: 'self._return_card()' CardNotFoundError: Card was not found [FATAL]",
         BLUEPRINT: "Copies the function of the card to its immediate left in the card area",
         SHOWMAN: "Lets cards you already own show up in the shop again, so you can own more than one of the same card",
@@ -1078,6 +1084,12 @@ class Card:
     # priced off the two parts it is made of the same way: the PIPE GROUP it
     # watches (18, the price of a Pipe/Drain/Pipe Bend collision condition —
     # see match_group_price) plus the xMult scorer half (25) = 43 -> $34.
+    # Intangible measures the time a marble spends inside things, so it is
+    # priced the same way off the two parts it is built on: the pass-through
+    # field it counts a marble sitting in — the (none) shape group's collision
+    # condition (16) — plus the mult scorer half (17) = 33 -> $26. Its
+    # locked-unit clause is a second rate on the same measure (see Card.NAMED),
+    # not a second component.
     PRICES: ClassVar[dict[int, int]] = {JOKER: 24, EXPLORER: 32, ASTRONAUT: 27,
                                         PLANE: 22, PILLAR: 26, BANKER: 20,
                                         WRECKING_BALL: 27, SKATER: 32,
@@ -1085,6 +1097,7 @@ class Card:
                                         COZY: 23, PAINTING: 21,
                                         SYNTHESIZER: 25, ISLAND: 32,
                                         FOUNTAIN: 34,
+                                        INTANGIBLE: 26,
                                         ERR_404: 19, BLUEPRINT: 33, SHOWMAN: 48,
                                         GARDEN: 36, RIGGED_CASINO: 38,
                                         CONQUISTADOR: 44, PEDESTAL: 44,
@@ -1116,6 +1129,7 @@ class Card:
         SYNTHESIZER: (140, 90, 210),  # synth violet
         ISLAND: (230, 200, 120),    # sand
         FOUNTAIN: (70, 155, 205),   # fountain water
+        INTANGIBLE: (225, 235, 250),  # ghost pale
         ERR_404: (150, 40, 50),     # error red
         BLUEPRINT: (60, 110, 200),  # blueprint blue
         SHOWMAN: (210, 60, 90),     # showman red
@@ -1151,6 +1165,7 @@ class Card:
         RIPPED_CARD: "R", COZY: "~", PAINTING: "P", SYNTHESIZER: "Y",
         ISLAND: "L",
         FOUNTAIN: "F",
+        INTANGIBLE: "V",
         ERR_404: "4", BLUEPRINT: "B", SHOWMAN: "!",
         GARDEN: "G", RIGGED_CASINO: "R", CONQUISTADOR: "C",
         PEDESTAL: "P", INFERNO: "I", DOPPELGANGER: "D",
@@ -1175,7 +1190,7 @@ class Card:
                                   PAINTING, SYNTHESIZER,
                                   TESSERACT,
                                   THOUSAND_HANDED, PROCRASTINATION, ESSENCE,
-                                  CONCERT, ISLAND, FOUNTAIN]
+                                  CONCERT, ISLAND, FOUNTAIN, INTANGIBLE]
     # How rare each whole card is. A whole card's tier follows its price, the
     # codebase's usual rarity rule (see component_weight): up to $28 Common,
     # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
@@ -1187,15 +1202,17 @@ class Card:
         # Common: the joke card and the cheap utility.
         ERR_404: Rarity.COMMON, MARKET: Rarity.COMMON,
         MINESHAFT: Rarity.COMMON,
-        # The named cards and the measured card added after them: everything
+        # The named cards and the measured cards added after them: everything
         # whose tier follows a price band, which is every whole card except the
         # three cheap utility ones below. The two dearest measured cards ($32)
-        # are Unusual along with Fountain ($34).
+        # are Unusual along with Fountain ($34), while Intangible ($26) is one of
+        # the cheap measured cards.
         JOKER: Rarity.COMMON, PLANE: Rarity.COMMON, BANKER: Rarity.COMMON,
         PILLAR: Rarity.COMMON, ASTRONAUT: Rarity.COMMON,
         WRECKING_BALL: Rarity.COMMON, GLITCH: Rarity.COMMON,
         RIPPED_CARD: Rarity.COMMON, COZY: Rarity.COMMON,
         PAINTING: Rarity.COMMON, SYNTHESIZER: Rarity.COMMON,
+        INTANGIBLE: Rarity.COMMON,
         EXPLORER: Rarity.UNUSUAL, SKATER: Rarity.UNUSUAL, ISLAND: Rarity.UNUSUAL,
         FOUNTAIN: Rarity.UNUSUAL,
         # Unusual: single-mechanic helpers.
@@ -1243,12 +1260,25 @@ class Card:
         COZY: ("start", Scorer.CHIPS_ADD, 3.0, "cozy"),
         PAINTING: ("start", Scorer.CHIPS_ADD, 0.1, "painting"),
         SYNTHESIZER: ("start", Scorer.MULT_ADD, 0.75, "synthesizer"),
-        ISLAND: ("start", Scorer.MULT_MUL, 2.0, "island"),
+        # Island is an xMult card, and xMult is a run-end calculation: it pays
+        # with the other end cards rather than at the start of the run.
+        ISLAND: ("end", Scorer.MULT_MUL, 2.0, "island"),
         # The first card in this table that was never a named condition: it
         # measures a run the same way the rest of them do, so it plays through
         # the same start/end machinery. Its ratio is exactly 1.0, which is what
         # makes one unit +0.25 xMult (see the standard bases above).
         FOUNTAIN: ("end", Scorer.MULT_MUL, 1.0, "pipe_streak"),
+        # Intangible pays +0.5 mult an inside second, which is a ratio of 0.125
+        # (4 x 0.125 = 0.5, exactly as Plane's 0.5 is 15 chips and Banker's 1/30
+        # is 1 chip per $10). Its second clause pays 30x that rate, and the
+        # measure it reads is weighted to match: one second inside a locked
+        # board unit counts as 30 ordinary seconds, so the single ratio serves
+        # both (+0.5 mult a block second, +15 a locked-unit second — see
+        # cards._named_card_units). "Inside" is any overlap of the marble with a
+        # block's hitbox, so both clauses are positions only a phasing marble can
+        # be in (see Game._count_inside_time). It fires at the END of the run,
+        # because both measures are only final once the marbles have stopped.
+        INTANGIBLE: ("end", Scorer.MULT_ADD, 0.125, "inside_time"),
     }
 
     @classmethod

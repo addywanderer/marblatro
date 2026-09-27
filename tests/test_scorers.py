@@ -45,6 +45,8 @@ class ScorersTests(GameTestCase):
 
 
     def test_mult_scorer_multiplies_score(self):
+        # An xMult block BANKS its factor: xMult is a run-end calculation (see
+        # _apply_xmult), so the multiplier only moves when the run settles.
         block = main.Block(0, 0, scorer=main.Scorer.MULT_MUL)
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
@@ -52,7 +54,11 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertEqual(self.game.score_mult, 1.5)
+        self.assertEqual(self.game.score_mult, 1)             # not yet
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1.5)
+        self.game._flush_run_xmult()
+        self.assertAlmostEqual(self.game.score_mult, 1.5)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)     # spent
         self.assertEqual(self.game.score_chips, 0)
 
 
@@ -116,6 +122,15 @@ class ScorersTests(GameTestCase):
         # The A key rotates a pipe to a horizontal gap; passing through that
         # cavity also triggers the scorer.
         chips, left = self._pipe_drop(angle=90)
+        self.assertEqual(chips, 30)
+        self.assertEqual(left, 0)
+
+
+    def test_drain_scorer_triggers_when_marble_falls_through_funnel(self):
+        # A drain's scorer triggers while the marble falls through its funnel,
+        # even though the marble never touches the curved walls — the same rule
+        # the pipe's central cavity follows (see physics._inside_drain_cavity).
+        chips, left = self._drain_drop()
         self.assertEqual(chips, 30)
         self.assertEqual(left, 0)
 
@@ -185,7 +200,7 @@ class ScorersTests(GameTestCase):
         self.assertEqual(self.game.last_run_cash_gained, 0)
 
 
-    def test_sharp_scorer_triples_mult_when_touched(self):
+    def test_sharp_scorer_triples_the_multiplier_as_the_run_ends(self):
         block = main.Block(0, 0, scorer=main.Scorer.SHARP)
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
@@ -193,8 +208,11 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertEqual(self.game.score_mult, 3)  # 1 * 3
+        self.assertEqual(self.game.score_mult, 1)      # banked, not applied
+        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
         self.assertEqual(block.triggers_left, 0)
+        self.game._flush_run_xmult()
+        self.assertEqual(self.game.score_mult, 3)      # 1 * 3, at the end
 
 
     def test_sharp_scorer_block_destroyed_on_continue(self):
@@ -427,10 +445,15 @@ class ScorersTests(GameTestCase):
 
 
     def test_random_scorer_xmult_branch_multiplies_by_one_point_three(self):
+        # The xMult reward is an xMult like any other, so it banks for the end
+        # of the run; the chips and mult rewards land where they trigger.
         self.game.score_chips = 100
         self.game.score_mult = 2
         self._trigger_random_block(0.9)  # last third -> +0.3 xMult (x1.3)
         self.assertEqual(self.game.score_chips, 100)
+        self.assertEqual(self.game.score_mult, 2)
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1.3)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 2 * 1.3)
 
 
@@ -756,7 +779,8 @@ class ScorersTests(GameTestCase):
 
 
     def test_colossus_pays_xmult_per_pixel_above_the_base_radius(self):
-        # A marble grown to 16 px (8 px above the base 8) pays +0.8 xMult.
+        # A marble grown to 16 px (8 px above the base 8) banks +0.8 xMult; the
+        # run multiplies by it when it settles.
         block = main.Block(0, 0, scorer=main.Scorer.COLOSSUS)
         self.game.grid[(0, 0)] = block
         self.game.run_active = True
@@ -767,6 +791,8 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1 + 0.1 * 8)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 2 * (1 + 0.1 * 8))
         self.assertEqual(block.triggers_left, 0)
 
@@ -782,6 +808,7 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.1 * 24)
 
 
@@ -950,6 +977,9 @@ class ScorersTests(GameTestCase):
         self.game.run_active = True
         self.game.score_mult = 2
         self.game._handle_block_contacts([block])
+        self.assertEqual(self.game.score_mult, 2)          # banked for the end
+        self.assertAlmostEqual(self.game.run_xmult_pending, 2.0)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 2 * 2.0)  # +1 xMult
         self.assertEqual(block.triggers_left, 0)
 
@@ -1252,13 +1282,15 @@ class ScorersTests(GameTestCase):
         self.assertLess(marble.air_streak, 0.2)
 
 
-    def test_satanic_block_multiplies_mult_by_6_66_when_touched(self):
+    def test_satanic_block_multiplies_mult_by_6_66_at_the_end(self):
         block = main.Block(0, 0, scorer=main.Scorer.SATANIC)
         self.game.score_mult = 2
         self.game.run_active = True
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
+        self.assertEqual(self.game.score_mult, 2)       # banked, not applied
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 2 * 6.66)
         self.assertEqual(block.triggers_left, 0)
 
@@ -1281,8 +1313,11 @@ class ScorersTests(GameTestCase):
 
 
     def test_sharp_then_mult_then_sharp_sequence(self):
-        # A Sharp block, then a +Mult block, then a (different) Sharp block:
-        # triple, add 4 to the multiplier, then triple (1 -> 3 -> 7 -> 21).
+        # A Sharp block, then a +Mult block, then another Sharp block: the two
+        # x3 factors BANK and the +4 mult lands where it triggers, so the run
+        # settles at (1 + 4) x 3 x 3 = 45 rather than tripling in between
+        # ((1 x 3) + 4) x 3 = 21. An xMult that lands late multiplies everything
+        # the run earned before it, which is what "fires at the end" means.
         self.game.score_mult = 1
         self.game.run_active = True
 
@@ -1293,11 +1328,16 @@ class ScorersTests(GameTestCase):
             self.game._handle_block_contacts([block])
 
         fire(main.Block(0, 0, scorer=main.Scorer.SHARP))
-        self.assertAlmostEqual(self.game.score_mult, 3)
+        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
         fire(main.Block(0, 0, scorer=main.Scorer.MULT_ADD, scorer_amount=4))
-        self.assertAlmostEqual(self.game.score_mult, 7)
+        self.assertAlmostEqual(self.game.score_mult, 5)
+        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
         fire(main.Block(0, 0, scorer=main.Scorer.SHARP))
-        self.assertAlmostEqual(self.game.score_mult, 21)
+        self.assertAlmostEqual(self.game.score_mult, 5)
+        self.assertAlmostEqual(self.game.run_xmult_pending, 9)
+
+        self.game._flush_run_xmult()
+        self.assertAlmostEqual(self.game.score_mult, 45)
 
 
     def test_a_naturally_v2_action_is_already_maxed(self):
@@ -1445,7 +1485,7 @@ class ScorersTests(GameTestCase):
         self.assertFalse(self.game._action_spirit(
             action, main.CardItem(main.Card.GARDEN, 36)))
 
-        self.game.tokens = [main.ScorerToken(main.Scorer.CASH, 15)
+        self.game.tokens = [_token(main.Scorer.CASH, 15)
                             for _ in range(main.MAX_TOKENS)]
         keeper = main.Block(5, 3, scorer=main.Scorer.CASH, scorer_amount=15)
         self.game.grid[(5, 3)] = keeper
@@ -1460,21 +1500,24 @@ class ScorersTests(GameTestCase):
         self.game._action_spirit(main.ActionItem(main.Action.SPIRIT, 36), seed)
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.upgrades_enabled = False
-        self.game.score_mult = 1
+        # What the run starts with is the game's own business: read it from a run
+        # with no tokens, then let the token fire on top of it.
+        base_chips, base_mult = self._start_run_base()
 
         self.assertTrue(self.game.reset_run())
 
-        # +4 mult from the kept scorer, on top of the fresh run's x1.
-        self.assertEqual(self.game.score_mult, 5)
+        # +4 mult from the kept scorer, on top of the run's own starting mult.
+        self.assertEqual(self.game.score_mult, base_mult + 4)
+        self.assertEqual(self.game.score_chips, base_chips)
         self.assertTrue(self.game.tokens[0].fired)
 
 
     def test_a_satanic_token_dies_with_its_scorer_and_a_sharp_one_usually_survives(self):
         # Saturnic scorers destroy themselves after a run, so the token does
         # too; a Sharp scorer only has its usual 1/4 destruction chance.
-        satanic = main.ScorerToken(main.Scorer.SATANIC, 6.66, runs_left=None)
+        satanic = _token(main.Scorer.SATANIC, 6.66)
         satanic.fired = True
-        sharp = main.ScorerToken(main.Scorer.SHARP, 3, runs_left=None)
+        sharp = _token(main.Scorer.SHARP, 3)
         sharp.fired = True
         self.game.tokens = [satanic, sharp]
 

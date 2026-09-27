@@ -213,6 +213,67 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(fresh.save_slot, 3)
         self.assertFalse(fresh.run_active)
 
+
+    def test_random_outcomes_save_and_load(self):
+        # An item's pre-rolled RANDOM/LUCKY reward is part of the save, so
+        # loading a save is never a chance to reroll a block or a card the
+        # player could already see (a load draws a fresh run seed, see
+        # save_system._load_save_data).
+        self.game.save_slot = 2
+        block = main.Block(1, 1, scorer=main.Scorer.RANDOM)
+        block.random_rolls = {"reward": 1, "scorer": main.Scorer.RANDOM,
+                              "run": self.game.run_number}
+        self.game.grid[(1, 1)] = block
+        card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                          main.Scorer.LUCKY)
+        card.random_rolls = {"chips": False, "cash": True,
+                             "scorer": main.Scorer.LUCKY,
+                             "run": self.game.run_number}
+        self.game.cards.append(card)
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 2)
+
+        self.assertEqual(fresh.grid[(1, 1)].random_rolls["reward"], 1)
+        self.assertEqual(fresh.cards[0].random_rolls["cash"], True)
+        # And the reloaded block really does pay what the run had chosen, even
+        # though a 0.9 draw would pay xMult if it rolled now.
+        fresh.score_mult = 1
+        fresh.run_active = True
+        fresh.marbles = [main.Marble(300, 300)]
+        fresh.marbles[0].collisions_this_tick = [fresh.grid[(1, 1)]]
+        with mock.patch("main.random.random", return_value=0.9):
+            fresh._handle_block_contacts([fresh.grid[(1, 1)]])
+        self.assertEqual(fresh.score_mult, 1 + 5)
+
+
+    def test_a_refunded_blocks_roll_and_triggers_save_and_load(self):
+        # A block erased to the toolbox carries what it had left (see
+        # main._refund_block): its remaining triggers and this run's outcome
+        # both survive the save, so a load is still a move.
+        self.game.save_slot = 4
+        block = main.Block(2, 2, scorer=main.Scorer.RANDOM, trigger_limit=3)
+        block.random_rolls = {"reward": 0, "scorer": main.Scorer.RANDOM,
+                              "run": self.game.run_number}
+        block.triggers_left = 1
+        self.game.grid[(2, 2)] = block
+        self.game._erase_block_at(2, 2)
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 4)
+
+        item = next(i for i in fresh.toolbox.items
+                    if getattr(i, "scorer", None) == main.Scorer.RANDOM)
+        self.assertEqual(item.triggers_left, 1)
+        self.assertEqual(item.random_rolls["reward"], 0)
+
+
     def test_board_unlock_state_saves_and_loads(self):
         # A new game locks the board to the centered 2x3; squares unlocked in
         # the shop and Board Units still in hand persist through a save/load
@@ -484,14 +545,15 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(fresh.tesseract_bonus, 1.0)
 
     def test_spirit_tokens_save_and_load(self):
-        # Spirit tokens persist: scorer, amount, the sacrificed block's cell and
-        # effects, and how many runs are left (None = permanent).
+        # Spirit tokens persist as the whole block they kept: its shape,
+        # effects, cell, rolled magnitudes and scorer, plus how many runs are
+        # left (None = permanent).
         self.game.save_slot = 5
-        self.game.tokens = [main.ScorerToken(main.Scorer.MULT_ADD, 4,
-                                             shape=main.Shape.CIRCLE,
-                                             effects=[main.Effect.BOUNCY],
-                                             x=3, y=4, runs_left=2),
-                            main.ScorerToken(main.Scorer.CASH, 15, runs_left=None)]
+        self.game.tokens = [_token(main.Scorer.MULT_ADD, 4,
+                                   shape=main.Shape.CIRCLE,
+                                   effects=[main.Effect.BOUNCY],
+                                   x=3, y=4, runs_left=2),
+                            _token(main.Scorer.CASH, 15)]
         save_system.save_game(self.game)
         data = save_system._read_slot(5)
         self.assertEqual(len(data["tokens"]), 2)
@@ -508,12 +570,193 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(kept.effects, [main.Effect.BOUNCY])
         self.assertEqual((kept.x, kept.y), (3, 4))
         self.assertEqual(kept.runs_left, 2)
+        self.assertTrue(kept.block.is_token)
         self.assertIsNone(fresh.tokens[1].runs_left)
+        # A save written while tokens were only a scorer (the old 7-field list)
+        # is read back into the block it describes.
+        fresh.tokens = [main.ScorerToken(main.Block(0, 0))]
+        data["tokens"] = [[main.Scorer.MULT_ADD, 4, main.Shape.CIRCLE,
+                           [main.Effect.BOUNCY], 3, 4, 2]]
+        save_system._load_save_data(fresh, data, 5)
+        self.assertEqual(len(fresh.tokens), 1)
+        self.assertEqual(fresh.tokens[0].scorer, main.Scorer.MULT_ADD)
+        self.assertEqual(fresh.tokens[0].shape, main.Shape.CIRCLE)
+        self.assertEqual((fresh.tokens[0].x, fresh.tokens[0].y), (3, 4))
+        self.assertEqual(fresh.tokens[0].runs_left, 2)
         # A save from before tokens existed loads with none.
-        fresh.tokens = [main.ScorerToken(main.Scorer.CASH, 15)]
         del data["tokens"]
         save_system._load_save_data(fresh, data, 5)
         self.assertEqual(fresh.tokens, [])
+
+    def test_the_trials_decided_cells_ride_through_a_save(self):
+        # Hands tied and Crumbling decide board CELLS once for the run (see
+        # main.Game._roll_trial_decision) and then replay that decision, so a
+        # save has to carry it: loading a save is not a chance to re-roll which
+        # blocks the trial picked.
+        self.game.grid.clear()
+        for gx in range(8):
+            self.game.grid[(gx, 0)] = main.Block(gx, 0,
+                                                 scorer=main.Scorer.CHIPS_ADD,
+                                                 scorer_amount=10)
+        self.game.current_trial = main.Trial.CRUMBLING
+        with mock.patch("main.random.sample", side_effect=lambda seq, k: seq[:k]):
+            self.game._apply_trial()
+        cells = set(self.game.trial_decision["cells"])
+        self.assertEqual(cells, {(0, 0), (1, 0)})
+
+        self.game.save_slot = 6
+        save_system.save_game(self.game)
+        data = save_system._read_slot(6)
+        self.assertEqual(data["trial_decision"]["trial"], main.Trial.CRUMBLING)
+        self.assertEqual(data["trial_decision"]["cells"], [[0, 0], [1, 0]])
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 6)
+        self.assertEqual(fresh.trial_decision["cells"], cells)
+        # The trial marks the SAME blocks the run had picked. The patched draw
+        # would pick the other end of the board, so this proves the decision came
+        # from the save rather than being rolled again.
+        with mock.patch("main.random.sample", side_effect=lambda seq, k: seq[-k:]):
+            fresh._apply_trial()
+        self.assertEqual({(block.x, block.y)
+                          for block in fresh.trial_fragile_blocks}, cells)
+
+    def test_the_shuffled_order_rides_through_a_save(self):
+        # Shuffled's order is decided once for the run, and is stored as
+        # card-area SLOTS so it still points at the same cards after a load (the
+        # card items themselves are rebuilt).
+        values = [main.match_group_card(main.match_group_for_shape(shape),
+                                        main.Scorer.MULT_ADD)
+                  for shape in (main.Shape.PIPE, main.Shape.SLOPE)]
+        values += [main.Card.COUPON, main.Card.MARKET]
+        self.game.cards = [main.CardItem(value, 40) for value in values]
+
+        def rotate(seq):
+            """Stand in for random.shuffle: one card round, deterministically."""
+            seq.insert(0, seq.pop())
+
+        self.game.current_trial = main.Trial.SHUFFLED
+        with mock.patch("main.random.shuffle", side_effect=rotate):
+            self.game._apply_trial()
+        order = [card.value for card in self.game.cards]
+        expected = list(values)          # the trial reverses the area first...
+        expected.reverse()
+        rotate(expected)                 # ...and then shuffles it
+        self.assertEqual(order, expected)
+        self.assertNotEqual(order, values)   # it really did shuffle
+
+        self.game.save_slot = 6
+        save_system.save_game(self.game)
+        data = save_system._read_slot(6)
+        # The card area is saved in the decided order, so the stored slots are
+        # that order's own positions: what matters is that they re-anchor the
+        # decision to the card items REBUILT on load (see
+        # _restore_trial_decision), which the assertions below check.
+        self.assertEqual(data["trial_decision"]["order"], [0, 1, 2, 3])
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 6)
+        self.assertEqual([card.value for card in fresh.cards], order)
+        self.assertEqual([card.value for card in fresh.trial_decision["order"]],
+                         order)
+        # A card bought after the load still follows the decided ones — and the
+        # order re-applied is the DECIDED one: the patched shuffle would give a
+        # different order if the decision had been dropped.
+        fresh.cards.append(main.CardItem(main.Card.SHOWMAN, 40))
+        with mock.patch("main.random.shuffle", side_effect=rotate):
+            fresh._apply_trial()
+        self.assertEqual([card.value for card in fresh.cards],
+                         order + [main.Card.SHOWMAN])
+
+    def test_the_trials_other_picks_ride_through_a_save(self):
+        # Card cutter's slot, Marble weight's factor and Deal breaker's group
+        # are decided once for the run as well (see
+        # save_system._serialize_trial_decision), and each comes back usable by
+        # _apply_trial. Every case patches the draw the trial WOULD make if its
+        # decision had been dropped, so the assertion fails unless the pick came
+        # out of the save.
+        group = main.match_group_for_shape(main.Shape.PIPE)
+        card = _card_item(group, main.Scorer.MULT_ADD)
+
+        # Card cutter: the decided SLOT still cuts the same card.
+        self.game.trial_decision = {"trial": main.Trial.CARD_CUTTER,
+                                    "card_index": 2}
+        data = save_system._save_data(self.game)
+        fresh = main.Game()
+        fresh.trials_enabled = False
+        fresh.cards = [main.CardItem(main.Card.COUPON, 40) for _ in range(3)]
+        fresh.current_trial = main.Trial.CARD_CUTTER
+        fresh.trial_decision = save_system._restore_trial_decision(data, fresh)
+        with mock.patch("main.random.randrange", return_value=0):
+            fresh._apply_trial()
+        self.assertIs(fresh.disabled_card, fresh.cards[2])
+
+        # Marble weight: the decided factor is still the one applied.
+        self.game.trial_decision = {"trial": main.Trial.MARBLE_WEIGHT,
+                                    "weight": 0.9}
+        data = save_system._save_data(self.game)
+        fresh.trial_decision = save_system._restore_trial_decision(data, fresh)
+        fresh.current_trial = main.Trial.MARBLE_WEIGHT
+        with mock.patch("main.random.choice", return_value=2.0):
+            fresh._apply_trial()
+        self.assertEqual(fresh.trial_marble_weight, 0.9)
+
+        # Deal breaker: the decided group comes back as a TUPLE (which is what
+        # the card comparison needs), not the list JSON stored it as.
+        self.game.trial_decision = {"trial": main.Trial.DEAL_BREAKER,
+                                    "group": group}
+        data = save_system._save_data(self.game)
+        fresh.cards = [card, main.CardItem(main.Card.COUPON, 40)]
+        fresh.trial_decision = save_system._restore_trial_decision(data, fresh)
+        fresh.current_trial = main.Trial.DEAL_BREAKER
+        with mock.patch("main.random.choice", return_value=("shape", (1,))):
+            fresh._apply_trial()
+        self.assertEqual(fresh.trial_decision["group"], group)
+        self.assertIn(fresh.trial_decision["group"], main.MATCH_GROUPS)
+        self.assertEqual(fresh.deal_broken_cards, {card})
+
+        # A save from before any of this loads with no decision at all.
+        del data["trial_decision"]
+        self.assertIsNone(save_system._restore_trial_decision(data, fresh))
+
+    def test_a_random_tokens_kept_reward_rides_through_a_save(self):
+        # A Spirit token's Random reward is decided when the block is sacrificed
+        # and tagged as KEPT (see main.KEPT_ROLL_RUN), so it rides through a save
+        # like any other item's roll (see _serialize_random_rolls) — the loaded
+        # token pays the reward it was sacrificed with, not a fresh draw.
+        self.game.save_slot = 5
+        token = _token(main.Scorer.RANDOM, x=3, y=4)
+        token.block.random_rolls = {"reward": 0, "scorer": main.Scorer.RANDOM,
+                                    "run": main.KEPT_ROLL_RUN}
+        self.game.tokens = [token]
+
+        save_system.save_game(self.game)
+        data = save_system._read_slot(5)
+        self.assertEqual(data["tokens"][0]["block"]["random_rolls"],
+                         {"reward": 0, "scorer": main.Scorer.RANDOM, "run": "kept"})
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 5)
+        self.assertEqual(fresh.tokens[0].block.random_rolls,
+                         token.block.random_rolls)
+        fresh.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        fresh.upgrades_enabled = False
+        # The chips a run STARTS with are the game's to set (see reset_run), so
+        # they are read from a run with no tokens in play first.
+        tokens, fresh.tokens = fresh.tokens, []
+        fresh.reset_run()
+        base_chips, base_mult = fresh.score_chips, fresh.score_mult
+        fresh.tokens = tokens
+        with mock.patch("main.random.random", return_value=0.9):
+            self.assertTrue(fresh.reset_run())
+        self.assertEqual(fresh.score_chips, base_chips + 35)  # not the xMult a draw pays
+        self.assertEqual(fresh.score_mult, base_mult)
 
     def test_required_scores_are_saved_and_loaded(self):
         # The lazily-grown REQUIRED_SCORES schedule is stored in the save so a

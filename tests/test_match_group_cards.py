@@ -173,12 +173,18 @@ class MatchGroupRarityTests(GameTestCase):
                              if group[0] == "shape"))
 
     def test_every_group_is_offered_as_often_as_any_other(self):
-        # The offer pool holds each group ONCE and each whole card once, so a
-        # plain random choice from the pool is what sets a card's rarity: no
-        # group is rarer than another, and no scorer can tilt it.
+        # Every group holds exactly one entry per scorer in its tier's pool (see
+        # main.card_offer_entries: the tier is drawn first, then a card FLAT
+        # inside it), so no group is rarer than any other and no scorer can tilt
+        # it. The pool itself is the exact answer; the draw is measured too, but
+        # with a sample big enough that the sampling noise cannot flake.
+        common = main.card_offer_entries(components.Rarity.COMMON)
+        for group in components.MATCH_GROUPS:
+            self.assertEqual(common.count(group), 1,
+                             components.match_group_label(group))
         random.seed(4242)
         counts = collections.Counter()
-        for _ in range(6000):
+        for _ in range(60000):
             value = main.random_card_option_value()
             meta = components.match_group_card_meta(value)
             if meta is not None:
@@ -186,7 +192,7 @@ class MatchGroupRarityTests(GameTestCase):
         self.assertEqual(len(counts), len(components.MATCH_GROUPS))
         average = sum(counts.values()) / len(counts)
         for label, count in counts.items():
-            self.assertAlmostEqual(count / average, 1.0, delta=0.35, msg=label)
+            self.assertAlmostEqual(count / average, 1.0, delta=0.15, msg=label)
 
     def test_the_shop_draws_the_group_first_and_the_scorer_after_it(self):
         # The scorer is drawn AFTER the group (see main.random_prebuilt_card_value
@@ -400,9 +406,12 @@ class MatchGroupTrialTests(GameTestCase):
         self.assertEqual((self.game.score_chips, self.game.score_mult), (1, 1))
         # A card of another group still fires on its own block: Deal breaker
         # breaks one group, not the whole card area. (An xMult card at its
-        # average magnitude multiplies the multiplier by 1 + 0.25.)
+        # average magnitude banks x1.25, which the run settles by when it ends.)
         self._card_fire(main.Block(0, 0, shape=main.Shape.SLOPE,
                                    scorer=main.Scorer.NONE))
+        self.assertEqual(self.game.score_mult, 1)
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1.25)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 1.25)
 
 

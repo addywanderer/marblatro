@@ -362,6 +362,33 @@ class PhysicsEngine:
         ly = dx * sin_a + dy * cos_a
         return abs(lx) <= marble.radius and abs(ly) <= block.rect.height / 2
 
+    def _inside_drain_cavity(self, marble, block):
+        """True when the marble's center is inside a drain's funnel cavity.
+
+        A drain's scorer should trigger when the marble falls through its funnel
+        even if the marble never grazes the curved walls — the funnel opens the
+        full cell width at the top and tapers to a hole exactly the marble's
+        diameter wide at the bottom, so a marble dropping down the middle of it
+        touches nothing at all (the same idea as _inside_pipe_cavity). The
+        marble is transformed into the drain's local frame (rotated by the
+        drain's effective angle, so a rotated or spinning drain is tested
+        against the shape it draws) and compared with the cavity there: the
+        funnel is symmetric about the cell's center axis and its half-width at a
+        point along that axis comes from the block itself (see
+        Block.drain_cavity_half_width), so the cavity tested here is exactly the
+        gap the drawn walls leave.
+        """
+        angle = math.radians(getattr(block, "effective_angle", block.angle))
+        cx, cy = block.rect.center
+        dx = marble.position[0] - cx
+        dy = marble.position[1] - cy
+        cos_a, sin_a = math.cos(-angle), math.sin(-angle)
+        lx = dx * cos_a - dy * sin_a
+        ly = dx * sin_a + dy * cos_a
+        if abs(ly) > block.rect.height / 2:
+            return False
+        return abs(lx) <= block.drain_cavity_half_width(ly)
+
     def _collect_field_contacts(self, marble, blocks):
         """Register pass-through blocks whose cell the marble is inside.
 
@@ -371,8 +398,9 @@ class PhysicsEngine:
         Lock (a doorway) are pass-through fields in exactly the same way. Portal
         blocks are pass-through too, so a marble
         passing through a portal also activates its scorer. A pipe's scorer
-        triggers when the marble passes through its central cavity, even without
-        touching the pillars. The portal the marble just arrived at (an exit
+        triggers when the marble passes through its central cavity, and a
+        drain's when the marble falls through its funnel, even without touching
+        the pillars or the walls. The portal the marble just arrived at (an exit
         portal) is skipped so it doesn't score. Adding them to
         collisions_this_tick reuses the normal once-per-touch edge detection
         (they trigger on entry and again only after leaving).
@@ -388,9 +416,13 @@ class PhysicsEngine:
             pass_through = (block.shape in (Shape.NONE, Shape.KEY)
                             or (block.shape == Shape.LOCK
                                 and not getattr(block, "locked", True)))
-            # A marble passing through a pipe's cavity triggers the pipe's
-            # scorer, even though the marble never touches the pillars.
+            # A marble passing through a pipe's cavity — or falling through a
+            # drain's funnel — triggers that block's scorer, even though the
+            # marble never touches the solid parts of either shape.
             if block.shape == Shape.PIPE and self._inside_pipe_cavity(marble, block):
+                marble.collisions_this_tick.append(block)
+                continue
+            if block.shape == Shape.DRAIN and self._inside_drain_cavity(marble, block):
                 marble.collisions_this_tick.append(block)
                 continue
             if not pass_through and not is_portal:
@@ -510,11 +542,12 @@ class PhysicsEngine:
             marble._pre_move_position = marble.position.copy()
             marble.position += increment
             self._resolve_block_overlaps(marble, blocks)
-            # Pass-through fields (Shape.NONE) and portals are registered by
-            # sampling the marble's path after every sub-step (each moves at
-            # most MAX_STEP_DISTANCE px), so a fast marble can't skip a whole
-            # cell between frame-boundary checks. Once a portal teleports it,
-            # stop moving so the rest of this frame plays out from the exit.
+            # Pass-through fields (Shape.NONE), portals and the pipe/drain
+            # cavities are registered by sampling the marble's path after every
+            # sub-step (each moves at most MAX_STEP_DISTANCE px), so a fast
+            # marble can't skip a whole cell between frame-boundary checks. Once
+            # a portal teleports it, stop moving so the rest of this frame plays
+            # out from the exit.
             self._collect_field_contacts(marble, blocks)
             if self._portal_teleport(marble, blocks):
                 break
@@ -610,6 +643,21 @@ class PhysicsEngine:
         if block.shape == Shape.LOCK:
             return self._rect_collision(marble, block)
         return self._slope_collision(marble, block)
+
+    def overlaps_block(self, marble, block):
+        """True when any part of the marble overlaps the block's HITBOX.
+
+        The overlap the physics exists to resolve (see _block_collision), with no
+        margin: a marble RESTING on a block's surface — its centre exactly a
+        radius away from it — is not overlapping, and neither is one sitting in a
+        pipe's cavity, a drain's funnel, or a Shape.NONE/Key/opened-Lock/portal
+        cell, because none of those have a hitbox there to overlap.
+
+        So this is exactly "a position the marble could not have got into without
+        the phase effect on" (phasing moves the marble with no blocks at all, see
+        update): the only way to overlap a hitbox is to pass through it.
+        """
+        return self._block_collision(marble, block) is not None
 
     def _rect_collision(self, marble, block, margin=0.0):
         """Circle vs rectangle: return (outward_normal, penetration) or None."""

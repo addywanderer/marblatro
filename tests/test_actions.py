@@ -287,12 +287,14 @@ class ActionsTests(GameTestCase):
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
     def test_explorer_fraction_is_distance_over_total_grid_units(self):
-        # Explorer's xMult is 1 + (travelled grid units / total grid cells).
+        # Explorer's xMult is 1 + (travelled grid units / total grid cells), and
+        # it lands as the run settles (the finish path flushes the xMult bank).
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
         marble = self._add_marble()
         marble.distance = 1500.0
         self.game.score_mult = 10
         self.game._apply_cards_on_finish()
+        self.game._flush_run_xmult()
         expected = 10 * (1 + (1500 / main.GRID_SIZE) / (main.GRID_WIDTH * main.GRID_HEIGHT))
         self.assertAlmostEqual(self.game.score_mult, expected)
 

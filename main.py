@@ -91,17 +91,15 @@ FONT_SIZES = {
     "total": 52,     # score totals
 }
 BORD_WIDTH = 6
-REQUIRED_SCORES = [1]
+REQUIRED_SCORES = [100]
 # Total-score exponent: total = (chips * mult) ** exponent, where the exponent
 # is an EQUAL-weight linear combination of the run's time, distance, and
 # uniqueness. Each factor is normalized to 0..1 and more of it is always
 # better (no par time).
-TIME_IDEAL = 5.0  # ideal time for max time contribution
-TIME_SCALE = 3.0  # leniency on how close time can be for more exponent effect
-DISTANCE_SCALE = 10000.0  # px traveled that count as a 1/2 distance contribution
-UNIQUE_SCALE = 18  # unique shape/effect/scorer types for a 1/2 uniqueness contribution
-                  # should be 1/2 the total number of components (not including start and finish scorer,
-                  #  square shape, or none effect)
+TIME_IDEAL = 2.0  # ideal time for max time contribution
+TIME_SCALE = 50.0  # leniency on how close time can be for more exponent effect
+DISTANCE_SCALE = 5000.0  # px traveled that count as a 1/2 distance contribution
+UNIQUE_SCALE = 20  # unique shape/effect/scorer types for a 1/2 uniqueness contribution
 CASH_SCALE = 25
 QUICK_SCALE = 0.05  # chips a Quick scorer grants per px/s of the marble's speed
 RECENT_SPEED_DECAY = 0.9
@@ -142,11 +140,18 @@ MAX_ACTIONS = 2  # Maximum owned actions the action area can hold at once
 # How many of the action catalogue the shop offers at once (two distinct
 # actions, drawn at random each refresh).
 SHOP_ACTION_SLOTS = 2
-# Spirit tokens (see Action.SPIRIT): tokens kept out of a destroyed block,
-# shown as poker chips in a column to the right of the inventory.
+# Spirit tokens (see Action.SPIRIT): a token keeps the whole block a Spirit
+# destroyed and is drawn as that block, in a column to the right of the
+# inventory (see ui.draw_token).
 MAX_TOKENS = 5
 TOKEN_COORDS = (TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2] + 10, TOOLBOX_COORDS[1],
                 GRID_SIZE, GRID_SIZE * MAX_TOKENS)
+# The "run" a Spirit token's Random/Lucky block is tagged with: the reward was
+# decided when the block was sacrificed and is KEPT for every run the token
+# covers, so its tag is not a run number and never goes stale — replaying a run
+# or loading a save cannot reroll what the token pays (see
+# Game._run_random_result / _roll_kept_reward).
+KEPT_ROLL_RUN = "kept"
 # Owned-action row above the inventory's top-RIGHT corner (actions modify
 # blocks/cards).
 ACTION_AREA_COORDS = (940, 142, MAX_ACTIONS * GRID_SIZE, GRID_SIZE)
@@ -858,6 +863,25 @@ class Block:
             points.append(pts)
         return points
 
+    def drain_cavity_half_width(self, offset):
+        """Half-width of a drain's funnel cavity at a local y offset.
+
+        ``offset`` is measured along the funnel's own axis in the block's frame:
+        -height/2 at the cell's open top edge (where the funnel is the full cell
+        wide) to +height/2 at its bottom edge (where the walls leave a hole
+        exactly the marble's diameter wide). The walls inset by
+        ``wall_w * (2u - u * u)``, which is what leaves half the cell minus that
+        inset as the cavity, so this is the gap a marble has to be inside to
+        count as passing through the drain (see physics._inside_drain_cavity).
+        The drawn walls and the tested cavity both come from here, so the shape
+        a marble flows through and the shape it collides with cannot drift
+        apart.
+        """
+        wall_w = self.rect.width / 2 - MARBLE_RADIUS
+        u = (offset + self.rect.height / 2) / self.rect.height
+        u = min(1.0, max(0.0, u))  # beyond an edge: that edge's own width
+        return self.rect.width / 2 - wall_w * (2 * u - u * u)
+
     def _get_drain_walls(self):
         """The two funnel walls of a drain block, as convex polygons.
 
@@ -870,21 +894,27 @@ class Block:
         """
         left, top = self.rect.left, self.rect.top
         right, bottom = self.rect.right, self.rect.bottom
-        # The bottom opening is exactly the marble diameter, centered in the cell.
-        wall_w = self.rect.centerx - MARBLE_RADIUS - left
         samples = 8
         left_curve = []
         right_curve = []
         for i in range(samples + 1):
-            u = i / samples
-            y = top + u * self.rect.height
-            inset = wall_w * (2 * u - u * u)  # 0 at the top, wall_w at the bottom
-            left_curve.append((left + inset, y))
-            right_curve.append((right - inset, y))
+            y = top + i / samples * self.rect.height
+            # The cavity's own half-width, so the drawn walls are exactly the
+            # gap a marble is tested against (see drain_cavity_half_width).
+            half = self.drain_cavity_half_width(y - self.rect.centery)
+            left_curve.append((self.rect.centerx - half, y))
+            right_curve.append((self.rect.centerx + half, y))
         # Each wall: down the cell's outer edge, across the bottom face, then up
-        # the curved inner surface back to the top corner (a convex wedge).
-        left_wall = [(left, top), (left, bottom), (left + wall_w, bottom)] + left_curve[:0:-1]
-        right_wall = [(right, top), (right, bottom), (right - wall_w, bottom)] + right_curve[:0:-1]
+        # the curved inner surface back to the top corner (a convex wedge). The
+        # bottom face spans the cavity's own width there — the marble-diameter
+        # opening the funnel tapers to.
+        opening_half = self.drain_cavity_half_width(self.rect.height / 2)
+        left_wall = ([(left, top), (left, bottom),
+                      (self.rect.centerx - opening_half, bottom)]
+                     + left_curve[:0:-1])
+        right_wall = ([(right, top), (right, bottom),
+                       (self.rect.centerx + opening_half, bottom)]
+                      + right_curve[:0:-1])
         # The drain honors its base angle (the A key) and any ROTATE spin, so a
         # rotated drain's hitbox matches its drawn shape.
         if self.angle % 360 != 0 or self.has_effect(Effect.ROTATE):
@@ -1476,7 +1506,7 @@ class BlockItem:
 
     def __init__(self, col, row, shape, effect, scorer, scorer_amount, price, name,
                  portal_number=0, key_number=0, trigger_limit=1, trigger_paid=0,
-                 effects=None, effect_amounts=None):
+                 effects=None, effect_amounts=None, angle=None):
         self.col = col
         self.row = row
         self.shape = shape
@@ -1494,6 +1524,10 @@ class BlockItem:
         # refunded on top of the resale value when the block is sold.
         self.trigger_limit = trigger_limit
         self.trigger_paid = trigger_paid
+        # The rotation the block already had when it was erased back into the
+        # toolbox (see _refund_block). None for a shop block: it has no rotation
+        # of its own and takes the build tool's angle when it is placed.
+        self.angle = angle
 
     def effect_magnitude(self, effect):
         """This block's own strength for an effect (the average when unrolled)."""
@@ -1545,30 +1579,72 @@ class ActionItem:
 
 
 class ScorerToken:
-    """A Spirit token: a destroyed block's scorer, kept firing each run.
+    """A Spirit token: a whole sacrificed block, kept firing each run.
 
-    Spirit destroys a block and keeps its scorer: at the start of every run it
-    still covers, the token fires that scorer once (see Game._apply_tokens).
-    The token carries the destroyed block's own data — its amount, effects and
-    the cell it stood in — so board-relative payoffs (Summit, Powerline,
-    Frontier, Cluster) and effect-count payoffs (Effective) keep working.
-    ``runs_left`` is None for a v2 token, which never expires.
+    Spirit destroys a block and keeps the BLOCK: the token stores a copy of it
+    (``block``), so a run fires it exactly as if a marble had collided with it —
+    the block's own scorer pays through the block-scorer path, and the player's
+    cards whose group matches the block fire with it (see Game._fire_token).
+    The stored block keeps everything the payoffs read: its cell (Summit,
+    Powerline, Frontier, Cluster), its shape and effects (Effective), its angle
+    and its own rolled magnitudes.
+
+    WHEN it fires follows the payoff: a scorer that pays a MULTIPLIER (xMult,
+    Sharp, Satanic, Effective — Scorer.MULTIPLIER_SCORERS) fires as the run
+    SETTLES, because xMult is a run-end calculation (see Game._apply_xmult),
+    and every other scorer fires at the START of the run. ``runs_left`` is None
+    for a v2 token, which never expires.
     """
     kind = "token"
 
-    def __init__(self, scorer, amount, shape=Shape.RECT, effects=None,
-                 x=0, y=0, runs_left=None):
-        self.scorer = scorer
-        self.scorer_amount = amount
-        self.shape = shape
-        self.effects = list(effects) if effects is not None else [Effect.NONE]
-        self.x = x
-        self.y = y
+    def __init__(self, block, runs_left=None):
+        self.block = block
+        # A token is not a marble-touched board block: marking it keeps the
+        # Watch card from gating it (see Game._watch_blocks_out_of_play).
+        block.is_token = True
         self.runs_left = runs_left  # None = permanent (v2)
-        # True once the token has fired in the run now in progress, so a token
-        # created mid-run is not spent by that same run's end.
+        # True once the run's start has picked this token up: a multiplier
+        # token is held back for the run's end, so this is what remembers that
+        # the run it belongs to has begun. A token created mid-run is never
+        # armed, so the run it was born in cannot spend it.
+        self.armed = False
+        # True once the token has actually paid in the run now in progress.
         self.fired = False
-        self.name = Scorer.name(scorer)
+
+    # The stored block answers for the token, so the drawing, the save file and
+    # the sidebar keep reading one thing.
+    @property
+    def scorer(self):
+        return self.block.scorer
+
+    @property
+    def scorer_amount(self):
+        return self.block.scorer_amount
+
+    @property
+    def shape(self):
+        return self.block.shape
+
+    @property
+    def effects(self):
+        return self.block.effects
+
+    @property
+    def x(self):
+        return self.block.x
+
+    @property
+    def y(self):
+        return self.block.y
+
+    @property
+    def name(self):
+        return Scorer.name(self.block.scorer)
+
+    @property
+    def fires_at_end(self):
+        """True when the token pays as the run settles (a multiplier scorer)."""
+        return self.block.scorer in Scorer.MULTIPLIER_SCORERS
 
 
 class CashBreakdown:
@@ -2127,8 +2203,8 @@ class Game:
         """Start a brand-new game: clear the board and reset all progress."""
         self.marbles = []
         self.grid = {}
-        self.score_chips = 1
-        self.score_mult = 1
+        self.score_chips = 30
+        self.score_mult = 4
         self.run_active = False
         self.run_complete = False
         self.run_cleared = False
@@ -2138,10 +2214,10 @@ class Game:
         self.run_number = 0  # total runs completed this game (0..TOTAL_RUNS)
         self.round_index = 0  # current round (0-based)
         self.run_in_round = 0  # current run within the round (0-based)
-        self.required_score = 1
+        self.required_score = REQUIRED_SCORES[0]  # the score target for the current run
         # A fresh game starts with a fresh required-score schedule. The module
         # list is persisted in saves, so loading overwrites it afterward.
-        REQUIRED_SCORES[:] = [1]
+        REQUIRED_SCORES[:] = [100]
         self.run_results = []  # True when the run met its score target
         self.runs_cleared = 0
         self.failed_runs = 0
@@ -2267,12 +2343,25 @@ class Game:
         # every run; see _count_pipe_streak.
         self.pipe_streak_blocks = []
         self.pipe_streak_run_units = 0
+        # The xMult this run has banked: every xMult a run earns — from blocks,
+        # cards and Spirit tokens alike — multiplies into this product and lands
+        # on the multiplier in one go as the run settles (see _apply_xmult /
+        # _flush_run_xmult).
+        self.run_xmult_pending = 1.0
         # Bomb-scorer blocks touched THIS RUN, keyed by their grid cell. They
         # detonate after a run (unlock radius, then destroyed).
         self.bomb_cells = set()
         # Seconds the marble(s) spent airborne THIS RUN (plane card). A marble
         # is in the air when it has no block contact that frame.
         self.air_time = 0.0
+        # Seconds the marble(s) spent inside a placed block's HITBOX this run,
+        # and inside a LOCKED board unit's this run (intangible card). Both are
+        # accumulated per marble per frame while the run plays (see
+        # _count_inside_time); a locked unit's second counts 30 of an ordinary
+        # one, which is the rate ratio the card pays (see cards._named_card_units)
+        # and is applied where the measure is read, not here.
+        self.inside_block_time = 0.0
+        self.inside_locked_time = 0.0
         # Strength of the marble-box fire (0..FIRE_MAX_INTENSITY): it grows
         # while the score passes the required score and dies down after the run.
         self.fire_intensity = 0.0
@@ -3196,12 +3285,14 @@ class Game:
         It: swaps out whatever stood in the cell (refunding it), builds the
         block from the armed parts, stamps it with the price of the item it
         came FROM (so a sale, Death and Painting read what the player actually
-        paid rather than a re-summed part total), hands out its triggers (the
-        Concert card's bonus included), keeps a portal in step with its
-        partner, consumes a bought block from the toolbox, unsets the old cell
-        when an already-placed block is moved, and clears the selection. It
-        refuses a locked cell or nothing selected, so a direct call can never
-        place a block where a click could not.
+        paid rather than a re-summed part total), carries over a RANDOM/LUCKY
+        outcome and the remaining triggers the item already had for this run,
+        hands out its triggers when it is a FRESH block (the Concert card's
+        bonus included), keeps a portal in step with its partner, consumes a
+        bought block from the toolbox, unsets the old cell when an
+        already-placed block is moved, and clears the selection. It refuses a
+        locked cell or nothing selected, so a direct call can never place a
+        block where a click could not.
         """
         if not (0 <= gx < GRID_WIDTH and 0 <= gy < GRID_HEIGHT):
             return False
@@ -3236,10 +3327,37 @@ class Game:
             # A block with no stored price of its own (hand-built) gets one
             # materialized once, so it never drifts afterwards.
             block_resale_price(placed)
-        # Placing a block is where its triggers are handed out, so a block
-        # placed while Concert is owned arrives with its extra one (and a block
-        # that never scores keeps its limit either way).
-        placed.triggers_left = self._trigger_limit(placed)
+        # A block the player MOVED keeps the trial's mark on it (see
+        # _carry_trial_mark): the block standing in the new cell is a new object
+        # built from the selection, so the mark has to be handed over here —
+        # BEFORE the trigger count below, which reads it (a Hands tied block is
+        # debuffed by an identity test, see _trigger_limit).
+        self._carry_trial_mark(item, gx, gy, placed)
+        # A block the player ALREADY had keeps the RANDOM/LUCKY outcome it
+        # rolled for this run: the roll belongs to the block they built, not to
+        # the cell it happens to sit in, so picking a Random block up and
+        # putting it down again must not reroll its reward (see
+        # _run_random_result). Erasing a block and putting it back down goes
+        # through the same door — the roll rides along on the toolbox item (see
+        # _refund_block). A block that has not rolled yet carries nothing, and
+        # an item from an earlier run carries a STALE roll: its tag makes the
+        # next run roll it fresh like everything else.
+        rolls = getattr(item, "random_rolls", None)
+        if rolls is not None:
+            placed.random_rolls = dict(rolls)
+        # Placing a FRESH block is where its triggers are handed out, so a
+        # block placed while Concert is owned arrives with its extra one (and a
+        # block that never scores keeps its limit either way). MOVING a block —
+        # or putting an erased one back down — is not a fresh placement: it
+        # keeps the triggers it had left, so nudging a half-spent block around
+        # the board cannot refill it. The carried count is clamped to the limit
+        # the block has NOW (in case Concert went away in between), and starting
+        # a run hands every block its triggers back anyway (see reset_run), so
+        # the carried count only ever lives in the build state.
+        limit = self._trigger_limit(placed)
+        remaining = getattr(item, "triggers_left", None)
+        placed.triggers_left = (limit if remaining is None
+                                else max(0, min(int(remaining), limit)))
         # A placed portal inherits its partner's trigger count so the pair stays
         # in lockstep (e.g. both exhausted after one use).
         self._sync_portal_pair_triggers(placed, list(self.grid.values()))
@@ -3261,6 +3379,44 @@ class Game:
         self.selected_scorer_amount = None
         self.selected_effect_amounts = {}
         return True
+
+    def _carry_trial_mark(self, item, gx, gy, placed):
+        """Hand a trial's mark to the block the player has just put down.
+
+        Hands tied and Crumbling pick board CELLS and remember the blocks they
+        marked (see _roll_trial_decision / _apply_trial). Picking a marked block
+        up would otherwise leave that mark behind twice over: its decided cell
+        stayed on the square it left (marking whatever is put there next) while
+        the block — a NEW object, rebuilt by _place_block_at from the selection —
+        was not in the trial's sets at all, so a Crumbling block stopped
+        shattering and a Hands tied block got its trigger back.
+
+        Taking a block up carries the mark on the item (see _refund_block), and
+        this puts it back where the block now stands: the decided cell moves with
+        the block, the marked block in the trial's sets is swapped for the one
+        now on the board, and the block's own fragility flag rides along. A block
+        the trial never marked carries nothing, and neither does an item whose
+        mark is spent (the sets are rebuilt from the board every run, see
+        _apply_trial), so a fresh placement is left alone.
+        """
+        debuffed = item in self.trial_debuffed_blocks
+        fragile = item in self.trial_fragile_blocks
+        if not (debuffed or fragile):
+            return
+        decision = self.trial_decision
+        cells = decision.get("cells") if decision else None
+        source = ((item.x, item.y) if isinstance(item, Block)
+                  else getattr(item, "trial_cell", None))
+        if cells is not None and source is not None and source in cells:
+            cells.discard(source)
+            cells.add((gx, gy))
+        if debuffed:
+            self.trial_debuffed_blocks.discard(item)
+            self.trial_debuffed_blocks.add(placed)
+        if fragile:
+            self.trial_fragile_blocks.discard(item)
+            self.trial_fragile_blocks.add(placed)
+        placed.trial_fragile = fragile
 
     def _set_scorer(self, scorer):
         self.selected_scorer = scorer
@@ -3293,6 +3449,15 @@ class Game:
         # The equipped block's own effect strengths travel with the selection,
         # so placing it puts the same piston/black hole/conveyor on the board.
         self.selected_effect_amounts = dict(getattr(item, "effect_amounts", {}))
+        # A block with a rotation of its OWN (one picked up from the board, or
+        # one erased back into the toolbox) hands it to the build tool: placing
+        # it down again then keeps the rotation it had instead of re-stamping
+        # the tool's, and A rotates on from the block's own angle. A fresh shop
+        # block has no angle of its own (see BlockItem.angle) and leaves the
+        # tool's angle alone.
+        own_angle = getattr(item, "angle", None)
+        if own_angle is not None:
+            self.current_block_angle = own_angle
         self._set_shop_message(f"Selected {self._item_name(item)}")
 
     def _select_placed_block(self, block):
@@ -3540,7 +3705,18 @@ class Game:
         return int(total * 0.75)
 
     def _refund_block(self, block):
-        """Return a removed block to the toolbox as a block (not components)."""
+        """Return a removed block to the toolbox as a block (not components).
+
+        The returned block keeps the RANDOM/LUCKY outcome it had already rolled
+        for this run and the triggers it had left (see _place_block_at /
+        _run_random_result): erasing a block and putting it back down is a move,
+        not a chance to roll its reward or refill its triggers again. Both are
+        tagged by the run (the roll) or re-handed by it (the triggers, see
+        reset_run), so a block that sits in the toolbox while the next run
+        starts arrives fresh. Its own ROTATION and the mark the trial put on it
+        (see _carry_trial_mark) ride along too, so putting the block down again
+        is a move in those respects as well.
+        """
         # A fragile block that shattered is stored with its original shape, so
         # erasing/replacing it returns that shape instead of a Shape.NONE.
         shape = block._fragile_shape if getattr(block, "_fragile_shape", None) is not None else block.shape
@@ -3556,7 +3732,28 @@ class Game:
                          trigger_limit=getattr(block, "trigger_limit", 1),
                          trigger_paid=getattr(block, "trigger_paid", 0),
                          effects=block.effects,
-                         effect_amounts=getattr(block, "effect_amounts", None))
+                         effect_amounts=getattr(block, "effect_amounts", None),
+                         angle=getattr(block, "angle", 0))
+        rolls = getattr(block, "random_rolls", None)
+        if rolls is not None:
+            item.random_rolls = dict(rolls)
+        remaining = getattr(block, "triggers_left", None)
+        if remaining is not None:
+            item.triggers_left = int(remaining)
+        # A block the trial marked hands its mark to the toolbox item the same
+        # way (the marked block in the trial's sets becomes the item), with the
+        # cell it stood in, so putting it back down puts the mark where the block
+        # now stands instead of leaving it on the square it was taken from (see
+        # _carry_trial_mark). Nothing is carried for a block the trial never
+        # marked, and the sets are rebuilt from the board every run (see
+        # _apply_trial), so a mark cannot outlive the run it belongs to.
+        if (block in self.trial_debuffed_blocks
+                or block in self.trial_fragile_blocks):
+            item.trial_cell = (block.x, block.y)
+            for group in (self.trial_debuffed_blocks, self.trial_fragile_blocks):
+                if block in group:
+                    group.discard(block)
+                    group.add(item)
         self.toolbox.add(item)
 
     def _erase_block_at(self, grid_x, grid_y):
@@ -3850,12 +4047,14 @@ class Game:
         block that Hands tied picks is still silenced under both.
 
         This is the number to HAND OUT triggers from (a fresh run's refill, a
-        Procrastination rewind, and a block being placed), and what the info box
-        reports. Charge rules like the trial penalty and the Concert bonus are
-        derived rather than written onto the block, so selling Concert, cutting
-        it, or re-rolling the trial's choices takes them away again instead of
-        leaving a changed limit behind on every block. Triggers already handed
-        out are not taken back — a limit only bites when triggers are dealt.
+        Procrastination rewind, and a FRESH block being placed) — a block that
+        is only moved or put back down keeps the triggers it has left instead
+        (see _place_block_at) — and what the info box reports. Charge rules like
+        the trial penalty and the Concert bonus are derived rather than written
+        onto the block, so selling Concert, cutting it, or re-rolling the
+        trial's choices takes them away again instead of leaving a changed limit
+        behind on every block. Triggers already handed out are not taken back —
+        a limit only bites when triggers are dealt.
         """
         limit = getattr(item, "trigger_limit", 1)
         if item in self.trial_debuffed_blocks:
@@ -4061,9 +4260,14 @@ class Game:
             shape = random.choice(Shape.ORDER)
             effects = random.sample(Effect.REAL_ORDER, random_effect_count())
             shape, effects = role_block_parts(scorer, shape, effects)
-            self.tokens.append(ScorerToken(scorer, roll_scorer_amount(scorer),
-                                           shape=shape, effects=effects,
-                                           runs_left=None))
+            block = Block(0, 0, shape=shape, effect=Effect.NONE, scorer=scorer,
+                          scorer_amount=roll_scorer_amount(scorer),
+                          effects=effects,
+                          effect_amounts=roll_effect_amounts(effects))
+            # A permanent token's Random/Lucky reward is rolled once, here, and
+            # kept for every run the token fires in (see _roll_kept_reward).
+            self._roll_kept_reward(block)
+            self.tokens.append(ScorerToken(block))
             granted += 1
         return granted
 
@@ -4496,13 +4700,28 @@ class Game:
             return False
         name = self._item_name(subject)
         runs_left = None if action.version >= 2 else 2
-        # A block still in the inventory never stood anywhere, so its token
-        # keeps the least generous cell: the bottom row of the first column.
-        token = ScorerToken(subject.scorer, subject.scorer_amount,
-                            shape=block_shape(subject), effects=subject.effects,
-                            x=getattr(subject, "x", 0),
-                            y=getattr(subject, "y", GRID_HEIGHT - 1),
-                            runs_left=runs_left)
+        # The token keeps the BLOCK itself, not just its scorer: the payoff is
+        # then exactly what colliding with that block would do (its cell drives
+        # the board-relative scorers, its effects an Effective payoff, its
+        # shape the cards that fire along with it). The copy keeps a shattered
+        # fragile block's real shape (see block_shape). A block still in the
+        # inventory never stood anywhere, so its token keeps the least generous
+        # cell: the bottom row of the first column.
+        token_block = Block(getattr(subject, "x", 0),
+                            getattr(subject, "y", GRID_HEIGHT - 1),
+                            shape=block_shape(subject), effect=Effect.NONE,
+                            scorer=subject.scorer,
+                            scorer_amount=subject.scorer_amount,
+                            angle=getattr(subject, "angle", None) or 0,
+                            effects=list(subject.effects),
+                            effect_amounts=dict(
+                                getattr(subject, "effect_amounts", None) or {}))
+        # A Random/Lucky block is sacrificed with its reward already decided,
+        # and the token keeps that one outcome for every run it covers (see
+        # KEPT_ROLL_RUN), so retrying a run or loading a save cannot reroll what
+        # the token pays.
+        self._roll_kept_reward(token_block)
+        token = ScorerToken(token_block, runs_left=runs_left)
         # Remove the sacrificed block exactly like a sale/erase would (a placed
         # block leaves the board; a Start block's marble is gone with it).
         if isinstance(subject, Block):
@@ -4521,33 +4740,63 @@ class Game:
         sounds.play_mech()
         return True
 
-    def _token_block(self, token):
-        """A throwaway Block standing in for a token, for the scorer code.
+    def _fire_token(self, token, marble):
+        """Fire one Spirit token: its block, exactly as a collision would.
 
-        Firing a token reuses the block scorer path, so board-relative payoffs
-        read the cell the sacrificed block stood in, and the token is marked so
-        the Watch card does not treat it as a marble-touched block.
+        The block's own scorer pays through the same path a marble's touch uses
+        (so every board-relative payoff reads the token's cell), and the cards
+        whose group matches the block fire with it. A Random/Lucky token's block
+        already carries its reward — decided when the block was sacrificed and
+        kept for every run (see _roll_kept_reward), so it repeats here rather
+        than rolling afresh — and a multiplier token banks its xMult like any
+        other trigger (see _apply_xmult).
         """
-        block = Block(token.x, token.y, shape=token.shape, effect=Effect.NONE,
-                      scorer=token.scorer, scorer_amount=token.scorer_amount,
-                      effects=token.effects)
-        block.is_token = True
-        return block
+        block = token.block
+        token.fired = True
+        if block.scorer in (Scorer.LUCKY, Scorer.RANDOM):
+            self._run_random_result(block, block.scorer)
+        self._apply_block_score_effect(marble, block)
+        self._apply_cards_on_collision(block, marble)
+        self._spawn_token_particle(token, block)
 
     def _apply_tokens(self):
-        """Fire every Spirit token's scorer once, at the start of a run."""
+        """Fire every Spirit token whose payoff belongs to the run's start.
+
+        Each token fires as if a marble had collided with its kept block (see
+        _fire_token). A token whose payoff is a MULTIPLIER is held back for the
+        run's END instead — xMult is a run-end calculation — and is only ARMED
+        here, which is also what makes the run it belongs to the one that spends
+        it: a token created mid-run is never armed (see _apply_end_tokens).
+        """
         if not self.tokens or not self.marbles:
             return
         marble = self.marbles[0]
         for token in list(self.tokens):
-            block = self._token_block(token)
-            token.fired = True
             # A token with nothing to fire is skipped silently (a Random/Lucky
-            # token still needs its pre-rolled result, which is drawn here).
-            if token.scorer in (Scorer.LUCKY, Scorer.RANDOM):
-                self._set_run_random_result(token, token.scorer)
-            self._apply_block_score_effect(marble, block)
-            self._spawn_token_particle(token, block)
+            # token still needs its pre-rolled result, drawn when it fires).
+            token.armed = False
+            if token.fires_at_end:
+                token.armed = True
+                continue
+            self._fire_token(token, marble)
+
+    def _apply_end_tokens(self):
+        """Fire the Spirit tokens whose payoff belongs to the run's END.
+
+        Called by the run's finish path before the banked xMult lands (see
+        _flush_run_xmult): a multiplier token is a run-end payoff, so this is
+        where its xMult — and the cards that fire with it — is banked. Only a
+        token the run's start ARMED fires here, so a token created mid-run is
+        left for the next run.
+        """
+        if not self.tokens or not self.marbles:
+            return
+        marble = self.marbles[0]
+        for token in list(self.tokens):
+            if not token.armed:
+                continue
+            token.armed = False
+            self._fire_token(token, marble)
 
     def _spawn_token_particle(self, token, block):
         """Pop the token's chip as it fires (so a run start shows it working)."""
@@ -5204,16 +5453,27 @@ class Game:
         if item is CASH_BREAKDOWN:
             return self._cash_breakdown_rows()
         if getattr(item, "kind", None) == "token":
+            # A token is a whole kept block, so it describes itself the way that
+            # block did on the board (shape, effects, scorer), plus when it
+            # fires. The trigger count is not reported: a token fires once per
+            # run whatever the block's own limit was.
+            block = item.block
             runs = ("every run, permanently" if item.runs_left is None
                     else f"{item.runs_left} more run(s)")
-            return [
-                (f"Token - {Scorer.name(item.scorer)}",
-                 f"A kept scorer: it fires at the start of each run, {runs}."),
-                (f"Scorer - {Scorer.name(item.scorer)}",
-                 scorer_description(item.scorer, item.scorer_amount)),
-                ("Kept from", (f"{Shape.name(item.shape)} "
-                               f"{Scorer.name(item.scorer)}")),
-            ]
+            timing = ("at the end of each run, when the run's xMult lands"
+                      if item.fires_at_end else "at the start of each run")
+            label = f"Token - {Shape.name(block.shape)} {Scorer.name(block.scorer)}"
+            rows = [(label,
+                     (f"A kept block: it fires {timing}, exactly as if a marble "
+                      f"collided with it ({runs})."))]
+            rows.append((f"Shape - {Shape.name(block.shape)}",
+                         shape_description(block.shape)))
+            for e in block.effects:
+                rows.append((f"Effect - {Effect.name(e)}",
+                             effect_description(e, block.effect_magnitude(e))))
+            rows.append((f"Scorer - {Scorer.name(block.scorer)}",
+                         scorer_description(block.scorer, block.scorer_amount)))
+            return rows
         if isinstance(item, Block):
             rows = [(f"Shape - {Shape.name(item.shape)}", shape_description(item.shape))]
             for e in item.effects:
@@ -5349,6 +5609,8 @@ class Game:
                 return "Press S to use — it needs no target"
             return "Click a target block/card, then press S to use"
         if source == "tokens":
+            if item.fires_at_end:
+                return "Fires at the end of each run it covers (xMult)"
             return "Fires at the start of each run it covers"
         if source == "toolbox":
             if getattr(item, "kind", None) == "block":
@@ -5474,6 +5736,10 @@ class Game:
                 if not marble.collisions_this_tick:
                     marble.air_streak += DT
                     self.air_time += DT
+                # The intangible card pays mult for every second a marble
+                # spends inside a block, and much more for a second inside a
+                # locked board unit, so accumulate both as the run plays.
+                self._count_inside_time(marble)
                 # Leave a shrinking trail dot wherever the marble has moved.
                 moved = marble.distance - marble._last_trail_distance
                 marble._last_trail_distance = marble.distance
@@ -5606,8 +5872,8 @@ class Game:
         self.run_active = True
         self.run_complete = False
         self.run_cleared = False
-        self.score_chips = 1
-        self.score_mult = 1
+        self.score_chips = 30
+        self.score_mult = 4
         # Permanent metagame upgrades (bought with dice on the title screen's
         # UPGRADES tab) apply at the start of every run: +chips, +mult, and an
         # xMult multiplier. A save can turn these off on the marble-selection
@@ -5676,6 +5942,10 @@ class Game:
         self.run_time = 0.0
         # Fresh run: no black-hole pull time has accumulated yet (astronaut).
         self.black_hole_time = 0.0
+        # Fresh run: no time inside blocks or inside locked board units has
+        # accumulated yet (intangible).
+        self.inside_block_time = 0.0
+        self.inside_locked_time = 0.0
         # Fresh run: no Fragile Breaks (Wrecking Ball) gains earned yet. They
         # only become permanent after a run.
         self._reset_wrecking_run_gain()
@@ -5697,12 +5967,20 @@ class Game:
         self.run_first_blocks = []
         self._prev_contact_block = None
         self.bomb_cells = set()
+        # Fresh run: no xMult banked yet. Every xMult the run earns (blocks,
+        # cards and Spirit tokens alike) is banked here and multiplied into the
+        # multiplier once, as the run settles (see _apply_xmult /
+        # _flush_run_xmult).
+        self.run_xmult_pending = 1.0
         # Fresh run: no pipe streak in progress and no completed streaks yet.
         # A streak is the run of FRESH contacts that are PIPE-GROUP blocks (see
         # _count_pipe_streak): its completed groups of three are what the
         # Fountain whole card pays +0.25 xMult for.
         self.pipe_streak_blocks = []
         self.pipe_streak_run_units = 0
+        # Fresh run: nothing banked from the last run's xMult either (see
+        # _apply_xmult).
+        self.run_xmult_pending = 1.0
         # Fresh run: the type bonus counts only the types touched THIS run.
         self.touched_shapes = set()
         self.touched_effects = set()
@@ -5926,8 +6204,10 @@ class Game:
         blocks are board CELLS and the cut card is an index into the card area —
         so re-applying the decision to a board the player has edited since still
         means "the blocks in these cells", and the same trial keeps cutting the
-        same slot. That is what makes the decision stable: a restart or a retry
-        replays it, and only a new run (or a bought trial) re-rolls it.
+        same slot. A block the player MOVES takes its decided cell with it (see
+        _carry_trial_mark), so the pick stays on the block it chose. That is what
+        makes the decision stable: a restart or a retry replays it, and only a
+        new run (or a bought trial) re-rolls it.
 
         The picks are: which cells Hands tied debuffs, which card slot Card
         cutter disables, the order Shuffled leaves the cards in, which cells
@@ -6040,8 +6320,10 @@ class Game:
         self.trial_fragile_blocks = set()
         if self.current_trial == Trial.HANDS_TIED:
             # The decided CELLS, not the block objects: a block the player has
-            # since moved or replaced in one of them is debuffed too, and a cell
-            # left empty simply has nothing to debuff.
+            # since put in one of them is debuffed too, and a cell left empty
+            # simply has nothing to debuff. Moving a chosen block moves the cell
+            # with it (see _carry_trial_mark), so the debuff stays on the block
+            # the trial picked.
             self.trial_debuffed_blocks = {
                 self.grid[cell] for cell in decision.get("cells", ())
                 if cell in self.grid}
@@ -6176,7 +6458,7 @@ class Game:
         else:
             unique_types = (len(self.touched_shapes) + len(self.touched_effects)
                             + len(self.touched_scorers))
-        scale_sq = TIME_SCALE * TIME_SCALE
+        # scale_sq = TIME_SCALE * TIME_SCALE
         # The Long run trial doubles the ideal time, so longer runs still earn
         # the full time contribution; the Speedrun trial halves it, so only a
         # fast run keeps full time contribution (trials are inert in tests).
@@ -6186,11 +6468,12 @@ class Game:
             ideal_time = TIME_IDEAL / 2
         else:
             ideal_time = TIME_IDEAL
-        ideal_sq = ideal_time * ideal_time
-        time_good = 1/(((self.run_time - ideal_time) / TIME_SCALE) * ((self.run_time - ideal_time) / TIME_SCALE) + 1)
-        time_good -= (scale_sq / (scale_sq + ideal_sq)) * 1/(self.run_time * self.run_time + 1) # modulator: run_time = 0 -> time_good = 0
+        # ideal_sq = ideal_time * ideal_time
+        # time_good = 1/(((self.run_time - ideal_time) / TIME_SCALE) * ((self.run_time - ideal_time) / TIME_SCALE) + 1)
+        # time_good -= (scale_sq / (scale_sq + ideal_sq)) * 1/(self.run_time * self.run_time + 1) # modulator: run_time = 0 -> time_good = 0
+        time_good = (1 if 0 <= self.run_time <= ideal_time else -((self.run_time - ideal_time) ** 2) / TIME_SCALE + 1)
         dist_good = np.atan(total_distance / DISTANCE_SCALE) * 2 / np.pi
-        uniq_good = unique_types / UNIQUE_SCALE
+        uniq_good = np.atan(unique_types / UNIQUE_SCALE) * 2 / np.pi
         return time_good, dist_good, uniq_good, unique_types
 
     def _compute_total_score(self):
@@ -6200,7 +6483,7 @@ class Game:
         """
         base = max(self.score_chips * self.score_mult, 1)
         time_good, dist_good, uniq_good, _ = self._score_factors()
-        exponent = (time_good / 2 + dist_good + uniq_good) * (4 / 5)
+        exponent = 0.5 + (time_good + dist_good + uniq_good) * (1/2)
         # The Inferno whole card raises the exponent itself, so it multiplies
         # the whole run's score by the chips x mult base raised to 0.07.
         if self._has_card(Card.INFERNO):
@@ -6292,6 +6575,42 @@ class Game:
             # three different blocks after these).
             self.pipe_streak_blocks = []
             self.pipe_streak_run_units += 1
+
+    def _count_inside_time(self, marble):
+        """Accumulate the time a marble spends inside a block, and in a lock.
+
+        The Intangible whole card's two measures (see
+        cards._named_card_units). "Inside" is the strict, physical sense: any
+        part of the marble overlaps the block's HITBOX (PhysicsEngine.
+        overlaps_block) — the overlap the physics exists to push the marble out
+        of — so the phrase means exactly "a position the marble could not be in
+        without the phase effect on". A marble merely resting on a block, sitting
+        in a pipe's cavity or a drain's funnel, or passing through a Shape.NONE
+        field, a Key, an opened Lock or a portal overlaps no hitbox and banks
+        nothing; a phasing marble buried in a block banks every frame it is in
+        there, including any frames after its phase has run out (it is still
+        physically inside until the physics has pushed it clear).
+
+        "Inside a locked board unit" is the same rule against the unit's own
+        solid — a locked square is a board wall (see _board_wall_blocks), and the
+        only way into one is phasing through it too — and the two are counted
+        apart: a placed block pays the block rate, a locked unit the higher
+        locked rate.
+
+        Both are banked for the marble that is there, so two marbles inside a
+        block bank twice as fast, exactly as the plane card's air time and the
+        astronaut's black-hole time accumulate (see update).
+        """
+        for block in self.grid.values():
+            if marble.physics.overlaps_block(marble, block):
+                self.inside_block_time += DT
+                break
+        if not self.board_locked():
+            return
+        for wall in self._board_wall_blocks():
+            if marble.physics.overlaps_block(marble, wall):
+                self.inside_locked_time += DT
+                break
 
     def _contact_normal(self, marble, block):
         """The unit collision normal of the marble's contact with a block.
@@ -6518,11 +6837,16 @@ class Game:
             # the marbles fly their last second again (see the method).
             if self._procrastination_rewind():
                 return
-            # End-of-run cards: the named cards that read a measure only the
-            # finished run can supply (Explorer's distance xMult, Astronaut's
-            # black-hole time, Plane's air time, Skater's slippery blocks)
-            # adjust the score here, before it is finalized.
+            # The end-of-run steps settle the run before the total is worked
+            # out: the Spirit tokens whose payoff is a MULTIPLIER fire first,
+            # then the cards that read a finished run (Explorer's distance
+            # xMult, Astronaut's black-hole mult, Plane's air time, Skater's
+            # slippery blocks, Fountain's pipe streaks, Island's groups), and
+            # finally the xMult every one of them banked lands at once (see
+            # _flush_run_xmult).
+            self._apply_end_tokens()
             self._apply_cards_on_finish()
+            self._flush_run_xmult()
             self.score_total = self._compute_total_score()
             self.armed_quick.clear()
             self.run_active = False
@@ -6548,15 +6872,50 @@ class Game:
             self.awaiting_after_run = True
 
     def _apply_xmult(self, factor):
-        """Apply an xMult reward: the multiplier is MULTIPLIED by ``factor``.
+        """Bank an xMult reward: the multiplier is multiplied by it AT THE END.
 
-        xMult always multiplies — there is no additive fallback. Every trigger
-        applies its own factor again, so xMult compounds individually (each
-        block or card fires for itself) and exponentially (their factors
-        stack): a Slope xMult card hitting two Slope blocks gives
-        1.25 x 1.25 = 1.5625, and one Sharp block with a trigger limit of 2
-        gives 3 x 3 = 9 rather than 3 then +2. Returns the factor, which is the
-        figure the reward particle shows.
+        xMult is a run-end calculation in this game (user request: "make all
+        xmult scorers and cards fire at the end of a run"): a block or card
+        that gives xMult — the xMult scorer, Sharp, Satanic, Effective, a
+        Random block's xMult reward, an xMult match-group card, a Colossus
+        card, the measured cards (Explorer, Skater, Fountain, Island) — records
+        its factor here instead of touching the multiplier where it fired, and
+        the whole product lands when the run ends (see _flush_run_xmult).
+
+        Every banking call multiplies into the same pending product, so
+        repeated triggers still compound exponentially (a Sharp block with two
+        triggers banks x3 x3 = x9, and two different cards' factors stack), and
+        a multiplier's own particle still pops where it fired so the player sees
+        it register. Returns the factor, which is the figure that particle
+        shows.
+        """
+        self.run_xmult_pending *= factor
+        return factor
+
+    def _flush_run_xmult(self):
+        """Apply the run's banked xMult product, once, as the run settles.
+
+        Called by the run's finish path after the end-of-run cards have paid, so
+        every xMult the run earned (blocks, cards and tokens alike) lands in the
+        same place: the multiplier is multiplied ONCE by the pending product
+        before the total score is computed. Nothing banked (the common case, a
+        product of exactly 1.0) pops nothing.
+        """
+        factor = self.run_xmult_pending
+        self.run_xmult_pending = 1.0
+        if factor == 1.0:
+            return
+        self._apply_xmult_now(factor)
+        fx, fy = cards.run_finish_pos(self)
+        self._spawn_score_particle(fx, fy, self._particle_amount_text(factor), RED)
+
+    def _apply_xmult_now(self, factor):
+        """Multiply the multiplier by ``factor`` this instant.
+
+        Only run-END settlements go through this (the banked product, and the
+        permanent bonuses the Wrecking Ball and Tesseract cards carry into a
+        run); everything a run earns while it plays banks instead (see
+        _apply_xmult).
         """
         self.score_mult *= factor
         return factor
@@ -6589,21 +6948,45 @@ class Game:
         result and REPLAYING the run — rushing R, pressing T, or retrying a
         finished run — replays it exactly instead of rerolling it. An item that
         entered play after the opening roll (a block placed or a card bought
-        mid-run) rolls on its first trigger instead.
+        mid-run) rolls on its first trigger instead. The roll travels with the
+        block the player BUILT (see _place_block_at / _refund_block), so moving
+        a Random block on the board — or erasing it and putting it down again —
+        keeps the reward it already had rather than drawing a new one.
         """
         rolls = getattr(item, "random_rolls", None)
         if (rolls is None or rolls.get("scorer") != scorer
-                or rolls.get("run") != self.run_number):
+                or rolls.get("run") not in (self.run_number, KEPT_ROLL_RUN)):
             rolls = self._set_run_random_result(item, scorer)
         return rolls
 
-    def _set_run_random_result(self, item, scorer):
-        """Draw a fresh result for an item, replacing any earlier roll."""
+    def _roll_kept_reward(self, block):
+        """Decide a sacrificed Random/Lucky block's reward, once and for good.
+
+        A Spirit token keeps a whole block, and a Random/Lucky block's reward is
+        part of what the player built: the token pays the SAME outcome for every
+        run it covers, so retrying the run it was won in — or loading a save —
+        can never reroll what the token gives. The roll is tagged KEPT_ROLL_RUN
+        rather than a run number, which is what makes it never stale (see
+        _run_random_result).
+        """
+        if block.scorer in (Scorer.LUCKY, Scorer.RANDOM):
+            self._set_run_random_result(block, block.scorer, run=KEPT_ROLL_RUN)
+        return block
+
+    def _set_run_random_result(self, item, scorer, run=None):
+        """Draw a fresh result for an item, replacing any earlier roll.
+
+        ``run`` tags the roll with the run it belongs to (the default: this
+        run), or with KEPT_ROLL_RUN for a Spirit token's block, whose reward is
+        decided when the block is sacrificed and then stands for every run (see
+        _roll_kept_reward).
+        """
         rolls = self._roll_random_output(scorer)
         rolls["scorer"] = scorer
         # The run the roll was made for: a roll from an earlier run is stale and
-        # is redrawn, but a roll made for THIS run survives every replay of it.
-        rolls["run"] = self.run_number
+        # is redrawn, but a roll made for THIS run survives every replay of it —
+        # and a KEPT roll is never stale at all.
+        rolls["run"] = self.run_number if run is None else run
         item.random_rolls = rolls
         return rolls
 

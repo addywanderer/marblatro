@@ -1,17 +1,20 @@
 {
   "version": 1,
-  "cash": 26,
+  "cash": 60,
   "run_number": 0,
   "round_index": 0,
   "run_in_round": 0,
-  "required_score": 1,
+  "required_score": 100,
   "required_scores": [
-    1
+    100
   ],
   "run_results": [],
   "runs_cleared": 0,
   "failed_runs": 0,
-  "current_trial": 7,
+  "current_trial": 6,
+  "trial_decision": {
+    "trial": 6
+  },
   "difficulty": 4,
   "final_boss": null,
   "cards": [],
@@ -21,18 +24,21 @@
       "kind": "block",
       "placed": false,
       "col": 0,
-      "row": 0,
-      "shape": 21,
+      "row": 1,
+      "shape": 0,
       "effects": [],
       "effect_amounts": {},
-      "scorer": 23,
+      "scorer": 5,
       "scorer_amount": 0.0,
-      "price": 25,
-      "name": "Lock Lucky",
+      "price": 53,
+      "name": "Finish Block",
       "portal_number": 0,
-      "key_number": 1,
+      "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
     }
   ],
   "grid": [
@@ -42,9 +48,7 @@
       "x": 4,
       "y": 6,
       "shape": 0,
-      "effects": [
-        0
-      ],
+      "effects": [],
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
@@ -57,224 +61,178 @@
       "triggers_left": 1,
       "portal_uses_left": 0,
       "fragile_shape": null,
-      "resale_price": 109
-    },
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 5,
-      "y": 7,
-      "shape": 0,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 5,
-      "scorer_amount": 0.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 53
-    },
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 8,
-      "shape": 20,
-      "effects": [],
-      "effect_amounts": {},
-      "scorer": 23,
-      "scorer_amount": 0.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 1,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 25
+      "resale_price": 109,
+      "random_rolls": null
     }
   ],
   "shop": [
     {
       "kind": "shape",
-      "value": 4,
+      "value": 2,
       "amount": 0,
-      "price": 8,
-      "name": "Circle",
+      "price": 12,
+      "name": "Line",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 21,
+      "value": 15,
       "amount": 0,
-      "price": 10,
-      "name": "Lock",
+      "price": 9,
+      "name": "Corner",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 5,
-      "amount": 3857.0,
-      "price": 23,
-      "name": "Black Hole",
+      "value": 15,
+      "amount": 0,
+      "price": 22,
+      "name": "Zipper",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 11,
+      "value": 9,
       "amount": 0,
-      "price": 24,
-      "name": "Shrinking",
+      "price": 20,
+      "name": "Fragile",
       "col": 4,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 23,
-      "amount": 0,
-      "price": 24,
-      "name": "Lucky",
+      "value": 16,
+      "amount": 0.754,
+      "price": 17,
+      "name": "Picky",
       "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 10,
+      "amount": 0.355,
+      "price": 16,
+      "name": "Shreds",
+      "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
       "value": 25,
-      "amount": 0.646,
+      "amount": 1.264,
       "price": 24,
       "name": "Rally",
-      "col": 6,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 2,
-      "amount": 5.205,
-      "price": 17,
-      "name": "+Mult",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 96,
-      "price": 46,
+      "value": 91,
+      "price": 40,
       "amount": 0,
       "col": 1,
       "row": 3,
-      "name": "Procrastination"
+      "name": "Watch",
+      "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 7,
-      "price": 32,
+      "value": 83,
+      "price": 44,
       "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "Skater"
+      "name": "Pedestal",
+      "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 10,
-      "price": 33,
+      "value": 85,
+      "price": 46,
       "amount": 0,
       "col": 3,
       "row": 3,
-      "name": "Blueprint"
+      "name": "Doppelganger",
+      "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 3644,
-      "price": 21,
-      "amount": 7.73,
+      "value": 95,
+      "price": 42,
+      "amount": 0,
       "col": 4,
       "row": 3,
-      "name": "Sticky card (Cash)"
+      "name": "1000-handed",
+      "random_rolls": null
     },
     {
       "kind": "action",
-      "value": 2,
-      "price": 28,
+      "value": 1,
+      "price": 24,
       "version": 1,
       "col": 5,
       "row": 3,
-      "name": "Deja Vu"
+      "name": "Recognition"
     },
     {
       "kind": "action",
-      "value": 6,
-      "price": 70,
+      "value": 5,
+      "price": 36,
       "version": 1,
       "col": 6,
       "row": 3,
-      "name": "Cleansweep"
+      "name": "Spirit"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 14,
+      "shape": 15,
       "effects": [
-        6
+        8
       ],
       "effect_amounts": {},
-      "scorer": 0,
-      "scorer_amount": 0.0,
-      "price": 33,
-      "name": "Platform None",
+      "scorer": 9,
+      "scorer_amount": 1.117,
+      "price": 24,
+      "name": "Corner Parts",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
     },
     {
       "kind": "block",
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 20,
+      "shape": 11,
       "effects": [
-        5
+        4
       ],
-      "effect_amounts": {
-        "5": 2530.0
-      },
-      "scorer": 28,
-      "scorer_amount": 3.566,
-      "price": 39,
-      "name": "Key Frontier",
+      "effect_amounts": {},
+      "scorer": 25,
+      "scorer_amount": 0.708,
+      "price": 42,
+      "name": "Curved Slope Line Rally",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
-      "trigger_paid": 0
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
     }
   ],
-  "component_purchases": [
-    [
-      "scorer",
-      23,
-      1
-    ],
-    [
-      "shape",
-      21,
-      1
-    ]
-  ],
+  "component_purchases": [],
   "wrecking_bonus": [
     [
       1,
@@ -303,8 +261,8 @@
   "game_won": false,
   "game_perfect": false,
   "continue_past_game_over": false,
-  "score_chips": 1,
-  "score_mult": 1,
+  "score_chips": 30,
+  "score_mult": 4,
   "last_run_cash_gained": 0,
   "last_run_cash_breakdown": {},
   "unlocked_cells": [

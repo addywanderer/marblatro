@@ -1070,8 +1070,8 @@ class UiTests(GameTestCase):
                                 effects=[main.Effect.PORTAL, main.Effect.BOUNCY])
             portal.portal_number = 2       # a pairing number AND the "+" mark
             main.ui.draw_block(portal, screen)
-            main.ui.draw_token(screen, main.ScorerToken(main.Scorer.CASH, 15,
-                                                        runs_left=2), rect)
+            main.ui.draw_token(screen, _token(main.Scorer.CASH, 15,
+                                               runs_left=2), rect)
             main.ui.draw_action(screen, main.ActionItem(main.Action.DEATH, 24,
                                                         version=2), rect)
             # Ids with no art at all fall back to a letter glyph, and a version

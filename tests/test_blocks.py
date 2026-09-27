@@ -630,6 +630,47 @@ class BlocksTests(GameTestCase):
         self.assertFalse(self.game.has_selected)
 
 
+    def test_moving_a_placed_block_keeps_its_rotation(self):
+        # A block picked up and put down again keeps the angle it had: the
+        # rotation belongs to the block the player built, so a move does not
+        # re-stamp it with whatever the build tool is set to (see _equip_block).
+        block = main.Block(2, 3, shape=main.Shape.PIPE, scorer=main.Scorer.CHIPS_ADD,
+                           scorer_amount=10, angle=90)
+        self.game.grid[(2, 3)] = block
+        self.game.current_block_angle = 0  # the build tool sits at 0
+
+        self._click(self._grid_pos(2, 3))  # pick it up
+        self.assertEqual(self.game.current_block_angle, 90)  # the tool adopts it
+        self._click(self._grid_pos(5, 5))  # put it down elsewhere
+
+        self.assertEqual(self.game.grid[(5, 5)].angle, 90)
+        self.assertNotIn((2, 3), self.game.grid)
+
+
+    def test_erasing_a_rotated_block_keeps_its_rotation(self):
+        # Erasing a block into the toolbox and putting it back down is a move in
+        # every respect, the rotation included (see _refund_block).
+        self.game.grid[(2, 3)] = main.Block(2, 3, shape=main.Shape.SLOPE,
+                                           scorer=main.Scorer.CHIPS_ADD,
+                                           scorer_amount=10, angle=270)
+        self.game.current_block_angle = 0  # the build tool sits at 0
+
+        self.game._erase_block_at(2, 3)
+        item = self.game.toolbox.items[-1]
+        self.assertEqual(item.angle, 270)
+        self.game._equip_block(item)
+
+        self.assertEqual(self.game.current_block_angle, 270)  # the tool adopts it
+        self.assertTrue(self.game._place_block_at(7, 7))
+        self.assertEqual(self.game.grid[(7, 7)].angle, 270)
+        # A still rotates it from there, so the block's own angle is not a
+        # rotation the player is stuck with.
+        self.game._equip_block(self.game.grid[(7, 7)])
+        self._press(main.pygame.K_a)
+        self.assertTrue(self.game._place_block_at(8, 8))
+        self.assertEqual(self.game.grid[(8, 8)].angle, 0)
+
+
     def test_a_key_rotates_next_placement_angle_not_placed_block(self):
         # The A key only rotates the next-placement/ghost angle; it does NOT
         # rotate a block that is already placed on the grid.
@@ -1183,9 +1224,9 @@ class BlocksTests(GameTestCase):
 
 
     def test_same_block_xmult_triggers_multiply(self):
-        # A Sharp block (x3 = +2 xMult) with trigger limit 2, fired twice,
-        # applies its factor on both triggers (1 -> 3 -> 9): xMult always
-        # multiplies (Game._apply_xmult), so an item's own triggers compound.
+        # A Sharp block (x3) with trigger limit 2 fires twice, and BOTH factors
+        # bank: an item's own triggers still compound into one product
+        # (3 x 3 = 9), which lands as the run settles (see Game._apply_xmult).
         self.game.score_mult = 1
         self.game.run_active = True
         block = main.Block(0, 0, scorer=main.Scorer.SHARP, trigger_limit=2)
@@ -1196,12 +1237,15 @@ class BlocksTests(GameTestCase):
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
         self.assertEqual(block.triggers_left, 0)
+        self.assertAlmostEqual(self.game.score_mult, 1)          # banked
+        self.assertAlmostEqual(self.game.run_xmult_pending, 9)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 9)
 
 
     def test_different_blocks_xmult_apply_separately(self):
-        # Two different Sharp blocks each triple on their own first trigger,
-        # so the multiplier compounds across them (1 -> 3 -> 9).
+        # Two different Sharp blocks each bank their own x3, so the product
+        # compounds across them (9) and lands in one go at the run's end.
         self.game.score_mult = 1
         self.game.run_active = True
         for _ in range(2):
@@ -1210,6 +1254,8 @@ class BlocksTests(GameTestCase):
             marble = self._add_marble()
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
+        self.assertAlmostEqual(self.game.run_xmult_pending, 9)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 9)
 
 
@@ -1508,6 +1554,173 @@ class BlocksTests(GameTestCase):
         self.assertEqual(moved.scorer, placed.scorer)
         self.assertEqual(moved.resale_price, 7)  # the price travels with it
         self.assertNotIn(placed, self.game.toolbox.items)  # not also refunded
+
+
+    def test_moving_a_random_block_keeps_the_reward_it_rolled(self):
+        # A move rebuilds the block in its new cell (see _place_block_at), and
+        # a Random block's reward is rolled ONCE per run and kept on the block
+        # (see _roll_run_random_outputs) — so the roll has to travel with it.
+        # The 0.9 draw below would pay +0.3 xMult if the block rolled again;
+        # the OLD reward (+5 mult) is what must come out.
+        block = main.Block(1, 1, scorer=main.Scorer.RANDOM)
+        self.game.grid[(1, 1)] = block
+        block.random_rolls = {"reward": 1, "scorer": main.Scorer.RANDOM,
+                              "run": self.game.run_number}
+        self.game._select_placed_block(block)
+
+        self.assertTrue(self.game._place_block_at(4, 5))
+
+        moved = self.game.grid[(4, 5)]
+        self.assertIsNot(moved, block)              # the move really rebuilt it
+        self.assertEqual(moved.random_rolls["reward"], 1)
+        self.game.score_mult = 1
+        self._touch_block(moved, random_value=0.9)
+        self.assertEqual(self.game.score_mult, 1 + 5)
+
+
+    def test_erasing_and_replacing_a_random_block_keeps_the_reward(self):
+        # Erasing a block puts it back in the toolbox (see _refund_block) and
+        # putting it down again is a move by another route: the roll rides on
+        # the toolbox item, so the reward is the one the run already chose.
+        block = main.Block(1, 1, scorer=main.Scorer.RANDOM)
+        self.game.grid[(1, 1)] = block
+        block.random_rolls = {"reward": 0, "scorer": main.Scorer.RANDOM,
+                              "run": self.game.run_number}
+
+        self.game._erase_block_at(1, 1)
+        item = self.game.toolbox.items[-1]
+        self.assertEqual(item.random_rolls["reward"], 0)
+        self.game._equip_block(item)
+        self.assertTrue(self.game._place_block_at(4, 5))
+
+        placed = self.game.grid[(4, 5)]
+        self.game.score_chips = 0
+        self._touch_block(placed, random_value=0.9)
+        self.assertEqual(self.game.score_chips, 35)   # +35 chips, not xMult
+
+
+    def test_moving_a_lucky_block_keeps_both_of_its_rolls(self):
+        # Lucky rolls two independent outcomes; a move must carry both, so a
+        # block that rolled "no chips, yes cash" keeps paying the $40 without
+        # the +130 the patched 0.0 draw would have granted.
+        block = main.Block(1, 1, scorer=main.Scorer.LUCKY)
+        self.game.grid[(1, 1)] = block
+        block.random_rolls = {"chips": False, "cash": True,
+                              "scorer": main.Scorer.LUCKY,
+                              "run": self.game.run_number}
+        self.game._select_placed_block(block)
+        self.assertTrue(self.game._place_block_at(4, 5))
+
+        moved = self.game.grid[(4, 5)]
+        self.game.score_chips = 0
+        self.game.cash = 100
+        self._touch_block(moved, random_value=0.0)
+        self.assertEqual(self.game.score_chips, 0)      # the chips roll said no
+        self.assertEqual(self.game.cash, 100 + 40)      # the cash roll said yes
+
+
+    def test_a_new_random_block_still_rolls_its_own_reward(self):
+        # The carried roll is the block's OWN: a freshly placed Random block
+        # (a shop buy, a grant, an assembly) has none, so it rolls on its first
+        # trigger as it always did.
+        item = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                              main.Scorer.RANDOM, 0, 20, "Rect Random")
+        self.game.toolbox.add(item)
+        self.game._equip_block(item)
+        self.assertTrue(self.game._place_block_at(4, 5))
+
+        placed = self.game.grid[(4, 5)]
+        self.assertFalse(getattr(placed, "random_rolls", None))
+        self.game.score_mult = 1
+        self._touch_block(placed, random_value=0.9)    # 0.9 -> +0.3 xMult
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1.3)
+        self.game._flush_run_xmult()
+        self.assertAlmostEqual(self.game.score_mult, 1.3)
+
+
+    def test_a_carried_roll_does_not_survive_into_the_next_run(self):
+        # The roll is tagged with the run it belongs to, so keeping it across a
+        # move must not make it permanent: the next run rolls the block fresh
+        # like every other random output (see _roll_run_random_outputs).
+        block = main.Block(1, 1, scorer=main.Scorer.RANDOM)
+        self.game.grid[(1, 1)] = block
+        block.random_rolls = {"reward": 0, "scorer": main.Scorer.RANDOM,
+                              "run": self.game.run_number}
+        self.game._select_placed_block(block)
+        self.assertTrue(self.game._place_block_at(4, 5))
+        moved = self.game.grid[(4, 5)]
+
+        self.game.run_number += 1          # the run advances
+        with mock.patch("main.random.random", return_value=0.9):
+            self.game._roll_run_random_outputs()
+        self.assertEqual(moved.random_rolls["reward"], 2)   # re-rolled: xMult
+
+
+    def test_moving_a_block_keeps_its_remaining_triggers(self):
+        # Placing a FRESH block is where its triggers are handed out; moving one
+        # is not a fresh placement, so a half-spent block stays half spent
+        # instead of being refilled by a nudge (see _place_block_at).
+        item = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                              main.Scorer.CHIPS_ADD, 10, 20, "Rect +Chips",
+                              trigger_limit=3)
+        self.game.toolbox.add(item)
+        self.game._equip_block(item)
+        self.assertTrue(self.game._place_block_at(1, 1))
+        placed = self.game.grid[(1, 1)]
+        self.assertEqual(placed.triggers_left, 3)   # a fresh block is dealt one
+
+        placed.triggers_left = 1
+        self.game._select_placed_block(placed)
+        self.assertTrue(self.game._place_block_at(4, 5))
+        self.assertEqual(self.game.grid[(4, 5)].triggers_left, 1)
+
+        # A SPENT block stays spent: 0 is a real count, not "no value yet".
+        spent = self.game.grid[(4, 5)]
+        spent.triggers_left = 0
+        self.game._select_placed_block(spent)
+        self.assertTrue(self.game._place_block_at(6, 6))
+        self.assertEqual(self.game.grid[(6, 6)].triggers_left, 0)
+
+        # A carried count never exceeds the limit the block has NOW (Concert
+        # may have been sold since the count was handed out).
+        topped_up = self.game.grid[(6, 6)]
+        topped_up.trigger_limit = 1
+        topped_up.triggers_left = 2
+        self.game._select_placed_block(topped_up)
+        self.assertTrue(self.game._place_block_at(8, 8))
+        self.assertEqual(self.game.grid[(8, 8)].triggers_left, 1)
+
+
+    def test_erasing_and_replacing_a_block_keeps_its_remaining_triggers(self):
+        # Putting an erased block back down is a move by another route, so its
+        # remaining triggers ride on the toolbox item too (see _refund_block).
+        block = main.Block(1, 1, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10,
+                           trigger_limit=3)
+        block.triggers_left = 1
+        self.game.grid[(1, 1)] = block
+
+        self.game._erase_block_at(1, 1)
+        item = self.game.toolbox.items[-1]
+        self.assertEqual(item.triggers_left, 1)
+        self.game._equip_block(item)
+        self.assertTrue(self.game._place_block_at(4, 5))
+        self.assertEqual(self.game.grid[(4, 5)].triggers_left, 1)
+
+
+    def test_starting_a_run_hands_every_block_its_triggers_back(self):
+        # The carried count only lives in the build state: starting a run (or
+        # restarting it) is what deals a fresh set (see reset_run).
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        block = main.Block(1, 1, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10,
+                           trigger_limit=3)
+        block.triggers_left = 0
+        self.game.grid[(1, 1)] = block
+        self.game._select_placed_block(block)
+        self.assertTrue(self.game._place_block_at(4, 5))
+        self.assertEqual(self.game.grid[(4, 5)].triggers_left, 0)
+
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.grid[(4, 5)].triggers_left, 3)
 
 
     def test_upgraded_block_scores_multiple_times_per_run(self):

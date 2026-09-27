@@ -2304,7 +2304,8 @@ class CardsTests(GameTestCase):
 
 
     def test_xmult_card_multiplies_mult_on_matching_collision(self):
-        # The xMult version of the Bouncy card multiplies mult by 1.25.
+        # The xMult version of the Bouncy card banks x1.25 on every matching
+        # collision (xMult settles at the end of the run).
         self.game.cards.append(main.CardItem(
             _effect_card_value(main.Effect.BOUNCY, components.Card.SCORE_XMULT), 40))
         block = main.Block(1, 1, shape=main.Shape.RECT, effects=[main.Effect.BOUNCY],
@@ -2315,6 +2316,9 @@ class CardsTests(GameTestCase):
         self.game.run_active = True
         self.game.score_mult = 4
         self.game._handle_block_contacts([block])
+        self.assertEqual(self.game.score_mult, 4)          # banked, not applied
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1.25)
+        self.game._flush_run_xmult()
         self.assertEqual(self.game.score_mult, 5)
 
 
@@ -2603,6 +2607,7 @@ class CardsTests(GameTestCase):
         self.game.run_complete = False
         self.game.score_mult = 1
         self.game._apply_cards_on_finish()
+        self.game._flush_run_xmult()
         fraction = (3000 / main.GRID_SIZE) / (main.GRID_WIDTH * main.GRID_HEIGHT)
         factor = 1 + fraction
         self.assertAlmostEqual(self.game.score_mult, factor * factor)  # Explorer + copy
@@ -2630,11 +2635,13 @@ class CardsTests(GameTestCase):
         self.game.grid[(0, 0)] = main.Block(0, 0, effects=[main.Effect.SLIPPERY])
         self.game.grid[(0, 1)] = main.Block(0, 1)
         self.game.score_mult = 1
-        # At the start it is a no-op (xMult waits for the end of the run)...
+        # At the start it is a no-op (Skater is an end card)...
         self.game._apply_cards()
         self.assertAlmostEqual(self.game.score_mult, 1.0)
-        # ...and at the end it applies the xMult.
+        # ...and as the run settles it banks its xMult, which the finish path
+        # puts on the multiplier.
         self.game._apply_cards_on_finish()
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 1 + 0.2 * 2)
 
 

@@ -422,6 +422,101 @@ class TrialsTests(GameTestCase):
         self.assertFalse(self.game.grid[(1, 1)].trial_fragile)
 
 
+    def test_crumbling_keeps_its_mark_when_the_block_moves(self):
+        # Moving a fragile block carries the trial's mark with it: the decided
+        # CELL moves, so the block does not stop shattering and a re-apply marks
+        # the block where it now stands (see Game._carry_trial_mark).
+        self.game.grid.clear()
+        for gx in range(8):
+            self.game.grid[(gx, 0)] = main.Block(gx, 0, scorer=main.Scorer.CHIPS_ADD,
+                                                 scorer_amount=10)
+        self.game.grid[(0, 1)] = main.Block(0, 1, scorer=main.Scorer.START)
+        self.game.current_trial = main.Trial.CRUMBLING
+        with mock.patch("main.random.sample",
+                        side_effect=lambda seq, k: seq[:k]):
+            self.game._apply_trial()
+        fragile = self.game.grid[(0, 0)]
+        self.assertTrue(fragile.trial_fragile)
+        self.assertEqual(self.game.trial_decision["cells"], {(0, 0), (1, 0)})
+
+        self._click(self._grid_pos(0, 0))  # pick the fragile block up...
+        self._click(self._grid_pos(4, 4))  # ...and put it down three cells over
+
+        moved = self.game.grid[(4, 4)]
+        self.assertIsNot(moved, fragile)     # a move rebuilds the block
+        self.assertTrue(moved.trial_fragile)
+        self.assertIn(moved, self.game.trial_fragile_blocks)
+        self.assertNotIn(fragile, self.game.trial_fragile_blocks)
+        self.assertEqual(self.game.trial_decision["cells"], {(1, 0), (4, 4)})
+
+        self.game._apply_trial()             # a replay marks the same blocks
+        self.assertTrue(self.game.grid[(4, 4)].trial_fragile)
+        self.assertIn(self.game.grid[(4, 4)], self.game.trial_fragile_blocks)
+
+
+    def test_hands_tied_keeps_its_mark_when_the_block_moves(self):
+        self.game.grid.clear()
+        for gx in range(8):
+            self.game.grid[(gx, 0)] = main.Block(gx, 0, scorer=main.Scorer.CHIPS_ADD,
+                                                 scorer_amount=10)
+        self.game.grid[(0, 1)] = main.Block(0, 1, scorer=main.Scorer.START)
+        self.game.current_trial = main.Trial.HANDS_TIED
+        with mock.patch("main.random.sample",
+                        side_effect=lambda seq, k: seq[:k]):
+            self.game._apply_trial()
+        debuffed = self.game.grid[(0, 0)]
+        self.assertEqual(self.game._trigger_limit(debuffed), 0)  # 1 - the penalty
+
+        self._click(self._grid_pos(0, 0))
+        self._click(self._grid_pos(4, 4))
+
+        moved = self.game.grid[(4, 4)]
+        self.assertIn(moved, self.game.trial_debuffed_blocks)
+        self.assertNotIn(debuffed, self.game.trial_debuffed_blocks)
+        self.assertEqual(self.game._trigger_limit(moved), 0)
+        # ...while a block the trial never picked keeps its full limit.
+        self.assertEqual(self.game._trigger_limit(self.game.grid[(7, 0)]), 1)
+        self.assertEqual(self.game.trial_decision["cells"], {(0, 1), (4, 4)})
+
+
+    def test_erasing_a_marked_block_keeps_its_mark_in_the_toolbox(self):
+        # Erasing a marked block carries the mark to the toolbox item, together
+        # with the cell it stood in (see _refund_block / _carry_trial_mark), so
+        # putting the block down elsewhere puts the mark there. The mark does NOT
+        # outlive the run it belongs to: the next application rebuilds the marks
+        # from the board, where an erased block no longer is.
+        self.game.grid.clear()
+        for gx in range(8):
+            self.game.grid[(gx, 0)] = main.Block(gx, 0, scorer=main.Scorer.CHIPS_ADD,
+                                                 scorer_amount=10)
+        self.game.grid[(0, 1)] = main.Block(0, 1, scorer=main.Scorer.START)
+        self.game.current_trial = main.Trial.CRUMBLING
+        with mock.patch("main.random.sample",
+                        side_effect=lambda seq, k: seq[:k]):
+            self.game._apply_trial()
+        self.game._erase_block_at(0, 0)
+
+        item = self.game.toolbox.items[-1]
+        self.assertIn(item, self.game.trial_fragile_blocks)
+        self.assertEqual(item.trial_cell, (0, 0))
+        self.game._equip_block(item)
+        self.assertTrue(self.game._place_block_at(4, 4))
+        self.assertTrue(self.game.grid[(4, 4)].trial_fragile)
+        self.assertNotIn(item, self.game.trial_fragile_blocks)
+        self.assertEqual(self.game.trial_decision["cells"], {(1, 0), (4, 4)})
+
+        # A block erased again and left in the toolbox keeps nothing once the
+        # marks are rebuilt: the trial marks the board, not the inventory.
+        self.game._erase_block_at(4, 4)
+        item = self.game.toolbox.items[-1]
+        self.game._apply_trial()
+        self.assertNotIn(item, self.game.trial_fragile_blocks)
+        self.game._equip_block(item)
+        self.assertTrue(self.game._place_block_at(6, 6))
+        self.assertNotIn(self.game.grid[(6, 6)], self.game.trial_fragile_blocks)
+        self.assertFalse(getattr(self.game.grid[(6, 6)], "trial_fragile", False))
+
+
     def test_speedrun_trial_halves_ideal_time(self):
         # With Speedrun the time factor peaks at half the ideal time, so a run
         # that takes TIME_IDEAL/2 scores the full time contribution while one

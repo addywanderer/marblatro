@@ -70,10 +70,11 @@ def apply_cards(game):
     bonus (the +3 mult a break has banked across the game), then Tesseract's
     reroll bonus, then every owned card whose effect fires at the START of a run
     (Joker's +4 mult, Pillar's fullest column, Banker's cash, Glitch's random
-    mult, Ripped Card, Cozy, Painting, Synthesizer, Island) in card-area order,
+    mult, Ripped Card, Cozy, Painting, Synthesizer) in card-area order,
     so a card's particle pops on the card that paid. End-of-run and
     fragile-break cards fire elsewhere (see apply_cards_on_finish /
-    on_fragile_broken).
+    on_fragile_broken), and every xMult a run earns is banked for the run's end
+    (see Game._apply_xmult).
     """
     if _owns_wrecking_ball_card(game):
         _apply_wrecking_bonus(game)
@@ -148,7 +149,14 @@ def _named_card_units(game, measure):
     * pipe_streak = the groups of PIPE-GROUP blocks the run's contacts
       completed (counted live by Game._count_pipe_streak, see
       FOUNTAIN_STREAK_LENGTH — three different Pipe/Drain/Pipe Bend blocks in a
-      row, anything else breaking the run).
+      row, anything else breaking the run);
+    * inside_time = the seconds the marbles spent INSIDE a block (any part of
+      the marble overlapping the block's hitbox — a position only the phase
+      effect can put it in, see PhysicsEngine.overlaps_block), with a second
+      inside a locked board unit counting 30 of them: the Intangible card pays
+      +0.5 mult a block second and +15 mult a locked-unit second, and 30 is that
+      rate ratio (15 / 0.5), so one ratio serves both clauses (see
+      Card.NAMED[Card.INTANGIBLE] and Game._count_inside_time).
     """
     if measure == "start":
         return 1.0
@@ -187,6 +195,11 @@ def _named_card_units(game, measure):
         # time this is read, and a run that is retried replays the same touches
         # (see Game.reset_run).
         return getattr(game, "pipe_streak_run_units", 0)
+    if measure == "inside_time":
+        # Seconds inside a block, with a locked-unit second worth 30 of them —
+        # the ratio between the Intangible card's two rates (see the docstring).
+        return (getattr(game, "inside_block_time", 0.0)
+                + 30 * getattr(game, "inside_locked_time", 0.0))
     return 0.0
 
 
@@ -237,7 +250,7 @@ def apply_card_start(game, card, value):
 
     Only the named cards do anything here (see Card.NAMED), and only the ones
     whose phase is "start": Joker, Pillar, Banker, Glitch, Ripped Card, Cozy,
-    Painting, Synthesizer and Island. `card` is the card that triggers the
+    Painting and Synthesizer. `card` is the card that triggers the
     effect (possibly a Blueprint copying its left neighbour), so the particle
     appears on that card in the card area.
     """
@@ -893,8 +906,10 @@ def apply_cards_on_finish(game):
 
     The named cards whose phase is "end" pay here — Explorer's distance xMult,
     Astronaut's black-hole mult, Plane's air-time chips, Skater's slippery
-    xMult and Fountain's pipe streaks — because their measures are only final
-    once the marbles have stopped. A Blueprint copies the card to its immediate left; a card disabled
+    xMult, Fountain's pipe streaks, Island's groups — because their measures are
+    only final once the marbles have stopped (and, for the xMult ones, because
+    xMult is a run-end calculation: the finish path flushes the whole banked
+    product right after this, see Game._flush_run_xmult). A Blueprint copies the card to its immediate left; a card disabled
     by the Card cutter or Deal breaker trial is skipped (and can't be copied
     either). Their popups appear where the run ended (on the finished marble),
     so they are visible instead of lost at the top-of-screen card area.

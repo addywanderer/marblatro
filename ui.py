@@ -1120,6 +1120,17 @@ def _build_whole_card_art(card):
         p([(3, 33), (37, 33), (32, 38), (8, 38)])    # the basin
         l(10, 35, 16, 35, 2)            # the water standing in it
         l(24, 35, 30, 35, 2)
+    elif card == Card.INTANGIBLE:             # a ghost, half here
+        # The marble passes through what it touches, so the card is a ghost: a
+        # domed sheet with a wavy hem and two punched-out eye holes. The eyes
+        # are holes rather than dots because the ink is a single colour — a
+        # transparent mark CUTS the silhouette, exactly as the action icons'
+        # skull sockets do (see _build_action_art).
+        p([(9, 30), (9, 13), (13, 6), (20, 4), (27, 6), (31, 13), (31, 30),
+           (28, 35), (25, 30), (22, 35), (19, 30), (16, 35), (13, 30),
+           (11, 33)])
+        pygame.draw.circle(art, (0, 0, 0, 0), (16, 16), 2)   # eye (left)
+        pygame.draw.circle(art, (0, 0, 0, 0), (25, 16), 2)   # eye (right)
     elif card == Card.COZY:                   # a small warm house
         p([(7, 20), (20, 9), (33, 20)])
         r(12, 20, 16, 14)
@@ -2778,38 +2789,53 @@ def draw_cards(game):
 
 
 def draw_token(screen, token, rect):
-    """Draw one Spirit token as a small circular poker chip.
+    """Draw one Spirit token as the block it kept.
 
-    The face is the kept scorer's colour, the rim is a ring of dashes (poker
-    chip edge spots), the scorer's name sits in the middle, and a limited
-    token carries a small gold number badge showing the runs it has left. A
-    PERMANENT token (a v2 Spirit) shows a gold rim instead of a badge.
+    A token IS a block (see ScorerToken), so it is drawn the way that block was
+    drawn on the board — its shape, its effect icons and its scorer colour —
+    moved into the token slot for the drawing alone (see _token_visual). A
+    limited token carries a small gold number badge showing the runs it has
+    left; a PERMANENT token (a v2 Spirit) gets a gold frame instead.
     """
-    center = rect.center
-    radius = min(rect.width, rect.height) // 2 - 3
-    pygame.draw.circle(screen, Scorer.color(token.scorer), center, radius)
-    pygame.draw.circle(screen, (255, 215, 0) if token.runs_left is None else WHITE,
-                       center, radius, 2)
-    for i in range(8):
-        angle = math.tau * i / 8
-        inner = (center[0] + math.cos(angle) * (radius - 6),
-                 center[1] + math.sin(angle) * (radius - 6))
-        outer = (center[0] + math.cos(angle) * (radius - 1),
-                 center[1] + math.sin(angle) * (radius - 1))
-        pygame.draw.line(screen, WHITE, inner, outer, 3)
-    label = font("mini").render(Scorer.name(token.scorer), True, WHITE)
-    screen.blit(label, label.get_rect(center=center))
-    if token.runs_left is not None:
-        badge = font("mini").render(str(token.runs_left), True, (255, 215, 0))
-        screen.blit(badge, (rect.right - badge.get_width() - 1, rect.top + 1))
+    draw_block(_token_visual(token, rect), screen)
+    if token.runs_left is None:
+        pygame.draw.rect(screen, (255, 215, 0), rect, 2)
+        return
+    badge = font("mini").render(str(token.runs_left), True, (255, 215, 0))
+    screen.blit(badge, (rect.right - badge.get_width() - 1, rect.top + 1))
+
+
+def _token_visual(token, rect):
+    """A copy of a token's block, sitting in the token slot, for drawing.
+
+    The copy carries the block's look (shape, effects, scorer, angle, rolled
+    magnitudes) but its rect is the slot's, so draw_block renders it in the
+    token column without moving the stored block — the stored block's own cell
+    is what the board-relative payoffs still read.
+    """
+    block = token.block
+    visual = Block(0, 0, shape=block.shape, effect=Effect.NONE,
+                   scorer=block.scorer, scorer_amount=block.scorer_amount,
+                   angle=block.angle, effects=list(block.effects),
+                   effect_amounts=dict(getattr(block, "effect_amounts", None) or {}))
+    visual.rect = pygame.Rect(rect)
+    # A token is never "used up": it fires again next run, so it never wears a
+    # block's red spent outline.
+    visual.triggers_left = 1
+    visual.spin = getattr(block, "spin", 0.0)
+    visual._refresh_geometry()
+    return visual
 
 
 def draw_tokens(game):
-    """Draw the Spirit token chips in a column right of the inventory.
+    """Draw the Spirit tokens in a column right of the inventory.
 
-    One chip per token (see ScorerToken): each fires its kept scorer at the
-    start of every run it covers. The column is a panel in the same style as
-    the other areas, and nothing is drawn when the player owns no tokens.
+    One block per token (see ScorerToken) — the block the token kept, drawn as
+    it was on the board. Each fires once per run it covers, as if the marble had
+    collided with it: the payoffs that belong to the run's start fire then, and
+    an xMult block fires as the run settles. The column is a panel in the same
+    style as the other areas, and nothing is drawn when the player owns no
+    tokens.
     """
     if not game.tokens:
         return

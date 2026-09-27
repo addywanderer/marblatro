@@ -44,7 +44,7 @@ __all__ = [
     "tempfile", "unittest", "mock", "np", "pygame", "achievements",
     "collection", "components", "main", "metagame", "profiles", "save_system",
     "GameTestCase", "CONDITIONS_COMMENTED_OUT", "NAMED_CARDS_GONE",
-    "_group_card", "_card_item",
+    "_group_card", "_card_item", "_token",
     "_card_for_block", "_shape_card_value", "_effect_card_value",
 ]
 
@@ -93,6 +93,21 @@ def _card_item(group, scorer, amount=None):
     if amount is None:
         amount = main.Scorer.DEFAULT_AMOUNT.get(scorer, 0)
     return main.CardItem(value, main.Card.PRICES[value], amount=amount)
+
+
+def _token(scorer, amount=None, shape=main.Shape.RECT, effects=None,
+           x=0, y=0, runs_left=None):
+    """A Spirit token keeping a block built for ``scorer`` (see ScorerToken).
+
+    A token stores the whole block it was made from, so the tests build one the
+    way the Spirit action does: a plain block with that scorer and magnitude.
+    """
+    if amount is None:
+        amount = main.Scorer.DEFAULT_AMOUNT.get(scorer, 0)
+    return main.ScorerToken(
+        main.Block(x, y, shape=shape, effect=main.Effect.NONE, scorer=scorer,
+                   scorer_amount=amount, effects=effects),
+        runs_left=runs_left)
 
 
 def _card_for_block(block, scorer, amount=None):
@@ -202,6 +217,21 @@ class GameTestCase(unittest.TestCase):
         return marble
 
 
+    def _start_run_base(self):
+        """Start a run with no tokens in play; return the (chips, mult) it dealt.
+
+        The chips and mult a run STARTS with are the game's to set (see
+        reset_run), so a test that measures what a token or card ADDS to a run
+        must not hard-code them: it reads the base from a run with nothing in
+        play, then starts the real run and compares.
+        """
+        tokens, self.game.tokens = self.game.tokens, []
+        self.game.reset_run()
+        base = (self.game.score_chips, self.game.score_mult)
+        self.game.tokens = tokens
+        return base
+
+
     def _grid_pos(self, gx, gy):
         """A screen point inside the given marble-box grid cell."""
         return (main.MARBLE_BOX_COORDS[0] + gx * main.GRID_SIZE + 5,
@@ -289,6 +319,30 @@ class GameTestCase(unittest.TestCase):
             if pipe.triggers_left == 0:
                 break
         return game.score_chips, pipe.triggers_left
+
+
+    def _drain_drop(self):
+        """Drop a marble through a drain's funnel; returns (chips, triggers_left).
+
+        Runs real physics so the marble falls down the funnel's middle without
+        ever touching its curved walls.
+        """
+        game = main.Game()
+        game.title_screen = False
+        game.score_chips = 0
+        game.run_active = True
+        drain = main.Block(4, 5, shape=main.Shape.DRAIN, scorer=main.Scorer.CHIPS_ADD,
+                           scorer_amount=30)
+        game.grid[(4, 5)] = drain
+        marble = main.Marble(main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE + 20,
+                             main.MARBLE_BOX_COORDS[1] + 2 * main.GRID_SIZE + 20)
+        marble.velocity = np.array([0.0, 200.0])
+        game.marbles.append(marble)
+        for _ in range(60 * 4):
+            game.update()
+            if drain.triggers_left == 0:
+                break
+        return game.score_chips, drain.triggers_left
 
 
     def _trigger_random_block(self, roll):

@@ -797,7 +797,7 @@ class ShopTests(GameTestCase):
 
     def test_selling_essence_stops_at_a_full_token_column(self):
         # Only the tokens that fit are distilled, and the sale says so.
-        self.game.tokens = [main.ScorerToken(main.Scorer.CASH, 15, runs_left=None)
+        self.game.tokens = [_token(main.Scorer.CASH, 15, runs_left=None)
                             for _ in range(main.MAX_TOKENS - 1)]
         self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
         self.game.selected_toolbox_item = self.game.cards[0]
@@ -1080,9 +1080,13 @@ class ShopTests(GameTestCase):
         # roll 0.2 (< 4/13) -> +5 mult.
         trigger(0.2)
         self.assertAlmostEqual(self.game.score_mult, 7)
-        # roll 0.5 (>= 4/13) -> the favored +0.3 xMult (x1.3).
+        # roll 0.5 (>= 4/13) -> the favored +0.3 xMult (x1.3), banked for the
+        # end of the run like every other xMult.
         self.game.score_mult = 2
         trigger(0.5)
+        self.assertAlmostEqual(self.game.score_mult, 2)
+        self.assertAlmostEqual(self.game.run_xmult_pending, 1.3)
+        self.game._flush_run_xmult()
         self.assertAlmostEqual(self.game.score_mult, 2 * 1.3)
 
 

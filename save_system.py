@@ -109,6 +109,28 @@ def _deserialize_effect_amounts(data):
     return {int(e): value for e, value in (data.get("effect_amounts") or {}).items()}
 
 
+def _serialize_random_rolls(item):
+    """An item's pre-rolled RANDOM/LUCKY outcome, or None (see main.py).
+
+    A Random/Lucky block or card has its reward chosen once for the run and
+    kept on the item, tagged with the run it belongs to (see
+    main.Game._roll_run_random_outputs / _run_random_result). Saving it means
+    loading a save is never a reroll: without it the outcome would be lost on
+    the way out (a loaded save draws a fresh run seed, so the block would roll
+    again the next time it triggered).
+    """
+    rolls = getattr(item, "random_rolls", None)
+    return dict(rolls) if rolls else None
+
+
+def _restore_random_rolls(item, data):
+    """Give a rebuilt item back the outcome a save stored for it (if any)."""
+    rolls = data.get("random_rolls")
+    if rolls:
+        item.random_rolls = dict(rolls)
+    return item
+
+
 def _serialize_item(item):
     """Turn a toolbox/shop/grid item into a JSON-safe dict."""
     if isinstance(item, Block):
@@ -135,6 +157,8 @@ def _serialize_item(item):
             # The price the block was placed with: a loaded block is never
             # repriced from its parts (see main.block_resale_price).
             "resale_price": getattr(item, "resale_price", None),
+            # This run's RANDOM/LUCKY outcome, so loading cannot reroll it.
+            "random_rolls": _serialize_random_rolls(item),
         }
     kind = getattr(item, "kind", None)
     if kind == "block":
@@ -153,6 +177,16 @@ def _serialize_item(item):
             "key_number": int(getattr(item, "key_number", 0)),
             "trigger_limit": int(getattr(item, "trigger_limit", 1)),
             "trigger_paid": int(getattr(item, "trigger_paid", 0)),
+            # A block erased to the toolbox carries the triggers it had left,
+            # this run's RANDOM/LUCKY outcome (see main._refund_block) and the
+            # rotation it had, so putting it back down after a save is still a
+            # move in every respect. A shop block has no angle of its own.
+            "angle": (None if getattr(item, "angle", None) is None
+                      else int(item.angle)),
+            "triggers_left": (int(item.triggers_left)
+                              if getattr(item, "triggers_left", None) is not None
+                              else None),
+            "random_rolls": _serialize_random_rolls(item),
         }
     if kind == "card":
         return {
@@ -164,6 +198,8 @@ def _serialize_item(item):
             "amount": getattr(item, "amount", 0),
             "col": item.col, "row": item.row,
             "name": item.name,
+            # This run's RANDOM/LUCKY outcome (see _serialize_random_rolls).
+            "random_rolls": _serialize_random_rolls(item),
         }
     if kind == "action":
         return {
@@ -188,9 +224,10 @@ def _serialize_item(item):
 def _deserialize_item(data):
     """Rebuild a toolbox/shop/grid item from a serialized dict."""
     if data["kind"] == "card":
-        return CardItem(data["value"], data.get("price", 20),
-                        col=data.get("col", 0), row=data.get("row", 0),
-                        amount=data.get("amount", 0))
+        return _restore_random_rolls(
+            CardItem(data["value"], data.get("price", 20),
+                     col=data.get("col", 0), row=data.get("row", 0),
+                     amount=data.get("amount", 0)), data)
     if data["kind"] == "action":
         return ActionItem(data["value"], data.get("price", 60),
                           version=data.get("version", 1),
@@ -221,8 +258,8 @@ def _deserialize_item(data):
             # leaves it unset, and the first read materializes one (see
             # main.block_resale_price).
             block.resale_price = data.get("resale_price")
-            return block
-        return BlockItem(
+            return _restore_random_rolls(block, data)
+        item = BlockItem(
             data.get("col", 0), data.get("row", 0),
             data["shape"], data.get("effect", Effect.NONE), data["scorer"],
             data.get("scorer_amount", 0), data.get("price", 0), data.get("name", ""),
@@ -232,7 +269,13 @@ def _deserialize_item(data):
             trigger_paid=data.get("trigger_paid", 0),
             effects=data.get("effects") or [Effect.NONE],
             effect_amounts=_deserialize_effect_amounts(data),
+            angle=data.get("angle"),
         )
+        # A block refunded to the toolbox keeps what it had left (see
+        # main._refund_block); a save from before this simply has none.
+        if data.get("triggers_left") is not None:
+            item.triggers_left = int(data["triggers_left"])
+        return _restore_random_rolls(item, data)
     return Component(
         data["kind"], data["value"],
         amount=data.get("amount", 0),
@@ -251,6 +294,67 @@ def ensure_saves():
         if not os.path.exists(path):
             with open(path, "w", encoding="utf-8") as f:
                 json.dump({"version": 1}, f)
+
+
+def _serialize_trial_decision(game):
+    """The run's decided trial picks as a JSON-safe dict, or None.
+
+    A trial decides every random choice it makes ONCE for the run (which cells
+    Hands tied debuffs, which slot Card cutter cuts, the order Shuffled leaves
+    the cards in, which cells Crumbling makes fragile, Marble weight's heavier
+    or lighter factor, which shape group or effect Deal breaker breaks — see
+    main.Game._roll_trial_decision) and then replays that decision, so it has to
+    ride through a save: without it, loading the save would hand the player a
+    free reroll of the very picks a replay is not allowed to change.
+
+    The picks are stored the way they are held: cells as [x, y] pairs, the
+    Shuffled order as card-area SLOT numbers (the card items themselves are
+    rebuilt on load, so a slot is what keeps pointing at the same card), and
+    Deal breaker's group as its kind plus its members.
+    """
+    decision = getattr(game, "trial_decision", None)
+    if not decision:
+        return None
+    out = {"trial": (None if decision.get("trial") is None
+                     else int(decision["trial"]))}
+    if "cells" in decision:
+        out["cells"] = [[int(x), int(y)] for x, y in sorted(decision["cells"])]
+    if "card_index" in decision:
+        out["card_index"] = int(decision["card_index"])
+    if "order" in decision:
+        out["order"] = [game.cards.index(card) for card in decision["order"]
+                        if card in game.cards]
+    if "weight" in decision:
+        out["weight"] = decision["weight"]
+    if "group" in decision:
+        kind, members = decision["group"]
+        out["group"] = [kind, [int(member) for member in members]]
+    return out
+
+
+def _restore_trial_decision(data, game):
+    """Read a save's decided trial picks back (an old save has none).
+
+    Called AFTER the save's cards are rebuilt: the Shuffled order is stored as
+    card-area slots, so it is pointed back at the loaded card items here.
+    """
+    saved = data.get("trial_decision")
+    if not saved:
+        return None
+    decision = {"trial": saved.get("trial")}
+    if "cells" in saved:
+        decision["cells"] = {(int(x), int(y)) for x, y in saved["cells"]}
+    if "card_index" in saved:
+        decision["card_index"] = int(saved["card_index"])
+    if "order" in saved:
+        decision["order"] = [game.cards[index] for index in saved["order"]
+                             if 0 <= index < len(game.cards)]
+    if "weight" in saved:
+        decision["weight"] = saved["weight"]
+    if "group" in saved:
+        kind, members = saved["group"]
+        decision["group"] = (kind, tuple(members))
+    return decision
 
 
 def _save_data(game):
@@ -273,6 +377,9 @@ def _save_data(game):
         "failed_runs": game.failed_runs,
         "current_trial": (int(game.current_trial)
                           if game.current_trial is not None else None),
+        # The trial's decided random picks for this run (see
+        # _serialize_trial_decision): loading a save must not reroll them.
+        "trial_decision": _serialize_trial_decision(game),
         # The save's difficulty (chosen when it was started): how many of a
         # round's runs play a trial and the score growth per run.
         "difficulty": int(game.difficulty),
@@ -290,11 +397,12 @@ def _save_data(game):
                            for s in game.wrecking_bonus],
         # Tesseract's permanent reroll bonus: an xMult factor (starts at 1.0).
         "tesseract_bonus": game.tesseract_bonus,
-        # Spirit tokens: a destroyed block's scorer, kept firing at the start
-        # of each run it covers (runs_left None = permanent).
-        "tokens": [[t.scorer, t.scorer_amount, t.shape, list(t.effects),
-                    int(t.x), int(t.y),
-                    -1 if t.runs_left is None else int(t.runs_left)]
+        # Spirit tokens: each is a whole kept block plus the runs it has left
+        # (None = permanent, a v2 Spirit), stored as an item dict so the block
+        # comes back exactly as it was (see _serialize_item).
+        "tokens": [{"block": _serialize_item(t.block),
+                    "runs_left": (None if t.runs_left is None
+                                  else int(t.runs_left))}
                    for t in game.tokens],
         "shred_points": game.shred_points,
         "rubble_points": game.rubble_points,
@@ -397,12 +505,20 @@ def _load_save_data(game, data, slot):
     # Tesseract's permanent reroll bonus persists too (a factor; 1.0 when the
     # save predates the card).
     game.tesseract_bonus = data.get("tesseract_bonus", 1.0)
-    # Spirit tokens persist: each keeps its scorer, amount, the sacrificed
-    # block's cell/effects, and its remaining runs (-1 = permanent).
+    # Spirit tokens persist: each keeps the whole block it was made from, so a
+    # save from before tokens stored their block (a plain [scorer, amount,
+    # shape, effects, x, y, runs_left] list) is read back into one.
     game.tokens = []
-    for _s, _a, _sh, _ef, _x, _y, _runs in data.get("tokens", []):
+    for entry in data.get("tokens", []):
+        if isinstance(entry, dict):
+            game.tokens.append(ScorerToken(
+                _deserialize_item(entry["block"]),
+                runs_left=entry.get("runs_left")))
+            continue
+        _s, _a, _sh, _ef, _x, _y, _runs = entry
         game.tokens.append(ScorerToken(
-            _s, _a, shape=_sh, effects=_ef, x=_x, y=_y,
+            Block(_x, _y, shape=_sh, effect=Effect.NONE, scorer=_s,
+                  scorer_amount=_a, effects=_ef),
             runs_left=None if _runs < 0 else _runs))
     # Resource points from Shreds/Rubble/Ideas scorers persist too, as do free
     # rerolls (granted by Fresh) and Picky points / bonus shop slots. A legacy
@@ -422,10 +538,20 @@ def _load_save_data(game, data, slot):
     game.difficulty = data.get("difficulty", DEFAULT_DIFFICULTY)
     # Whether the permanent upgrade effects apply to this save's runs.
     game.upgrades_enabled = data.get("upgrades_enabled", True)
-    # The trial's applied effects re-apply when a run starts. A loaded save
-    # also drops this run's decided random picks and draws a fresh run seed: the
-    # run is being set up again from the save, so its dice roll afresh rather
-    # than being tied to the choices the (unloaded) session had made.
+    # The trial's applied effects re-apply when a run starts, so the state they
+    # derive is cleared here. The DECIDED picks they derive from are not: a
+    # trial decides every random choice it makes once for the run (see
+    # main.Game._roll_trial_decision) and then replays it, so dropping the
+    # decision on load would be a free reroll. It is restored below, once the
+    # save's cards are back (a Shuffled order is stored as card-area slots and
+    # has to be pointed at the rebuilt cards). The run SEED is drawn afresh
+    # instead: the run is being set up again from the save, so its IN-PLAY dice
+    # (the 8 ball's retriggers, a Glitch card's random mult) roll anew rather
+    # than staying tied to the choices the (unloaded) session had made. The
+    # rewards an item already rolled are not dropped either: a Random/Lucky
+    # block, card or Spirit token carries its own outcome through the save (see
+    # _serialize_random_rolls), so loading is never a reroll of a reward the
+    # player could already see.
     game.trial_debuffed_blocks = set()
     game.disabled_card = None
     game.deal_broken_cards = set()
@@ -446,6 +572,10 @@ def _load_save_data(game, data, slot):
     for d in data.get("grid", []):
         block = _deserialize_item(d)
         game.grid[(block.x, block.y)] = block
+    # The decided trial picks come back now that the items above exist: a
+    # Shuffled order is stored as card-area slots and is resolved against the
+    # loaded cards here (see _restore_trial_decision).
+    game.trial_decision = _restore_trial_decision(data, game)
     # Pairing numbers (Key/Lock and Portal) are handed out by a counter that
     # lives in the running game while the numbers themselves live in this save,
     # so the loaded board claims its numbers before any new pair is built:
