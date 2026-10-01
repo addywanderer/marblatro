@@ -961,10 +961,12 @@ class BlocksTests(GameTestCase):
                              "the belt accelerated the marble past its own speed")
 
 
-    def test_conveyor_does_not_slow_a_faster_marble_or_scale_with_mass(self):
+    def test_conveyor_does_not_slow_a_faster_marble_or_scale_with_its_own_mass(self):
         # A belt only adds speed: a marble already moving faster along the belt
-        # keeps its own speed, and the belt speed is the same for every marble
-        # (a light marble is not flung harder by a belt).
+        # keeps its own speed, and the belt speed never reads the marble's own
+        # mass (a light marble is not flung harder by a belt — the marble-weight
+        # trial's factor is a separate thing, see
+        # test_marble_weight_trial_scales_accelerators_and_conveyors).
         block = main.Block(5, 5, effect=main.Effect.CONVEYOR, scorer=main.Scorer.NONE)
         marble = main.Marble(block.rect.centerx, block.rect.top - main.MARBLE_RADIUS)
         marble.velocity = np.array([900.0, 0.0])
@@ -1924,3 +1926,189 @@ class BlocksTests(GameTestCase):
         self.game._erase_block_at(2, 1)
 
         self.assertEqual(len(self.game.marbles), 1)  # non-start erase leaves the marble
+
+
+class GondolaTests(GameTestCase):
+    """The Gondola effect: a block that slides along its own lane and turns back."""
+
+    def _place(self, gx, gy, angle=90, shape=main.Shape.RECT):
+        """Put a cable car on an unlocked board and return it."""
+        self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
+                                    for y in range(main.GRID_HEIGHT)}
+        block = main.Block(gx, gy, shape=shape, effect=main.Effect.GONDOLA,
+                           scorer=main.Scorer.NONE, angle=angle)
+        self.game.grid[(gx, gy)] = block
+        self.game.run_active = True
+        return block
+
+    def _slide(self, frames):
+        for _ in range(frames):
+            self.game._update_gondolas(main.DT)
+
+    def test_the_effect_data(self):
+        self.assertEqual(main.Effect.name(main.Effect.GONDOLA), "Gondola")
+        self.assertIn(main.Effect.GONDOLA, main.Effect.REAL_ORDER)
+        self.assertIn(main.Effect.GONDOLA, main.Effect.ORDER)
+        self.assertEqual(main.Effect.magnitude(main.Effect.GONDOLA), 60)
+        self.assertEqual(main.Effect.MAGNITUDE_UNIT[main.Effect.GONDOLA], "px/s")
+        # It is offered by the shop like any other real effect, and its own
+        # magnitude is rolled onto the block when it is built.
+        self.assertIn(main.Effect.GONDOLA,
+                      [e for e in main.Effect.REAL_ORDER])
+        self.assertIn("Slides", main.effect_description(main.Effect.GONDOLA))
+        self.assertIn("turning back",
+                      main.effect_description(main.Effect.GONDOLA))
+
+    def test_the_axis_and_first_direction_come_from_the_arrow(self):
+        up = self._place(2, 7, angle=0)          # the base arrow points up
+        right = self._place(6, 7, angle=90)
+        self.assertEqual(self.game._gondola_axis(up), ("y", -1))
+        self.assertEqual(self.game._gondola_axis(right), ("x", 1))
+        # A Rotate block's spin is part of the arrow it obeys, so a spinning
+        # car can change lanes mid-run.
+        spinning = self._place(3, 3, angle=0)
+        spinning.spin = 90.0
+        self.assertEqual(self.game._gondola_axis(spinning), ("x", 1))
+
+    def test_it_slides_at_its_own_speed(self):
+        car = self._place(2, 7, angle=90)
+        start = car.rect.topleft
+        self._slide(30)                          # half a second at 60 px/s
+        self.assertEqual(car.rect.left - start[0], 30)
+        self.assertEqual(car.rect.top, start[1])  # it stays on its lane
+        # Its cell never changes: the rect moves, the key it is stored under
+        # does not (so erasing, scoring and rebuilding all still find it).
+        self.assertEqual((car.x, car.y), (2, 7))
+        self.assertIn((2, 7), self.game.grid)
+
+    def test_the_marble_meets_the_car_where_it_has_moved_to(self):
+        # The slide runs before the frame's block list is built, so the physics
+        # sees the car's new rect in the same frame.
+        car = self._place(2, 7, angle=90)
+        marble = self._add_marble()
+        self.game.update()
+        self.assertEqual(car.rect.left, 2 * main.GRID_SIZE
+                         + main.MARBLE_BOX_COORDS[0] + 1)
+        self.assertGreater(len(self.game.grid), 0)
+        self.assertIsNotNone(marble)
+
+    def test_a_slow_roll_is_not_lost_to_whole_pixels(self):
+        # The roll can land as low as a tenth of the average speed — a tenth of
+        # a pixel a frame. The travel is kept as a float and floored into the
+        # rect once a frame (see Game._gondola_rect), so a slow car still moves;
+        # feeding the fraction straight into the rect every frame (which is what
+        # Rect.move does) discards it EVERY frame and parks the car on its cell
+        # for good, which is what most rolled cars used to do.
+        car = self._place(2, 7, angle=90)
+        car.effect_amounts[main.Effect.GONDOLA] = 24
+        start = car.rect.left
+        self._slide(60)
+        self.assertAlmostEqual(car.rect.left - start, 24, delta=1)
+
+        slow = self._place(4, 9, angle=90)       # another lane, no interference
+        slow.effect_amounts[main.Effect.GONDOLA] = 6
+        start = slow.rect.left
+        self._slide(120)
+        self.assertAlmostEqual(slow.rect.left - start, 12, delta=1)
+
+    def test_it_really_slides_in_the_real_frame_loop(self):
+        # The cars have to move in the game's own frame loop, not only when
+        # _update_gondolas is called by hand: this drives the real update() for
+        # a second and measures what the player would see on screen.
+        self.game.grid = {}
+        car = self._place(4, 7, angle=90)
+        car.effect_amounts[main.Effect.GONDOLA] = 24
+        self.game.grid[(9, 14)] = main.Block(9, 14, scorer=main.Scorer.START)
+        self.assertTrue(self.game.reset_run())
+        start = car.rect.topleft
+        for _ in range(60):
+            self.game.update()
+        self.assertTrue(self.game.run_active)    # the run is still in play
+        self.assertAlmostEqual(car.rect.left - start[0], 24, delta=2)
+        self.assertEqual(car.rect.top, start[1])  # and it stayed on its lane
+
+    def test_the_lane_ends_where_the_car_would_hit_something(self):
+        # The lane is the whole of the effect's geography: the two ends the car
+        # turns around at, and the two ends its cables are drawn between (see
+        # Game._gondola_lane and ui._draw_gondola_cables).
+        car = self._place(2, 7, angle=90)
+        home = main.MARBLE_BOX_COORDS[0] + 2 * main.GRID_SIZE
+        wall = main.MARBLE_BOX_COORDS[0] + 5 * main.GRID_SIZE
+        # Nothing in the way: the lane runs from the board's left edge to its
+        # right one (minus the car's own width at each end).
+        self.assertEqual(
+            self.game._gondola_lane(car),
+            (main.MARBLE_BOX_COORDS[0] - home,
+             main.MARBLE_BOX_COORDS[0] + main.MARBLE_BOX_COORDS[2] - home
+             - main.GRID_SIZE))
+        # A block in the way shortens the lane to the gap this side of it.
+        self.game.grid[(5, 7)] = main.Block(5, 7, shape=main.Shape.RECT)
+        self.assertEqual(self.game._gondola_lane(car),
+                         (main.MARBLE_BOX_COORDS[0] - home,
+                          wall - home - main.GRID_SIZE))
+
+    def test_it_turns_back_at_the_board_border(self):
+        car = self._place(2, 7, angle=90)
+        right_edge = main.MARBLE_BOX_COORDS[0] + main.MARBLE_BOX_COORDS[2]
+        self._slide(600)
+        self.assertEqual(car.gondola_dir, -1)     # it came off the wall
+        self.assertLessEqual(car.rect.right, right_edge)
+        # And it turns again at the other side: a car left alone patrols.
+        self._slide(1200)
+        self.assertGreaterEqual(car.rect.left, main.MARBLE_BOX_COORDS[0])
+        self.assertLessEqual(car.rect.right, right_edge)
+
+    def test_it_turns_back_at_another_block(self):
+        car = self._place(2, 7, angle=90)
+        wall = main.Block(5, 7, shape=main.Shape.RECT)
+        self.game.grid[(5, 7)] = wall
+        headings = set()
+        for _ in range(600):
+            self.game._update_gondolas(main.DT)
+            # It never reaches the wall, however long it is left running...
+            self.assertLessEqual(car.rect.right, wall.rect.left + 1)
+            headings.add(car.gondola_dir)
+        # ... and it does patrol: it has travelled both ways by now.
+        self.assertEqual(headings, {1, -1})
+
+    def test_it_turns_back_at_a_locked_square(self):
+        # With the board locked, the locked squares' walls (see
+        # _board_wall_blocks) are what turns the car, so it stays inside the
+        # playable region like every marble does.
+        self.game._reset_board_to_start()
+        self.game.grid = {}
+        car = main.Block(4, 7, shape=main.Shape.RECT, effect=main.Effect.GONDOLA,
+                         scorer=main.Scorer.NONE, angle=90)
+        self.game.grid[(4, 7)] = car
+        self.game.run_active = True
+        left = main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE
+        right = left + 2 * main.GRID_SIZE
+        self._slide(600)
+        self.assertGreaterEqual(car.rect.left, left)
+        self.assertLessEqual(car.rect.right, right)
+
+    def test_a_run_starts_every_car_back_on_its_own_cell(self):
+        car = self._place(2, 7, angle=90)
+        home = car.rect.topleft
+        self._slide(45)
+        self.assertNotEqual(car.rect.topleft, home)
+        self.game.grid[(9, 9)] = main.Block(9, 9, scorer=main.Scorer.START)
+
+        self.assertTrue(self.game.reset_run())
+
+        self.assertEqual(car.rect.topleft, home)
+        self.assertIsNone(car.gondola_dir)       # it faces its arrow again
+        # Turning the block between runs sends the car off the new way.
+        car.angle = 0
+        self.game.run_active = True
+        self._slide(15)
+        self.assertLess(car.rect.top, home[1])   # now it climbs
+
+    def test_a_locked_out_save_style_block_does_not_stop_it(self):
+        # A Shape.NONE field and an opened Lock are pass-through for the marble,
+        # so the car sails through them too (see _gondola_solids).
+        car = self._place(2, 7, angle=90)
+        field = main.Block(5, 7, shape=main.Shape.NONE, effect=main.Effect.NONE)
+        self.game.grid[(5, 7)] = field
+        self._slide(240)
+        self.assertGreater(car.rect.left, field.rect.left)

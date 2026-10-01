@@ -7,6 +7,29 @@ imports live in tests/game_test_case.py.
 from tests.game_test_case import *  # noqa: F401,F403
 
 
+def _flame_pixel(surface, x, y, tol=3):
+    """True when a board-fire coloured pixel is within ``tol`` px of (x, y).
+
+    The marble's flames are drawn in the fire's two colours exactly
+    (``pygame.draw`` writes them raw), but they flicker and wander, so a sample
+    is taken as a small patch rather than a single pixel.
+    """
+    fire = (main.ui.FIRE_BODY_COLOR, main.ui.FIRE_CORE_COLOR)
+    return any(surface.get_at((x + dx, y + dy))[:3] in fire
+               for dx in range(-tol, tol + 1)
+               for dy in range(-tol, tol + 1))
+
+
+def _flame_reach(surface, x, y, dx, dy, limit=16):
+    """How far a flame reaches from (x, y) along (dx, dy), in pixels."""
+    fire = (main.ui.FIRE_BODY_COLOR, main.ui.FIRE_CORE_COLOR)
+    reach = 0
+    for dist in range(limit + 1):
+        if surface.get_at((x + dx * dist, y + dy * dist))[:3] in fire:
+            reach = dist
+    return reach
+
+
 class UiTests(GameTestCase):
     """Drawing: the HUD, sidebar, panels, fonts, popups and the CRT filter."""
 
@@ -519,6 +542,99 @@ class UiTests(GameTestCase):
         self.game.draw()  # renders the flames along the top edge without raising
 
 
+    def test_a_burning_trail_particle_burns_where_it_was_laid(self):
+        # The marble's fire trail is the marble's OWN TRAIL PARTICLES: a dot laid
+        # while the board is burning carries its own flame (see ui.TrailParticle),
+        # standing where the marble was and streaming back the way the marble was
+        # travelling THEN. So the fire lies along the path the marble actually
+        # took and cannot swing about when the marble bounces — the dots already
+        # laid burn on where they are, and only the dots laid afterwards take the
+        # new direction.
+        right = np.array([200.0, 0.0])
+        down = np.array([0.0, 200.0])
+        # One burning dot leans BACK the way its marble was going: its flame
+        # reaches further behind the dot than in front of it, whether the marble
+        # was travelling right or down.
+        for velocity, back, front in ((right, (-1, 0), (1, 0)),
+                                      (down, (0, -1), (0, 1))):
+            single = pygame.Surface(self.game.screen.get_size())
+            single.fill((0, 0, 0))
+            main.ui.TrailParticle(200, 240, 4.0, main.WHITE, fire=2.0,
+                                  velocity=velocity).draw(single)
+            self.assertGreater(_flame_reach(single, 200, 240, *back), 2)
+            self.assertGreater(_flame_reach(single, 200, 240, *back),
+                               _flame_reach(single, 200, 240, *front))
+        # A plain dot (the default) draws no fire at all.
+        plain = pygame.Surface(self.game.screen.get_size())
+        plain.fill((0, 0, 0))
+        main.ui.TrailParticle(200, 240, 4.0, main.WHITE).draw(plain)
+        self.assertFalse(_flame_pixel(plain, 200, 240, tol=1))
+        # A chain of the dots a marble rolling right leaves behind it (4px apart,
+        # see main.TRAIL_SPACING): the fire follows the whole path...
+        trail = pygame.Surface(self.game.screen.get_size())
+        trail.fill((0, 0, 0))
+        for i in range(16):
+            main.ui.TrailParticle(200 - i * 4, 240, 4.0, main.WHITE, fire=2.0,
+                                  velocity=right).draw(trail)
+        for dist in range(0, 60, 4):
+            self.assertTrue(_flame_pixel(trail, 200 - dist, 240),
+                            f"no flame {dist}px along the path")
+        # ...and every pixel of it is the board fire's own palette: a burning dot
+        # IS its flame, not a marble-coloured dot with a flame painted over it.
+        for x in range(200 - 66, 200 + 8):
+            for y in range(240 - 8, 240 + 8):
+                self.assertIn(trail.get_at((x, y))[:3],
+                              ((0, 0, 0), main.ui.FIRE_BODY_COLOR,
+                               main.ui.FIRE_CORE_COLOR),
+                              f"a stray pixel at {x},{y}")
+        # A marble that turns around leaves the fire it has laid where it was:
+        # with the marble back at the head of the trail and now travelling the
+        # other way, the fire is still BEHIND it along the path it came down,
+        # and there is none in the direction it is now heading.
+        marble = main.Marble(200, 240)
+        marble.velocity = np.array([-200.0, 0.0])  # bounced: heading back left
+        main.ui.draw_marble(marble, trail, fire=2.0)
+        self.assertTrue(_flame_pixel(trail, 200 - 40, 240))
+        self.assertFalse(_flame_pixel(trail, 200 + 12, 240))
+        # The halo and the wash are the marble's own (translucent heat, not
+        # palette pixels): a warm ring beside it, and its face bluer than cold.
+        cold = pygame.Surface(self.game.screen.get_size())
+        lit = pygame.Surface(self.game.screen.get_size())
+        cold.fill((0, 0, 0))
+        lit.fill((0, 0, 0))
+        main.ui.draw_marble(marble, lit, fire=2.0)
+        main.ui.draw_marble(marble, cold)
+        beside = (200, 240 - (int(marble.radius) + 2))
+        self.assertEqual(cold.get_at(beside)[:3], (0, 0, 0))
+        self.assertNotEqual(lit.get_at(beside)[:3], (0, 0, 0))
+        face = (200 + int(marble.radius) // 2, 240)
+        self.assertLess(lit.get_at(face)[2], cold.get_at(face)[2])
+        # The game lays these particles itself — with the fire's strength at the
+        # moment each dot was laid — and paints them, so a marble rolling while
+        # the board burns leaves fire behind it.
+        self.game.marbles = []
+        self.game.run_active = True
+        self.game.fire_intensity = 1.0
+        rolling = self._add_marble((300, 500))
+        rolling.velocity = np.array([300.0, 0.0])
+        for _ in range(4):
+            self.game.update()
+        burning = [p for p in self.game.trail_particles if p.fire > 0]
+        self.assertTrue(burning, "the rolling marble laid no burning dots")
+        # The newest dot is still under the marble itself; the trail is what it
+        # has left behind it and the marble's draw cannot cover.
+        behind = [p for p in burning
+                  if math.hypot(p.x - rolling.position[0],
+                                p.y - rolling.position[1]) > rolling.radius + 2]
+        self.assertTrue(behind, "no burning dot was left behind the marble")
+        self.game.draw()
+        for particle in behind:
+            self.assertTrue(
+                _flame_pixel(self.game.screen, int(particle.x),
+                             int(particle.y)),
+                f"the fire at {particle.x},{particle.y} is missing")
+
+
     def test_make_icon_draws_a_block_filling_the_surface(self):
         icon = main.make_icon()
         self.assertEqual(icon.get_size(), (main.GRID_SIZE, main.GRID_SIZE))
@@ -689,6 +805,40 @@ class UiTests(GameTestCase):
         self.assertGreaterEqual(rect.top, 0)
         self.assertLessEqual(rect.right, main.SCREEN_WIDTH)
         self.assertLessEqual(rect.bottom, main.SCREEN_HEIGHT)
+
+
+    def test_the_explorer_paints_the_units_a_marble_has_been_in(self):
+        # While Explorer is owned, every board unit a marble has been in this
+        # run is repainted in the title screen's own background colour, so the
+        # player watches the card's measure fill square by square. draw_board
+        # paints it, so it sits under the grid lines and every placed block.
+        self.game.visited_cells = {(2, 3)}
+        visited = self._grid_pos(2, 3)
+        neighbour = self._grid_pos(3, 3)
+        self.game.screen.fill(main.BG_COLOR)
+        main.ui.draw_board(self.game)
+        # Without the card every unit keeps the plain board colour.
+        self.assertEqual(tuple(self.game.screen.get_at(visited))[:3],
+                         main.MARBLE_BOX_COLOR)
+        # The title screen's own background, read off a real title-screen draw.
+        self.game.title_screen = True
+        self.game.draw()
+        title_bg = tuple(self.game.screen.get_at((4, 4)))[:3]
+        self.game.title_screen = False
+        self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
+        self.game.screen.fill(main.BG_COLOR)
+        main.ui.draw_board(self.game)
+        self.assertEqual(tuple(self.game.screen.get_at(visited))[:3], title_bg)
+        # An unvisited unit is untouched, so the trail reads as a trail.
+        self.assertEqual(tuple(self.game.screen.get_at(neighbour))[:3],
+                         main.MARBLE_BOX_COLOR)
+        # A card disabled for the run (Card cutter) applies no effect, so it
+        # paints no trail either — see Game._has_card.
+        self.game.disabled_card = self.game.cards[-1]
+        self.game.screen.fill(main.BG_COLOR)
+        main.ui.draw_board(self.game)
+        self.assertEqual(tuple(self.game.screen.get_at(visited))[:3],
+                         main.MARBLE_BOX_COLOR)
 
 
     def test_the_info_box_takes_the_same_colour_as_the_inventory(self):
@@ -1239,15 +1389,16 @@ class UiTests(GameTestCase):
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
         block = main.Block(0, 0, shape=main.Shape.SLOPE, scorer=main.Scorer.FINISH)
         marble = self._add_marble()
-        marble.distance = 3000.0
+        # Half the board visited: 2 units, i.e. a x1.5 factor.
+        self.game.visited_cells = {(gx, gy) for gx in range(main.GRID_WIDTH // 2)
+                                   for gy in range(main.GRID_HEIGHT)}
         marble.collisions_this_tick = [block]
         marble.finished = True
         self.game.run_active = True
         self.game.run_complete = False
         self.game.score_mult = 1
         self.game._handle_block_contacts([block])
-        fraction = (3000 / main.GRID_SIZE) / (main.GRID_WIDTH * main.GRID_HEIGHT)
-        factor = 1 + fraction
+        factor = 1.5
         p = self.game.score_particles[0]
         self.assertEqual(p.text, self.game._particle_amount_text(factor))
         self.assertEqual(p.color, main.RED)
@@ -1374,11 +1525,11 @@ class UiTests(GameTestCase):
         self.game.trials_enabled = True
         self.game.final_boss = None
         self.game.current_trial = main.Trial.SPEEDRUN
-        size = main.ui.TRIAL_TILE_SIZE
+        size = main.ui.TILE_SIZE
 
         self.game.screen.fill((1, 2, 3))
         main.ui.draw_background(self.game)
-        tile = main.ui._trial_tile(main.Trial.SPEEDRUN)
+        tile = main.ui._tile_art(main.Trial, main.Trial.SPEEDRUN)
         columns = main.SCREEN_WIDTH // size
         rows = main.SCREEN_HEIGHT // size
         for cell_x, cell_y, px, py in ((0, 0, 10, 10),
@@ -1410,9 +1561,48 @@ class UiTests(GameTestCase):
                             tuple(tile.get_at(corner))[:3])
         self.assertEqual(
             tuple(self.game.screen.get_at(corner))[:3],
-            tuple(main.ui._trial_tile(main.Trial.ALL_FINISHES).get_at(corner))[:3])
-        self.assertIs(main.ui._trial_background(main.Trial.ALL_FINISHES),
-                      main.ui._trial_background(main.Trial.ALL_FINISHES))
+            tuple(main.ui._tile_art(main.Trial,
+                                    main.Trial.ALL_FINISHES).get_at(corner))[:3])
+        self.assertIs(main.ui._tile_background(main.Trial, main.Trial.ALL_FINISHES),
+                      main.ui._tile_background(main.Trial,
+                                               main.Trial.ALL_FINISHES))
+
+    def test_a_boss_run_wears_the_bosses_own_tile(self):
+        # The final boss REPLACES the trial in the run's display, so the 24th
+        # run is covered in — and tinted by — the boss's tile rather than the
+        # rolled trial's. The trial's RULES still apply: only the art changes.
+        self.game.trials_enabled = True
+        self.game.final_boss = main.FinalBoss.SKY_HIGH
+        self.game.current_trial = main.Trial.SPEEDRUN
+        size = main.ui.TILE_SIZE
+        self.game.screen.fill((1, 2, 3))
+        main.ui.draw_background(self.game)
+        boss_tile = main.ui._tile_art(main.FinalBoss, main.FinalBoss.SKY_HIGH)
+        trial_tile = main.ui._tile_art(main.Trial, main.Trial.SPEEDRUN)
+        for cell_x, cell_y, px, py in ((0, 0, 10, 10),
+                                       (main.SCREEN_WIDTH // size - 1, 0,
+                                        size - 10, 10),
+                                       (3, main.SCREEN_HEIGHT // size - 1, 40,
+                                        size - 10)):
+            with self.subTest(cell=(cell_x, cell_y)):
+                got = tuple(self.game.screen.get_at(
+                    (cell_x * size + px, cell_y * size + py)))[:3]
+                self.assertEqual(got, tuple(boss_tile.get_at((px, py)))[:3])
+        self.assertNotEqual(self._pixel_hash(boss_tile),
+                            self._pixel_hash(trial_tile))
+        # The panels take the boss's colour, and the trial the run is really
+        # playing is still the one its effects come from.
+        self.assertEqual(main.ui.panel_fill(self.game),
+                         main.FinalBoss.panel_color(main.FinalBoss.SKY_HIGH))
+        self.assertEqual(main.ui.locked_fill(self.game),
+                         main.FinalBoss.locked_color(main.FinalBoss.SKY_HIGH))
+        self.assertEqual(self.game.active_trial, main.Trial.SPEEDRUN)
+        # With no boss (the endless runs after it, or any earlier run) the
+        # trial's own tile is back.
+        self.game.final_boss = None
+        main.ui.draw_background(self.game)
+        self.assertEqual(tuple(self.game.screen.get_at((10, 10)))[:3],
+                         tuple(trial_tile.get_at((10, 10)))[:3])
 
     def test_a_running_trials_panels_take_its_own_colour(self):
         # The board, the inventory and the shop are filled with the running
@@ -1514,8 +1704,14 @@ class UiTests(GameTestCase):
                 self.game.screen.fill(main.BG_COLOR)
                 self.game.draw_trial_box()
                 fill = main.ui.panel_fill(self.game)
-                self.assertEqual(fill, main.Trial.panel_color(trial)
-                                 if trial is not None else main.MARBLE_BOX_COLOR)
+                if boss is None:
+                    expected = (main.Trial.panel_color(trial)
+                                if trial is not None else main.MARBLE_BOX_COLOR)
+                else:
+                    # The boss replaces the trial: its run wears the boss's own
+                    # colour (see Game.tile_source).
+                    expected = main.FinalBoss.panel_color(boss)
+                self.assertEqual(fill, expected)
                 # A 4px strip down the panel's left edge, clear of the rounded
                 # corners: inside the panel, and out of reach of the centred
                 # title and description, so a tile painted into the box would
@@ -1541,7 +1737,7 @@ class UiTests(GameTestCase):
         icon_rect = pygame.Rect(40, 40, main.GRID_SIZE, main.GRID_SIZE)
         main.ui.draw_collection_icon(self.game, "trial", main.Trial.SHUFFLED,
                                      icon_rect)
-        tile = main.ui._trial_tile(main.Trial.SHUFFLED)
+        tile = main.ui._tile_art(main.Trial, main.Trial.SHUFFLED)
         for px, py in ((10, 10), (30, 20), (20, 35)):
             self.assertEqual(tuple(self.game.screen.get_at(
                 (icon_rect.x + px, icon_rect.y + py)))[:3],
@@ -1549,6 +1745,37 @@ class UiTests(GameTestCase):
         # ...while an undiscovered trial still shows the ??? square.
         entry = next(e for e in entries
                      if e[0] == "trial" and e[1] == main.Trial.INFLATION)
+        self.assertTrue(entry[4])
+        self.assertFalse(entry[5])
+
+    def test_a_discovered_final_boss_icon_is_its_tile(self):
+        # A final boss has icon art of its own now: its collection entry shows
+        # the same tile its run is covered in, not the "???" square.
+        collection.discover_final_boss(main.FinalBoss.SINGULARITY)
+        entries = self.game._collection_entries()
+        entry = next(e for e in entries
+                     if e[0] == "final_boss"
+                     and e[1] == main.FinalBoss.SINGULARITY)
+        self.assertTrue(entry[4], "a final boss needs an icon in the collection")
+        self.assertTrue(entry[5], "the boss was just discovered")
+
+        self.game.screen.fill(main.BG_COLOR)
+        icon_rect = pygame.Rect(40, 40, main.GRID_SIZE, main.GRID_SIZE)
+        main.ui.draw_collection_icon(self.game, "final_boss",
+                                     main.FinalBoss.SINGULARITY, icon_rect)
+        tile = main.ui._tile_art(main.FinalBoss, main.FinalBoss.SINGULARITY)
+        for px, py in ((10, 10), (30, 20), (20, 35)):
+            self.assertEqual(tuple(self.game.screen.get_at(
+                (icon_rect.x + px, icon_rect.y + py)))[:3],
+                tuple(tile.get_at((px, py)))[:3])
+        # The other boss wears its own tile, and an undiscovered boss still
+        # shows the ??? square.
+        self.assertNotEqual(
+            self._pixel_hash(tile),
+            self._pixel_hash(main.ui._tile_art(main.FinalBoss,
+                                               main.FinalBoss.SKY_HIGH)))
+        entry = next(e for e in entries
+                     if e[0] == "final_boss" and e[1] == main.FinalBoss.SKY_HIGH)
         self.assertTrue(entry[4])
         self.assertFalse(entry[5])
 
@@ -1705,9 +1932,8 @@ class UiTests(GameTestCase):
         self.game.disabled_card = joker
         self.game.draw()  # renders the dimmed card without raising
 
-        # A card disabled by either trial (Card cutter's disabled_card or Deal
-        # breaker's deal_broken_cards) is dimmed, so the player can see which
-        # card got cut.
+        # A card disabled by the Card cutter trial is dimmed, so the player can
+        # see which card got cut.
         rect = main.pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
                                 main.GRID_SIZE, main.GRID_SIZE)
 
@@ -1717,17 +1943,12 @@ class UiTests(GameTestCase):
                        for y in range(rect.top, rect.bottom))
 
         self.game.disabled_card = None
-        self.game.deal_broken_cards = set()
         self.game.draw()
         plain = brightness()
         self.game.disabled_card = joker
         self.game.draw()
         cut = brightness()
-        self.game.disabled_card = None
-        self.game.deal_broken_cards = {joker}
-        self.game.draw()
         self.assertLess(cut, plain)
-        self.assertEqual(brightness(), cut)
 
 
     def test_title_screen_achievements_button_opens_tab(self):
@@ -1945,3 +2166,140 @@ class UiTests(GameTestCase):
         right_band = [surface.get_at((x, 20))[:3] for x in range(27, 34)]
         self.assertTrue(any(p != (0, 0, 0) for p in left_band))
         self.assertTrue(any(p != (0, 0, 0) for p in right_band))
+
+
+    def test_the_codex_description_box_holds_five_lines(self):
+        # The box grew from three lines to five, so a description that needs the
+        # fifth line has it drawn (it used to be cut off after the third).
+        # Showman is the entry used here: its description is exactly five lines
+        # at the box's width (pinned below, so shortening it is noticed).
+        self.assertEqual(main.ui.COLLECTION_DESC_LINES, 5)
+        self.assertEqual(main.ui.COLLECTION_DESC_WIDTH,
+                         main.ui.COLLECTION_CARD_W - 62)
+        index = main.Card.ORDER.index(main.Card.SHOWMAN)
+        description = main.Card.description(main.Card.SHOWMAN)
+        lines = self.game._wrap_text(description, self.game.tiny_font,
+                                    main.ui.COLLECTION_DESC_WIDTH)
+        self.assertEqual(len(lines), 5, lines)
+        collection.discover_card(main.Card.SHOWMAN)
+
+        main.ui.draw_collection(self.game)
+
+        x = 42 + (index % 5) * 226
+        y = 118 + (index // 5) * (main.ui.COLLECTION_CARD_H + 14)
+        # The fifth line's band: the lines start 34 px into the cell and step
+        # 14 px, so line five sits at +90 (its ink stops well above the rarity
+        # tag at +104).
+        grey = (210, 210, 210)
+        drawn = any(
+            all(abs(a - b) <= 20 for a, b in
+                zip(tuple(self.game.screen.get_at((px, py)))[:3], grey))
+            for px in range(x + 54, x + 190)
+            for py in range(y + 88, y + 102))
+        self.assertTrue(drawn, "the fifth description line was not drawn")
+
+
+    def test_every_codex_description_fits_its_box(self):
+        # Every description in the codex is written to fit the box, so no
+        # revealed entry has its text cut off (see ui.COLLECTION_DESC_LINES).
+        self.game._unlock_entire_collection()
+        for kind, value, name, desc, has_icon, discovered in self.game._collection_entries():
+            with self.subTest(entry=f"{kind}:{name}"):
+                lines = self.game._wrap_text(desc, self.game.tiny_font,
+                                            main.ui.COLLECTION_DESC_WIDTH)
+                self.assertLessEqual(len(lines), main.ui.COLLECTION_DESC_LINES,
+                                     "\n".join(lines))
+
+
+    def test_a_gondola_draws_two_cables_along_its_lane(self):
+        # The user's rule: two cables spanning the area a gondola moves, in the
+        # same direction as its motion (see ui._draw_gondola_cables). One car
+        # sliding left/right and one sliding up/down cover both orientations.
+        self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
+                                    for y in range(main.GRID_HEIGHT)}
+        self.game.grid = {
+            (2, 9): main.Block(2, 9, shape=main.Shape.RECT,
+                               effect=main.Effect.GONDOLA, angle=90),
+            (6, 9): main.Block(6, 9, shape=main.Shape.RECT,
+                               effect=main.Effect.GONDOLA, angle=0),
+            # A wall above the vertical car's lane, so its cable stops short of
+            # the top of the board where its car could never go.
+            (6, 3): main.Block(6, 3, shape=main.Shape.RECT),
+        }
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
+            self.game.draw()
+        cable = main.ui.GONDOLA_CABLE_COLOR
+        x0, y0 = main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1]
+        size = main.GRID_SIZE
+
+        def pixel(x, y):
+            return tuple(self.game.screen.get_at((x, y)))[:3]
+
+        # The horizontal car: two lines along its own row, at the two sides of
+        # its cell, reaching from the board's left edge to the vertical car's
+        # cell — as far as its car can slide — and no further.
+        lane = y0 + 9 * size + 3
+        for y in (lane, lane + size - 6):
+            for x in (x0 + 6, x0 + 6 * size - 6):     # the reachable span
+                self.assertEqual(pixel(x, y), cable, (x, y))
+            self.assertNotEqual(pixel(x0 + 8 * size + 5, y), cable, y)
+
+        # The vertical car: two lines down its own column, stopping at the wall
+        # above it (its car turns around under the wall's cell).
+        column = x0 + 6 * size
+        reach_top = y0 + 3 * size + size          # the wall's bottom edge
+        for x in (column + 3, column + size - 3):
+            for y in (reach_top + 1, y0 + 10 * size + 20):
+                self.assertEqual(pixel(x, y), cable, (x, y))
+            # Above the wall there is no cable: the car cannot get up there.
+            self.assertNotEqual(pixel(x, y0 + 2 * size + 20), cable, x)
+
+        # The cables go UNDER the blocks: inside the car's own cell the block
+        # covers them, so the car reads as riding along its lane.
+        car_middle = (x0 + 2 * size + size // 2, lane)
+        self.assertNotEqual(pixel(*car_middle), cable)
+
+        # Without a gondola there is no cable anywhere on the board.
+        self.game.grid = {}
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
+            self.game.draw()
+        on_board = {pixel(x, y)
+                    for x in range(x0, x0 + main.MARBLE_BOX_COORDS[2], 5)
+                    for y in range(y0, y0 + main.MARBLE_BOX_COORDS[3], 5)}
+        self.assertNotIn(cable, on_board)
+
+
+    def test_a_held_shop_offer_is_framed_and_padlocked(self):
+        # Hoard's held cell wears a gold frame and a padlock, so the player can
+        # tell at a glance which offers a reroll will leave alone (see
+        # ui._draw_shop_held_marker).
+        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
+        held = self.game.shop.items[0]
+        rect = pygame.Rect(self.game.shop.rect.x + held.col * main.GRID_SIZE,
+                           self.game.shop.rect.y + held.row * main.GRID_SIZE,
+                           main.GRID_SIZE, main.GRID_SIZE)
+
+        def draw():
+            with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
+                self.game.screen.fill(main.BLACK)
+                main.ui.draw_shop(self.game)
+
+        draw()
+        plain = self._pixel_hash(self.game.screen.subsurface(rect).copy())
+
+        self.game.shop.locked = [self.game.shop.slot_key(held)]
+        draw()
+        marked = self._pixel_hash(self.game.screen.subsurface(rect).copy())
+
+        self.assertNotEqual(marked, plain)
+        # The frame sits on the cell's own edge, in the game's gold.
+        self.assertEqual(
+            tuple(self.game.screen.get_at((rect.left, rect.centery)))[:3],
+            (255, 215, 0))
+        # The padlock's dark plate and its gold body are both in the corner,
+        # clear of the item's own art in the middle of the cell.
+        corner = {(tuple(self.game.screen.get_at((x, y)))[:3])
+                  for x in range(rect.left + 1, rect.left + 17)
+                  for y in range(rect.top + 1, rect.top + 17)}
+        self.assertIn((20, 20, 28), corner)
+        self.assertIn((255, 215, 0), corner)

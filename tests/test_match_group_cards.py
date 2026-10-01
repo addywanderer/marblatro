@@ -381,38 +381,23 @@ class MatchGroupFiringTests(GameTestCase):
 
 
 class MatchGroupTrialTests(GameTestCase):
-    """Deal breaker disables a GROUP, which is the new unit of a card."""
+    """Deal breaker gags the BOARD; the group cards still fire."""
 
-    def test_deal_breaker_disables_every_card_of_one_group(self):
+    def test_deal_breaker_gags_the_board_but_not_the_cards(self):
+        # While no block pays anything (see main.Game._deal_breaker_gags) a
+        # match-group card still fires on its own block: the trial is a board
+        # gag, not a curse on the player's cards.
         pipe = main.match_group_for_shape(main.Shape.PIPE)
-        slope = main.match_group_for_shape(main.Shape.SLOPE)
-        c_pipe1 = _card_item(pipe, main.Scorer.CHIPS_ADD)
-        c_pipe2 = _card_item(pipe, main.Scorer.MULT_ADD)
-        c_slope = _card_item(slope, main.Scorer.MULT_MUL)
-        self.game.cards = [c_pipe1, c_pipe2, c_slope]
+        card = _card_item(pipe, main.Scorer.CHIPS_ADD)
+        self.game.cards = [card]
+        self.game.trials_enabled = True
         self.game.current_trial = main.Trial.DEAL_BREAKER
-        # Force the chosen group to be the Pipe group (one the player holds).
-        with mock.patch("main.random.choice",
-                        side_effect=lambda seq: pipe if pipe in seq else seq[0]):
-            self.game._apply_trial()
-        self.assertIn(c_pipe1, self.game.deal_broken_cards)
-        self.assertIn(c_pipe2, self.game.deal_broken_cards)
-        self.assertNotIn(c_slope, self.game.deal_broken_cards)
-        # The broken cards are skipped when their block is hit.
-        self.game.score_chips = 1
-        self.game.score_mult = 1
+        self.game._apply_trial()
+        self.assertTrue(self.game._deal_breaker_gags())
+        self.game.score_chips = 0
         self._card_fire(main.Block(0, 0, shape=main.Shape.PIPE,
                                    scorer=main.Scorer.NONE))
-        self.assertEqual((self.game.score_chips, self.game.score_mult), (1, 1))
-        # A card of another group still fires on its own block: Deal breaker
-        # breaks one group, not the whole card area. (An xMult card at its
-        # average magnitude banks x1.25, which the run settles by when it ends.)
-        self._card_fire(main.Block(0, 0, shape=main.Shape.SLOPE,
-                                   scorer=main.Scorer.NONE))
-        self.assertEqual(self.game.score_mult, 1)
-        self.assertAlmostEqual(self.game.run_xmult_pending, 1.25)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 1.25)
+        self.assertEqual(self.game.score_chips, card.amount)
 
 
 class UnsplittableCardTests(GameTestCase):

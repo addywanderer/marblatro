@@ -35,6 +35,10 @@ DT = _physics_source.DT
 Effect = _physics_source.Effect
 FRICTION_COEFFICIENT = _physics_source.FRICTION_COEFFICIENT
 GRAVITY = _physics_source.GRAVITY
+# The direction gravity pulls in unless something redirects it: straight down.
+# The Vertigo trial gives a marble its own default instead (marble.base_gravity_dir,
+# see update), and a Gravity-effect block redirects it temporarily.
+DOWN_GRAVITY = np.array([0.0, 1.0])
 GRID_SIZE = _physics_source.GRID_SIZE
 GROW_RADIUS_FACTOR = _physics_source.GROW_RADIUS_FACTOR
 MARBLE_BOX_COORDS = _physics_source.MARBLE_BOX_COORDS
@@ -70,7 +74,7 @@ class PhysicsEngine:
     method signatures. Internal helper calls pass the marble along.
     """
     def __init__(self):
-        self.gravity_dir = np.array([0.0, 1.0])
+        self.gravity_dir = DOWN_GRAVITY
 
     def update(self, marble, dt, blocks):
         """Advance the marble by one frame: integrate forces, collide, clamp."""
@@ -98,9 +102,15 @@ class PhysicsEngine:
         if (not phased and getattr(marble, "phase_block", None) is not None
                 and self._block_collision(marble, marble.phase_block) is None):
             marble.phase_block = None
-        # Gravity points down by default. A gravity-effect block redirects it to
-        # the direction its indicator points while the marble is under its
-        # influence (in contact with the shape, or inside the cell for Shape.NONE).
+        # Gravity points down by default — or wherever the Vertigo trial's rolled
+        # direction pulls (marble.base_gravity_dir, set when the marble was
+        # released). A gravity-effect block redirects it to the direction its
+        # indicator points while the marble is under its influence (in contact
+        # with the shape, or inside the cell for Shape.NONE), and the default is
+        # put back every frame, so a redirect ends with the influence.
+        base_dir = getattr(marble, "base_gravity_dir", None)
+        self.gravity_dir = (np.array(base_dir, dtype=float) if base_dir
+                            else DOWN_GRAVITY)
         for block in blocks:
             if block.has_effect(Effect.GRAVITY) and self._accelerating(marble, block):
                 self.gravity_dir = block.get_gravity_direction
@@ -132,8 +142,9 @@ class PhysicsEngine:
 
         for block in blocks:
             if block.has_effect(Effect.ACCELERATOR) and self._accelerating(marble, block):
-                # A light marble (ping-pong) is pushed much harder (1 / mass).
-                marble.velocity += block.get_acceleration * self._effect_boost(marble) * dt
+                # A light marble (ping-pong) is pushed much harder (1 / mass),
+                # and the marble-weight trial scales the drive (see _drive_boost).
+                marble.velocity += block.get_acceleration * self._drive_boost(marble) * dt
 
         # Black-hole blocks pull the marble toward their center with a
         # gravity-like attraction that strengthens as the marble gets closer.
@@ -151,8 +162,9 @@ class PhysicsEngine:
                     # built), strongest at the edge of the range.
                     force = block.effect_magnitude(Effect.BLACK_HOLE)
                     pull = force * (BLACK_HOLE_RANGE / max(dist, BLACK_HOLE_MIN_DIST))
-                    # A light marble (ping-pong) is pulled much harder (1/mass).
-                    marble.velocity += direction * pull * self._effect_boost(marble) * dt
+                    # A light marble (ping-pong) is pulled much harder (1/mass),
+                    # and the marble-weight trial scales the pull.
+                    marble.velocity += direction * pull * self._drive_boost(marble) * dt
 
         # Repulsor blocks are the black hole's opposite: they push the marble
         # away from their center with the same range and falloff (stronger the
@@ -165,20 +177,24 @@ class PhysicsEngine:
                     direction = away / dist
                     force = block.effect_magnitude(Effect.REPULSOR)
                     push = force * (BLACK_HOLE_RANGE / max(dist, BLACK_HOLE_MIN_DIST))
-                    marble.velocity += direction * push * self._effect_boost(marble) * dt
+                    # The marble-weight trial scales the shove like every other
+                    # drive (see _drive_boost).
+                    marble.velocity += direction * push * self._drive_boost(marble) * dt
 
         # Conveyor blocks are belts: they carry the marble along the belt
         # direction (the block's arrow turned 90 degrees) at a CONSTANT speed.
         # The marble is brought up to the belt speed and then held there, so a
         # belt never accelerates a marble frame after frame; a marble already
-        # travelling faster along the belt keeps its speed (a belt only adds),
-        # and the belt speed is the same for every marble, so mass and the
-        # effect-push modifiers don't change it.
+        # travelling faster along the belt keeps its speed (a belt only adds).
+        # The belt speed is the same for every marble — a marble's own mass does
+        # not change it — but the marble-weight trial's factor does: a heavy
+        # marble is carried at half speed, a light one ~11% faster.
         for block in blocks:
             if block.has_effect(Effect.CONVEYOR) and self._accelerating(marble, block):
                 belt = block.get_belt_direction
                 along = float(np.dot(marble.velocity, belt))
-                belt_speed = block.effect_magnitude(Effect.CONVEYOR)
+                belt_speed = (block.effect_magnitude(Effect.CONVEYOR)
+                              / max(1e-6, getattr(marble, "effect_mass_mult", 1.0)))
                 if along < belt_speed:
                     marble.velocity = marble.velocity + belt * (belt_speed - along)
 
@@ -1452,16 +1468,32 @@ class PhysicsEngine:
                 a.velocity = a.velocity - normal * (impulse * b.mass)
                 b.velocity = b.velocity + normal * (impulse * a.mass)
 
-    def _effect_boost(self, marble):
-        """How much harder effect pushes act on a light marble (1 / mass).
+    def _mass_boost(self, marble):
+        """How much harder a push acts on a LIGHT marble (1 / mass).
 
-        A ping-pong ball (mass 0.35) is flung/pulled ~2.86x harder by pistons,
-        bouncy blocks, rotating shapes, accelerators, and black holes; a normal
-        marble (mass 1) is unchanged, and a heavier marble is pushed less.
-        Gravity is NOT boosted (see update), so light marbles fall normally.
-        The marble-weight trial multiplies the mass used for these pushes only
-        (marble.effect_mass_mult): 2.0 heavy halves them, 0.5 light doubles
-        them, and fall speed (which reads marble.mass) is never affected.
+        A ping-pong ball (mass 0.35) is flung ~2.86x harder, a normal marble
+        (mass 1) is unchanged, and a heavier marble (the Singularity boss) is
+        pushed less. Gravity is not scaled by mass here (see update), so light
+        marbles fall normally. This is the marble's OWN physics — it covers the
+        bounce off a surface too — and the marble-weight trial never touches it
+        (that trial scales the board's drives only, see _drive_boost).
+        """
+        mass = getattr(marble, "mass", 1.0)
+        return 1.0 / mass if mass > 0 else 1.0
+
+    def _drive_boost(self, marble):
+        """How much harder the DRIVING effects move this marble.
+
+        A drive is an effect whose whole job is to move the marble along: an
+        accelerator's force, a piston's launch, a rotating shape's fling, a
+        conveyor's belt, a black hole's pull, a repulsor's shove. Each scales by
+        1/mass like every other push (a light ping-pong ball is thrown further),
+        AND by the marble-weight trial's factor (marble.effect_mass_mult: 2.0
+        heavy halves them, 0.9 light makes them ~11% stronger).
+
+        So the trial changes how hard the BOARD drives the marble and nothing
+        else: fall speed and the marble's own bounce read mass alone (see
+        _mass_boost), which is what "heavier or lighter" means here.
         """
         mass = getattr(marble, "mass", 1.0) * getattr(marble, "effect_mass_mult", 1.0)
         return 1.0 / mass if mass > 0 else 1.0
@@ -1473,7 +1505,8 @@ class PhysicsEngine:
         if vel_normal_component < 0:
             vel_normal = vel_normal_component * normal
             vel_tangent = marble.velocity - vel_normal
-            boost = self._effect_boost(marble)
+            mass_boost = self._mass_boost(marble)
+            drive = self._drive_boost(marble)
             if block.has_effect(Effect.STICKY):
                 # Sticky blocks damp the marble by its impact speed (a faster
                 # hit keeps less of its speed) and pin it in place for the
@@ -1485,36 +1518,39 @@ class PhysicsEngine:
                 marble.sticky_timer = block.effect_magnitude(Effect.STICKY)
                 marble.velocity *= 0.0
             else:
-                # Bouncy reflection is an effect push (a light marble is flung
-                # back harder, ~1/mass); plain surfaces use the marble's own
-                # bounciness. The bouncy-castle trial makes every solid block
-                # reflect the marble like a bouncy block.
+                # Bouncy reflection is the marble's own behaviour (a light
+                # marble is flung back harder, ~1/mass, and the marble-weight
+                # trial leaves it alone: a heavy marble bounces the same);
+                # plain surfaces use the marble's own bounciness. The
+                # bouncy-castle trial makes every solid block reflect the
+                # marble like a bouncy block.
                 if (block.has_effect(Effect.BOUNCY) or getattr(marble, "bouncy", False)
                         or getattr(marble, "bouncy_castle", False)):
                     # The bouncy block's own bounce strength (its rolled % of the
                     # impact speed); the trials/marbles use the average.
                     bouncy = (block.effect_magnitude(Effect.BOUNCY) / 100.0
                               if block.has_effect(Effect.BOUNCY) else BOUNCY_RESTITUTION)
-                    restitution = bouncy * boost
+                    restitution = bouncy * mass_boost
                 else:
                     restitution = getattr(marble, "restitution", RESTITUTION)
                 if block.has_effect(Effect.PISTON):
                     # A piston launches the marble at a fixed speed along the
                     # surface normal, regardless of how fast it arrived (the
                     # block's own rolled launch speed). A light marble
-                    # (ping-pong) is launched much harder (1 / mass).
+                    # (ping-pong) is launched much harder (1 / mass), and the
+                    # marble-weight trial scales the launch.
                     marble.velocity = (vel_tangent
-                                       + block.effect_magnitude(Effect.PISTON) * boost * normal)
+                                       + block.effect_magnitude(Effect.PISTON) * drive * normal)
                 elif block.has_effect(Effect.ROTATE):
                     # A rotating shape flings the marble along its spin: keep
                     # the normal response and add a strong tangential launch in
                     # the direction the shape is rotating (harder for a light
-                    # marble, and harder for a faster-spinning block — the fling
-                    # scales with the block's own rolled spin speed).
+                    # marble, harder for a faster-spinning block, and scaled by
+                    # the marble-weight trial like every other drive).
                     spin = block.effect_magnitude(Effect.ROTATE)
                     fling = ROTATE_FLING * (spin / ROTATE_SPEED) if ROTATE_SPEED else ROTATE_FLING
                     marble.velocity = (vel_tangent - vel_normal * restitution
-                                       + fling * boost * self._rotate_tangent(marble, block, normal))
+                                       + fling * drive * self._rotate_tangent(marble, block, normal))
                 else:
                     # Bouncy blocks (and rubber-ball marbles) reflect the normal
                     # component; other surfaces reflect it with the marble's own

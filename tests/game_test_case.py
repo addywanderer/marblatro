@@ -14,6 +14,7 @@ A split module starts with ``from tests.game_test_case import *`` and defines
 one ``class XxxTests(GameTestCase)``; nothing else needs importing.
 """
 
+import hashlib
 import inspect
 import itertools
 import json
@@ -244,6 +245,15 @@ class GameTestCase(unittest.TestCase):
                    for x in range(rect.left, rect.right)
                    for y in range(rect.top, rect.bottom))
 
+    def _pixel_hash(self, surface):
+        """A short fingerprint of a surface's pixels.
+
+        Art comparisons use this rather than the raw bytes: an ``assertEqual``
+        on two ``pygame.image.tostring`` results prints the whole image into the
+        failure report when it fails, which buries everything else.
+        """
+        return hashlib.sha1(pygame.image.tostring(surface, "RGB")).hexdigest()
+
 
     def _marble_box_title_region(self):
         """The bottom-left region of the board (marble box) where its title sits."""
@@ -272,9 +282,16 @@ class GameTestCase(unittest.TestCase):
         Returns (chips gained, the block). A marble is released above the block
         and the game is stepped until the block's trigger is used up, so the
         physics (forces, collisions, effect behavior) all play out for real.
+
+        Trials are switched off for this game: a fresh Game DRAWS one (see
+        _choose_trial), and a drawn Phantom would let the marble phase through
+        the block (0 chips), Elephant double it, Vertigo pull it sideways — the
+        outcome would then depend on where the global RNG stream happened to
+        be, which any change that draws differently shifts.
         """
         game = main.Game()
         game.title_screen = False
+        game.trials_enabled = False
         game.score_chips = 0
         game.run_active = True
         block = main.Block(4, 5, shape=main.Shape.RECT, effect=effect, scorer=main.Scorer.QUICK)
@@ -294,10 +311,12 @@ class GameTestCase(unittest.TestCase):
         """Drop a marble through a pipe's cavity; returns (chips, triggers_left).
 
         Runs real physics so the marble passes through the pipe's gap without
-        touching the pillars.
+        touching the pillars. Trials are off (see _run_quick_drop): Vertigo's
+        rolled gravity or Elephant's doubled marble would decide this drop.
         """
         game = main.Game()
         game.title_screen = False
+        game.trials_enabled = False
         game.score_chips = 0
         game.run_active = True
         pipe = main.Block(4, 5, shape=main.Shape.PIPE, scorer=main.Scorer.CHIPS_ADD,
@@ -325,10 +344,11 @@ class GameTestCase(unittest.TestCase):
         """Drop a marble through a drain's funnel; returns (chips, triggers_left).
 
         Runs real physics so the marble falls down the funnel's middle without
-        ever touching its curved walls.
+        ever touching its curved walls. Trials are off (see _run_quick_drop).
         """
         game = main.Game()
         game.title_screen = False
+        game.trials_enabled = False
         game.score_chips = 0
         game.run_active = True
         drain = main.Block(4, 5, shape=main.Shape.DRAIN, scorer=main.Scorer.CHIPS_ADD,
@@ -525,7 +545,7 @@ class GameTestCase(unittest.TestCase):
 
     def _new_effects(self):
         return (main.Effect.REPULSOR, main.Effect.CONVEYOR, main.Effect.ZIPPER,
-                main.Effect.PHASE, main.Effect.SPLITTER)
+                main.Effect.PHASE, main.Effect.SPLITTER, main.Effect.GONDOLA)
 
 
     # COMMENTED OUT with the conditions: assigning a condition + scorer in the

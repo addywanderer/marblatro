@@ -789,20 +789,66 @@ class RunsTests(GameTestCase):
         self.assertGreater(self.game.black_hole_time, 0)
 
 
+    def test_the_run_records_the_board_units_a_marble_has_been_in(self):
+        # Every frame a marble plays, the board unit its centre sits in is
+        # recorded once (Explorer's measure, and the salmon trail it paints —
+        # see ui.draw_board). It is a set, so time spent in a unit counts once.
+        self.game.visited_cells = set()
+        marble = self._add_marble(
+            position=(main.MARBLE_BOX_COORDS[0] + 20, main.MARBLE_BOX_COORDS[1] + 20))
+        self.game.run_active = True
+        self.game.update()
+        self.assertEqual(self.game.visited_cells, {(0, 0)})
+        # It fell clear of that unit in half a second, so more units were
+        # recorded — and every one of them is a real board unit.
+        for _ in range(29):
+            self.game.update()
+        self.assertGreater(len(self.game.visited_cells), 1)
+        for gx, gy in self.game.visited_cells:
+            self.assertTrue(0 <= gx < main.GRID_WIDTH)
+            self.assertTrue(0 <= gy < main.GRID_HEIGHT)
+        # The unit the marble is in right now is always among them.
+        cx = int((marble.position[0] - main.MARBLE_BOX_COORDS[0]) // main.GRID_SIZE)
+        cy = int((marble.position[1] - main.MARBLE_BOX_COORDS[1]) // main.GRID_SIZE)
+        self.assertIn((cx, cy), self.game.visited_cells)
+
+
+    def test_visited_units_ignore_the_off_board_and_clear_each_run(self):
+        marble = self._add_marble(
+            position=(main.MARBLE_BOX_COORDS[0] + 20, main.MARBLE_BOX_COORDS[1] + 20))
+        self.game._note_visited_cell(marble)
+        self.assertEqual(self.game.visited_cells, {(0, 0)})
+        # A position off the board — a marble flung past an edge before the box
+        # pushed it back — is not a board unit and records nothing.
+        marble.position = np.array(
+            [main.MARBLE_BOX_COORDS[0] - 5.0, main.MARBLE_BOX_COORDS[1] + 20.0])
+        self.game._note_visited_cell(marble)
+        marble.position = np.array(
+            [main.MARBLE_BOX_COORDS[0] + 20.0,
+             main.MARBLE_BOX_COORDS[1] + main.MARBLE_BOX_COORDS[3] + 5.0])
+        self.game._note_visited_cell(marble)
+        self.assertEqual(self.game.visited_cells, {(0, 0)})
+        # The card measures THIS run, so a new run starts with a clean map.
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.visited_cells, set())
+
+
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_explorer_applies_when_run_completes(self):
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
         block = main.Block(0, 0, shape=main.Shape.SLOPE, scorer=main.Scorer.FINISH)
         marble = self._add_marble()
-        marble.distance = 3000.0
+        # Half the board visited: 2 units, i.e. x1.5.
+        self.game.visited_cells = {(gx, gy) for gx in range(main.GRID_WIDTH // 2)
+                                   for gy in range(main.GRID_HEIGHT)}
         marble.collisions_this_tick = [block]
         marble.finished = True
         self.game.run_active = True
         self.game.run_complete = False
         self.game.score_mult = 1
         self.game._handle_block_contacts([block])
-        fraction = (3000 / main.GRID_SIZE) / (main.GRID_WIDTH * main.GRID_HEIGHT)
-        self.assertAlmostEqual(self.game.score_mult, 1 + fraction)
+        self.assertAlmostEqual(self.game.score_mult, 1.5)
         self.assertTrue(self.game.run_complete)
 
 

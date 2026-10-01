@@ -238,38 +238,168 @@ class CardsTests(GameTestCase):
         self.assertEqual(len(self.game.toolbox.items), 2)
 
 
-    def test_watch_ends_the_run_at_the_ideal_finish_time(self):
+    def test_watch_pins_the_time_factor_at_its_maximum(self):
+        # The reworked card's whole effect: however long the run takes, the time
+        # factor is the best the ideal window pays (see TIME_GOOD_MAX), so a
+        # slow, long build never loses score to its length again.
+        self.assertEqual(main.TIME_GOOD_MAX, 1.0)
+        self.game.cards.append(main.CardItem(main.Card.WATCH, 40))
+        self.game.run_time = 20.0                # far outside the ideal window
+        self.assertEqual(self.game._score_factors()[0], main.TIME_GOOD_MAX)
+        # It is the very factor a run inside the window earns, so the run's
+        # length stops mattering to the score at all.
+        self.game.run_time = main.TIME_IDEAL
+        self.assertEqual(self.game._score_factors()[0], main.TIME_GOOD_MAX)
+        # Without the card that same long run is a heavy penalty instead: the
+        # factor goes negative once a run passes ideal + sqrt(TIME_SCALE).
+        self.game.cards = []
+        self.game.run_time = 20.0
+        self.assertLess(self.game._score_factors()[0], 0)
+
+    def test_a_cut_watch_stops_pinning_the_time_factor(self):
+        # Watch is read through _has_card, so the Card cutter silences it like
+        # every other passive whole card (see Game._has_card).
+        watch = main.CardItem(main.Card.WATCH, 40)
+        self.game.cards = [watch]
+        self.game.run_time = 20.0
+        self.assertEqual(self.game._score_factors()[0], main.TIME_GOOD_MAX)
+        self.game.disabled_card = watch
+        self.assertLess(self.game._score_factors()[0], 0)
+
+    def test_watch_still_ends_no_run_early(self):
+        # The rework took the old forced finish away: Watch never ends a run at
+        # the ideal time (and puts it back), it only pays the time factor.
+        self.game.cards.append(main.CardItem(main.Card.WATCH, 40))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run()
-        self.game.run_time = main.TIME_IDEAL - main.DT
-
+        self.game.run_time = main.TIME_IDEAL
         self.game.update()
-
-        # Without Watch the run is still going at the ideal time ...
-        self.assertFalse(self.game.run_complete)
         self.assertTrue(self.game.run_active)
-        # ... with Watch it ends right there.
-        self.game.cards.append(main.CardItem(main.Card.WATCH, 40))
-        self.game.run_time = main.TIME_IDEAL - main.DT
-        self.game.update()
-        self.assertTrue(self.game.run_complete)
-        self.assertFalse(self.game.run_active)
-        self.assertTrue(self.game.awaiting_after_run)
+        self.assertFalse(self.game.run_complete)
 
 
-    def test_watch_lets_only_the_first_five_blocks_score(self):
+    def test_watch_lets_only_the_first_eight_blocks_score(self):
+        # Watch's other clause is back, at eight blocks this time: the first
+        # eight distinct blocks the marble touches pay, and every later one
+        # pays nothing though its trigger is still spent.
+        self.assertEqual(main.WATCH_BLOCK_LIMIT, 8)
         self.game.cards.append(main.CardItem(main.Card.WATCH, 40))
         self.game.score_mult = 1
         blocks = [main.Block(i, 5, scorer=main.Scorer.MULT_ADD, scorer_amount=4)
-                  for i in range(6)]
+                  for i in range(9)]
 
         self._touch_blocks(blocks)
 
-        # The first five blocks pay +4 each; the sixth pays nothing, though its
-        # trigger is still spent (so it shows as used up).
-        self.assertEqual(self.game.score_mult, 1 + 4 * 5)
-        self.assertEqual(blocks[5].triggers_left, 0)
-        self.assertEqual(blocks[4].triggers_left, 0)
+        self.assertEqual(self.game.score_mult, 1 + 4 * 8)
+        # The ninth block scored nothing, and it still shows as used up.
+        self.assertEqual(blocks[8].triggers_left, 0)
+        self.assertEqual(blocks[7].triggers_left, 0)
+
+
+    def test_the_watch_block_limit_only_bites_with_the_card(self):
+        # Without the card every block scores, however many the marble touches.
+        self.game.score_mult = 1
+        blocks = [main.Block(i, 5, scorer=main.Scorer.MULT_ADD, scorer_amount=4)
+                  for i in range(9)]
+
+        self._touch_blocks(blocks)
+
+        self.assertEqual(self.game.score_mult, 1 + 4 * 9)
+        self.assertFalse(self.game._watch_blocks_out_of_play(blocks[8]))
+        self.game.cards.append(main.CardItem(main.Card.WATCH, 40))
+        self.assertTrue(self.game._watch_blocks_out_of_play(blocks[8]))
+
+
+    def test_infinity_card_data(self):
+        self.assertIn(main.Card.INFINITY, main.Card.ORDER)
+        self.assertEqual(main.Card.name(main.Card.INFINITY), "Infinity")
+        self.assertEqual(main.Card.PRICES[main.Card.INFINITY], 52)
+        self.assertEqual(main.Card.rarity_name(main.Card.INFINITY), "Legendary")
+        self.assertTrue(main.Card.comment(main.Card.INFINITY))
+        self.assertIn("straight line", main.Card.description(main.Card.INFINITY))
+        self.assertIn(main.Card.INFINITY, main.Card.COLORS)
+        self.assertIn(main.Card.INFINITY, main.Card.GLYPHS)
+        # A whole card: no group half and no scorer half to split it into.
+        self.assertIsNone(components.match_group_card_meta(main.Card.INFINITY))
+        self.assertIsNone(components.card_scorer(main.Card.INFINITY))
+
+
+    def test_infinity_makes_the_factors_straight_lines_through_the_anchor(self):
+        # The card's whole rule: the two saturating curves become straight
+        # lines, each pinned to its curve at INFINITY_ANCHOR — so the two
+        # formulas AGREE at the anchor (0.75) and the card trades a slower start
+        # for a factor that never levels off.
+        self.assertEqual(main.INFINITY_ANCHOR, 0.75)
+        anchor_value = main.DISTANCE_SCALE * main.INFINITY_ANCHOR_TANGENT
+        curve = np.atan(anchor_value / main.DISTANCE_SCALE) * 2 / np.pi
+        self.assertAlmostEqual(curve, main.INFINITY_ANCHOR, places=9)
+        self.assertAlmostEqual(
+            main.infinity_factor(anchor_value, main.DISTANCE_SCALE),
+            main.INFINITY_ANCHOR, places=9)
+        # Below the anchor the line pays LESS than the curve did ...
+        low = anchor_value / 4
+        self.assertLess(main.infinity_factor(low, main.DISTANCE_SCALE),
+                        np.atan(low / main.DISTANCE_SCALE) * 2 / np.pi)
+        # ... above it, MORE, and it keeps climbing where the curve has given
+        # up: the line is `anchor * value / (scale * tan(anchor * pi/2))`, so
+        # twenty scales out it reads 6.2 while the curve is still short of 1.0.
+        high = main.DISTANCE_SCALE * 20
+        self.assertGreater(main.infinity_factor(high, main.DISTANCE_SCALE), 6.0)
+        self.assertLess(np.atan(high / main.DISTANCE_SCALE) * 2 / np.pi, 1.0)
+        # It is linear: equal steps buy equal factor, which is what "linear
+        # instead of capped" means.
+        step = main.infinity_factor(anchor_value, main.DISTANCE_SCALE)
+        self.assertAlmostEqual(
+            main.infinity_factor(anchor_value * 2, main.DISTANCE_SCALE)
+            - main.infinity_factor(anchor_value, main.DISTANCE_SCALE), step)
+
+
+    def test_infinity_unlocks_both_factors_in_a_real_run(self):
+        # Through the real factor read: both distance and uniqueness go linear,
+        # so a run far past the anchors scores on both where the curves had all
+        # but stopped paying.
+        marble = self._add_marble()
+        marble.distance = main.DISTANCE_SCALE * 5
+        self.game.touched_shapes = set(main.Shape.ORDER)
+        self.game.touched_effects = set(main.Effect.ORDER)
+        self.game.touched_scorers = set(main.Scorer.ORDER)
+        unique_types = (len(main.Shape.ORDER) + len(main.Effect.ORDER)
+                        + len(main.Scorer.ORDER))
+
+        self.game.cards = []
+        curve_distance, curve_unique = (self.game._score_factors()[1],
+                                        self.game._score_factors()[2])
+        self.game.cards = [main.CardItem(main.Card.INFINITY, 52)]
+        linear = self.game._score_factors()
+        self.assertEqual(linear[1],
+                         main.infinity_factor(marble.distance, main.DISTANCE_SCALE))
+        self.assertEqual(linear[2],
+                         main.infinity_factor(unique_types, main.UNIQUE_SCALE))
+        self.assertGreater(linear[1], curve_distance)
+        self.assertGreater(linear[2], curve_unique)
+        # And the score itself rises with it: the same run pays more with the
+        # card, because the exponent the two factors feed is larger.
+        self.game.score_chips = 100
+        self.game.score_mult = 3
+        with_card = self.game._compute_total_score()
+        self.game.cards = []
+        self.assertGreater(with_card, self.game._compute_total_score())
+
+
+    def test_a_cut_infinity_leaves_the_curves_alone(self):
+        # Read through _has_card, so the Card cutter silences it: the factors go
+        # back to the saturating curves and the score falls with them.
+        marble = self._add_marble()
+        marble.distance = main.DISTANCE_SCALE * 5
+        infinity = main.CardItem(main.Card.INFINITY, 52)
+        self.game.cards = [infinity]
+        self.game.score_chips = 100
+        self.game.score_mult = 3
+        uncapped = self.game._compute_total_score()
+        self.game.disabled_card = infinity
+        self.assertLess(self.game._compute_total_score(), uncapped)
+        self.assertLess(self.game._score_factors()[1],
+                        main.infinity_factor(marble.distance, main.DISTANCE_SCALE))
 
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
@@ -2600,17 +2730,18 @@ class CardsTests(GameTestCase):
         # A Blueprint next to an Explorer copies its end-of-run xMult.
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
         self.game.cards.append(main.CardItem(main.Card.BLUEPRINT, 35))
+        # Half the board visited: 2 units, i.e. x1.5, paid twice.
+        self.game.visited_cells = {
+            (gx, gy) for gx in range(main.GRID_WIDTH // 2)
+            for gy in range(main.GRID_HEIGHT)}
         marble = self._add_marble()
-        marble.distance = 3000.0
         marble.finished = True
         self.game.run_active = True
         self.game.run_complete = False
         self.game.score_mult = 1
         self.game._apply_cards_on_finish()
         self.game._flush_run_xmult()
-        fraction = (3000 / main.GRID_SIZE) / (main.GRID_WIDTH * main.GRID_HEIGHT)
-        factor = 1 + fraction
-        self.assertAlmostEqual(self.game.score_mult, factor * factor)  # Explorer + copy
+        self.assertAlmostEqual(self.game.score_mult, 1.5 * 1.5)  # Explorer + copy
 
 
     def test_blueprint_does_not_chain_another_blueprint(self):
@@ -2787,32 +2918,17 @@ class CardsTests(GameTestCase):
         self.assertEqual(after, list(reversed(before)))
 
 
-    @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
-    def test_deal_breaker_disables_all_cards_of_one_condition(self):
-        # Deal breaker picks a condition the player owns and disables every
-        # card whose condition matches it.
-        start_chips = main.condition_scorer_card(main.Condition.START, main.Scorer.CHIPS_ADD)
-        start_mult = main.condition_scorer_card(main.Condition.START, main.Scorer.MULT_ADD)
-        dist_mult = main.condition_scorer_card(main.Condition.DISTANCE, main.Scorer.MULT_MUL)
-        c_start1 = main.CardItem(start_chips, 20)
-        c_start2 = main.CardItem(start_mult, 20)
-        c_dist = main.CardItem(dist_mult, 25)
-        self.game.cards = [c_start1, c_start2, c_dist]
+    def test_deal_breaker_no_longer_disables_cards(self):
+        # The trial's rule is now "blocks never score until you sell a card": it
+        # GAGS the board (see main.Game._deal_breaker_gags) and leaves the
+        # player's cards alone, so a card that used to be skipped fires again.
+        card = main.CardItem(main.Card.COUPON, 40)
+        self.game.cards = [card]
+        self.game.trials_enabled = True
         self.game.current_trial = main.Trial.DEAL_BREAKER
-        # Force the chosen condition to be START (present in the owned cards).
-        with mock.patch("main.random.choice",
-                        side_effect=lambda seq: main.Condition.START
-                        if main.Condition.START in seq else seq[0]):
-            self.game._apply_trial()
-        self.assertIn(c_start1, self.game.deal_broken_cards)
-        self.assertIn(c_start2, self.game.deal_broken_cards)
-        self.assertNotIn(c_dist, self.game.deal_broken_cards)
-        # The disabled cards are skipped when the run applies its cards.
-        self.game.score_chips = 1
-        self.game.score_mult = 1
-        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
-        self.game._apply_cards()
-        self.assertEqual(self.game.score_chips, 1)  # START+chips disabled
+        self.game._apply_trial()
+        self.assertTrue(self.game._deal_breaker_gags())
+        self.assertFalse(self.game._card_disabled(card))
         self.assertEqual(self.game.score_mult, 1)   # START+mult disabled
 
 
@@ -2919,12 +3035,20 @@ class CardsTests(GameTestCase):
 
 
     def test_a_token_fires_even_with_the_watch_card(self):
-        # Watch limits which TOUCHED blocks score; a token is a start-of-run
-        # payoff like a card, so it is never gated.
-        ghost = main.Block(3, 4, scorer=main.Scorer.MULT_ADD, scorer_amount=4)
-        ghost.is_token = True
+        # A token pays its scorer at the start of every run. Watch is a
+        # time-factor card and gates nothing, so a token pays with it owned
+        # exactly as it does without it.
+        seed = main.Block(3, 4, scorer=main.Scorer.MULT_ADD, scorer_amount=4,
+                          effects=[])
+        self.game.grid[(3, 4)] = seed
+        self.game._action_spirit(main.ActionItem(main.Action.SPIRIT, 36), seed)
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.upgrades_enabled = False
+        base_chips, base_mult = self._start_run_base()
         self.game.cards.append(main.CardItem(main.Card.WATCH, 40))
 
-        self.assertFalse(self.game._watch_blocks_out_of_play(ghost))
-        self.assertTrue(self.game._watch_blocks_out_of_play(
-            main.Block(5, 5, scorer=main.Scorer.MULT_ADD, scorer_amount=4)))
+        self.assertTrue(self.game.reset_run())
+
+        self.assertEqual(self.game.score_mult, base_mult + 4)
+        self.assertEqual(self.game.score_chips, base_chips)
+        self.assertTrue(self.game.tokens[0].fired)

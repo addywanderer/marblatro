@@ -302,7 +302,7 @@ def _serialize_trial_decision(game):
     A trial decides every random choice it makes ONCE for the run (which cells
     Hands tied debuffs, which slot Card cutter cuts, the order Shuffled leaves
     the cards in, which cells Crumbling makes fragile, Marble weight's heavier
-    or lighter factor, which shape group or effect Deal breaker breaks — see
+    or lighter factor, which way Vertigo pulls gravity — see
     main.Game._roll_trial_decision) and then replays that decision, so it has to
     ride through a save: without it, loading the save would hand the player a
     free reroll of the very picks a replay is not allowed to change.
@@ -310,7 +310,7 @@ def _serialize_trial_decision(game):
     The picks are stored the way they are held: cells as [x, y] pairs, the
     Shuffled order as card-area SLOT numbers (the card items themselves are
     rebuilt on load, so a slot is what keeps pointing at the same card), and
-    Deal breaker's group as its kind plus its members.
+    Vertigo's direction as an index into main.VERTIGO_DIRECTIONS.
     """
     decision = getattr(game, "trial_decision", None)
     if not decision:
@@ -326,9 +326,8 @@ def _serialize_trial_decision(game):
                         if card in game.cards]
     if "weight" in decision:
         out["weight"] = decision["weight"]
-    if "group" in decision:
-        kind, members = decision["group"]
-        out["group"] = [kind, [int(member) for member in members]]
+    if "gravity" in decision:
+        out["gravity"] = int(decision["gravity"])
     return out
 
 
@@ -351,9 +350,8 @@ def _restore_trial_decision(data, game):
                              if 0 <= index < len(game.cards)]
     if "weight" in saved:
         decision["weight"] = saved["weight"]
-    if "group" in saved:
-        kind, members = saved["group"]
-        decision["group"] = (kind, tuple(members))
+    if "gravity" in saved:
+        decision["gravity"] = int(saved["gravity"])
     return decision
 
 
@@ -390,6 +388,11 @@ def _save_data(game):
         "toolbox": [_serialize_item(i) for i in game.toolbox.items],
         "grid": [_serialize_item(b) for b in game.grid.values()],
         "shop": [_serialize_item(i) for i in game.shop.items],
+        # The shop offers the Hoard whole card is holding, as the CELLS they
+        # were held in (see main.Shop.slot_key): the offers themselves are
+        # already in the key above, so this is what keeps them held through a
+        # load rather than merely on the shelf.
+        "shop_locked": [list(slot) for slot in game.shop.locked],
         "component_purchases": [[k, v, c] for (k, v), c in game.component_purchases.items()],
         # Fragile Breaks (Wrecking Ball) permanent bonuses, one per unit scorer
         # (chips/mult add; the xMult bonus is a multiplicative factor).
@@ -410,6 +413,14 @@ def _save_data(game):
         "free_rerolls": game.free_rerolls,
         "option_points": game.option_points,
         "bonus_slots": game.bonus_slots,
+        # Action bonuses (see Game._action_mass_production / _action_brainstorm
+        # / _action_grace): Mass production's factor for the run being played
+        # and its permanent one, Brainstorm's reroll-price factor, and the
+        # xMult Grace banked for that run.
+        "resource_gain_mult": game.resource_gain_mult,
+        "resource_gain_bonus": game.resource_gain_bonus,
+        "reroll_discount": game.reroll_discount,
+        "run_xmult_bonus": game.run_xmult_bonus,
         "marble_type": game.marble_type,
         "upgrades_enabled": game.upgrades_enabled,
         "game_over": game.game_over,
@@ -431,14 +442,20 @@ def _save_data(game):
     }
 
 
-def save_game(game):
-    """Write the game's state to its active slot (the P key)."""
+def save_game(game, announce=True):
+    """Write the game's state to its active slot (the P key).
+
+    ``announce`` is cleared by the AUTOSAVE (see Game._tick_autosave): the
+    autosave is not something the player did, and a "Saved to slot N" message
+    every 30 seconds would sit over the shop.
+    """
     slot = game.save_slot if game.save_slot is not None else 1
     game.save_slot = slot
     ensure_saves()
     with open(_slot_file_path(slot), "w", encoding="utf-8") as f:
         json.dump(_save_data(game), f, indent=2)
-    game._set_shop_message(f"Saved to slot {slot}")
+    if announce:
+        game._set_shop_message(f"Saved to slot {slot}")
 
 
 def load_slot(game, slot):
@@ -530,6 +547,12 @@ def _load_save_data(game, data, slot):
     game.option_points = data.get("option_points", 0)
     game.bonus_slots = data.get("bonus_slots", 0)
     game.shop.bonus_slots = game.bonus_slots
+    # The action bonuses above: a save written before they existed reads as an
+    # untouched game (no factor, full reroll price, no banked xMult).
+    game.resource_gain_mult = data.get("resource_gain_mult", 1.0)
+    game.resource_gain_bonus = data.get("resource_gain_bonus", 1.0)
+    game.reroll_discount = data.get("reroll_discount", 1.0)
+    game.run_xmult_bonus = data.get("run_xmult_bonus", 0.0)
     # The marble type chosen for this save (one per save).
     game.marble_type = data.get("marble_type", 0)
     # The save's difficulty (see Difficulty): how many of a round's runs play a
@@ -554,9 +577,12 @@ def _load_save_data(game, data, slot):
     # player could already see.
     game.trial_debuffed_blocks = set()
     game.disabled_card = None
-    game.deal_broken_cards = set()
     game.trial_fragile_blocks = set()
     game.trial_marble_weight = 1.0
+    game.deal_breaker_released = False
+    game.trial_gravity_dir = None
+    for card in game.cards:
+        card.flipped = False
     game.trial_decision = None
     game.run_seed = random.randrange(1 << 31)
     game.run_rng = random.Random(game.run_seed)
@@ -568,6 +594,12 @@ def _load_save_data(game, data, slot):
     game.shop.items = [_deserialize_item(d) for d in data.get("shop", [])]
     game.cards = [_deserialize_item(d) for d in data.get("cards", [])]
     game.actions = [_deserialize_item(d) for d in data.get("actions", [])]
+    # The Hoard card's held shop offers come back with the shop: a save written
+    # before the card existed holds nothing, and the holds are clipped once the
+    # cards are back, so a hold can never outlive the Hoard that pays for it
+    # (see Game.shop_lock_cap).
+    game.shop.locked = [tuple(slot) for slot in data.get("shop_locked", [])]
+    game._clip_shop_locks()
     game.grid = {}
     for d in data.get("grid", []):
         block = _deserialize_item(d)

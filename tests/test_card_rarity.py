@@ -1,7 +1,7 @@
 """The rarity of every card (see components.Rarity).
 
 A card wears one of five tiers — Common, Unusual, Rare, Epic, Legendary. Every
-match-group card (the 832 shape-group and effect cards) is Common; the whole
+match-group card (the 864 shape-group and effect cards) is Common; the whole
 cards are tiered by price, the codebase's usual rarity rule. The tier is also
 the card's SHOP FREQUENCY weight: the shop draws the tier first, weighted
 1 : 0.7 : 0.5 : 0.3 : 0.2 from Common up to Legendary (see Rarity.WEIGHTS and
@@ -20,8 +20,8 @@ class CardRarityTests(GameTestCase):
 
     def test_every_card_has_a_rarity(self):
         cards = list(main.Card.ORDER) + components.match_group_card_values()
-        # 36 whole cards (the 16 measured ones among them) + 832 group cards.
-        self.assertEqual(len(cards), 868)
+        # 41 whole cards (the 18 measured ones among them) + 864 group cards.
+        self.assertEqual(len(cards), 905)
         for value in cards:
             self.assertIn(value, main.Card.RARITIES, main.Card.name(value))
             self.assertIn(main.Card.rarity(value), components.Rarity.ORDER,
@@ -109,16 +109,16 @@ class CardRarityTests(GameTestCase):
     def test_a_rarer_tier_is_offered_the_ratio_less_often(self):
         # Measured through the real offer draw: the share of offers that come
         # out of each TIER follows the weights, 1 : 0.7 : 0.5 : 0.3 : 0.2 — and
-        # it follows them even though the tiers hold 41/8/7/3/3 pool entries,
+        # it follows them even though the tiers hold 42/9/9/4/4 pool entries,
         # which is the point of drawing the tier before the card.
         random.seed(90210)
         draws = [main.random_card_option_value() for _ in range(60000)]
         counted = collections.Counter(main.Card.rarity(value) for value in draws)
         entries = {tier: len(main.card_offer_entries(tier))
                    for tier in components.Rarity.ORDER}
-        # 36 whole cards + 26 groups, and the tiers are very unevenly sized.
-        self.assertEqual(sum(entries.values()), 62)
-        self.assertEqual(entries[components.Rarity.COMMON], 41)
+        # 41 whole cards + 27 groups, and the tiers are very unevenly sized.
+        self.assertEqual(sum(entries.values()), 68)
+        self.assertEqual(entries[components.Rarity.COMMON], 42)
         # The tiers are wildly different sizes, so a count-driven draw would
         # show a different pattern: assert the ratio is what decides.
         self.assertGreater(entries[components.Rarity.COMMON],
@@ -128,7 +128,7 @@ class CardRarityTests(GameTestCase):
             self.assertAlmostEqual(
                 ratio, components.Rarity.weight(tier), delta=0.03,
                 msg=components.Rarity.name(tier))
-        # The three-card Legendary tier beats the four-card Unusual one, which
+        # The four-card Legendary tier beats the nine-card Unusual one, which
         # only the ratio (0.2 vs 0.7) can explain.
         self.assertGreater(counted[components.Rarity.UNUSUAL],
                            counted[components.Rarity.LEGENDARY])
@@ -234,11 +234,11 @@ class CardRarityTests(GameTestCase):
     def test_the_codex_names_the_tier_of_a_revealed_card(self):
         # The collection entry prints the tier in the tier's own colour under the
         # entry's text: the codex is where the border on a card is explained. The
-        # entry grid below mirrors ui.draw_collection (5 columns of 212x92 cells
+        # entry grid below mirrors ui.draw_collection (5 columns of 212x124 cells
         # with a 14px gap, starting at y 118) — keep the two in step.
         index = main.Card.ORDER.index(main.Card.INFERNO)
         x = 42 + (index % 5) * 226
-        y = 118 + (index // 5) * 106
+        y = 118 + (index // 5) * 138
         collection.discover_card(main.Card.INFERNO)
         main.ui.draw_collection(self.game)
         gold = components.Rarity.COLORS[components.Rarity.LEGENDARY]
@@ -246,7 +246,7 @@ class CardRarityTests(GameTestCase):
             all(abs(a - b) <= 30 for a, b in
                 zip(tuple(self.game.screen.get_at((px, py)))[:3], gold))
             for px in range(x + 54, x + 132)
-            for py in range(y + 74, y + 90))
+            for py in range(y + 102, y + 118))
         self.assertTrue(found, "no legendary tier tag drawn on the card entry")
         # With every entry revealed, every kind's tier tag draws without raising.
         self.game._unlock_entire_collection()

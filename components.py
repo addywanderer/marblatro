@@ -154,20 +154,22 @@ class Effect:
     ZIPPER = 15  # a one-way gate: pass through in the arrow's direction, solid against it
     PHASE = 16  # touching it makes the marble pass through everything for 1 second
     SPLITTER = 17  # splits the marble in two; the copy leaves the opposite way
+    GONDOLA = 18  # slides up/down or left/right along its arrow, turning back at walls
 
     NAMES: ClassVar[dict[int, str]] = {NONE: "None", BOUNCY: "Bouncy", ACCELERATOR: "Accelerator", \
                                        PISTON: "Piston", GRAVITY: "Gravity", BLACK_HOLE: "Black Hole", \
                                        PORTAL: "Portal", ROTATE: "Rotate", SLIPPERY: "Slippery", \
                                        FRAGILE: "Fragile", GROWING: "Growing", SHRINKING: "Shrinking", \
                                        STICKY: "Sticky", REPULSOR: "Repulsor", CONVEYOR: "Conveyor", \
-                                       ZIPPER: "Zipper", PHASE: "Phase", SPLITTER: "Splitter"}
+                                       ZIPPER: "Zipper", PHASE: "Phase", SPLITTER: "Splitter", \
+                                       GONDOLA: "Gondola"}
     ORDER: ClassVar[list[int]] = [NONE, BOUNCY, ACCELERATOR, PISTON, GRAVITY, BLACK_HOLE, PORTAL, ROTATE,
                                   SLIPPERY, FRAGILE, GROWING, SHRINKING, STICKY, REPULSOR, CONVEYOR,
-                                  ZIPPER, PHASE, SPLITTER]
+                                  ZIPPER, PHASE, SPLITTER, GONDOLA]
     # The real, non-NONE effects a block can actually have.
     REAL_ORDER: ClassVar[list[int]] = [BOUNCY, ACCELERATOR, PISTON, GRAVITY, BLACK_HOLE, PORTAL, ROTATE,
                                        SLIPPERY, FRAGILE, GROWING, SHRINKING, STICKY, REPULSOR,
-                                       CONVEYOR, ZIPPER, PHASE, SPLITTER]
+                                       CONVEYOR, ZIPPER, PHASE, SPLITTER, GONDOLA]
     # The effects whose strength is a NUMBER: each block rolls its own value
     # around the average below (see main.roll_magnitude). Magnitudes roll with
     # the same 1/(x^2+1) distribution scorers use, one step at a time, where a
@@ -187,12 +189,13 @@ class Effect:
         BOUNCY: 100,         # % of the impact speed kept when bouncing
         STICKY: 0.4,         # seconds the marble is held against it
         PHASE: 1.0,          # seconds of phasing a touch grants
+        GONDOLA: 60,         # px/s the cable car slides along its lane
     }
     # The unit each magnitude is spoken in (used by the descriptions).
     MAGNITUDE_UNIT: ClassVar[dict[int, str]] = {
         PISTON: "px/s", ACCELERATOR: "px/s^2", BLACK_HOLE: "px/s^2",
         REPULSOR: "px/s^2", CONVEYOR: "px/s", ROTATE: "deg/s",
-        BOUNCY: "%", STICKY: "s", PHASE: "s",
+        BOUNCY: "%", STICKY: "s", PHASE: "s", GONDOLA: "px/s",
     }
 
     @classmethod
@@ -427,11 +430,109 @@ class Scorer:
 RESOURCE_THRESHOLD = 1.0
 
 
-class Trial:
+class TileArt:
+    """The tile art a run modifier wears: its colours and what fills the screen.
+
+    A "tile" is one square LATTICE CELL — big enough that the whole screen tiles
+    exactly — drawn as a TESSELLATION of a few shapes in a few shades of the
+    modifier's own base colour (see Trial.TILE_STYLES and FinalBoss.TILE_STYLES
+    for which shapes, ui for the drawing). The tile is both the modifier's ICON
+    (its collection entry) and the pattern the whole screen is covered in while
+    that modifier is in play, and the panels drawn over it (the board, the
+    inventory, the shop, the info box) are filled from the same colour family one
+    step lighter, so a run reads as one palette.
+
+    The run modifiers are Trials and FinalBosses, so both inherit this: each
+    spells out its own COLORS and TILE_STYLES — as unlike each other as the
+    modifiers are, and never repeating another modifier's family — and gets the
+    derived shades (palette, panel_color, locked_color) for free.
+    """
+    # The base colour of each modifier's tile: the field its tessellation is
+    # built from, and the hue its icon in the collection and its tinted panels
+    # (see panel_color) are derived from. One per modifier.
+    COLORS: ClassVar[dict[int, tuple]] = {}
+    # Which tessellation each modifier's tile is drawn with (see ui): the pattern
+    # is always made of SHAPES — rows of triangles, rings, circles, chevrons,
+    # scales, diamonds, octagons, split cells — never a plain rectangle of flat
+    # colour, and no two modifiers share a family, so the pattern alone names
+    # which one is in play.
+    TILE_STYLES: ClassVar[dict[int, str]] = {}
+    # The extra colours a tile may use besides the modifier's own: an accent
+    # (gold by default: the game's "payoff" colour) and the two ends of the
+    # light/dark range. Kept as fractions so every palette is derived from
+    # COLORS.
+    TILE_LIGHT = 0.34       # how much lighter the light shade is
+    TILE_DARK = 0.34        # how much darker the dark shade is
+    TILE_ACCENT_LIGHT = 0.72
+    PANEL_LIGHT = 0.22      # the board/inventory/shop tint (see panel_color)
+    LOCKED_DARK = 0.34      # how far a locked square sinks below a panel
+    # A tile brighter than this gets its panels DARKENED instead of lightened:
+    # the panels carry white text (the board/inventory/shop titles, prices and
+    # messages), so an all-finishes run cannot have near-white panels.
+    PANEL_LIGHT_LIMIT = 200
+
+    @classmethod
+    def palette(cls, value):
+        """The few colours one tile is built from.
+
+        Four shades derived from the modifier's base colour — a light, the base
+        itself, a dark, and a pale accent — so a tile reads as one colour FAMILY
+        while its shapes still tell each other apart. The mesh lines drawn
+        between the shapes use the dark shade, so the same palette covers the
+        whole pattern.
+        """
+        base = cls.COLORS.get(value, (60, 60, 70))
+        return {
+            "light": shade(base, cls.TILE_LIGHT),
+            "base": base,
+            "dark": shade(base, -cls.TILE_DARK),
+            "accent": shade(base, cls.TILE_ACCENT_LIGHT),
+        }
+
+    @classmethod
+    def panel_color(cls, value):
+        """The colour the board/inventory/shop panels are filled with.
+
+        The modifier's tile colour, a little lighter, so the panels read as part
+        of the run's palette instead of a separate red. The one exception is a
+        tile that is already very light (the all-finishes trial is near-white):
+        its panels are darkened instead of lightened, because they carry white
+        text and near-white panels would swallow it. No modifier at all (or an
+        unknown id) keeps the game's own panel colour.
+        """
+        if value is None:
+            return None
+        base = cls.COLORS.get(value, (60, 60, 70))
+        if sum(base) / 3 > cls.PANEL_LIGHT_LIMIT:
+            return shade(base, -cls.TILE_DARK)
+        return shade(base, cls.PANEL_LIGHT)
+
+    @classmethod
+    def locked_color(cls, value):
+        """The colour a LOCKED board square is filled with during that modifier.
+
+        Always taken a step DOWN from panel_color (LOCKED_DARK) rather than
+        straight from the tile's base: the all-finishes tile is near-white and
+        its panel is darkened rather than lightened, so a locked square derived
+        from the base could come out the SAME as its own panel — or lighter.
+        Deriving from the panel makes a locked square darker than the unlocked
+        ones around it for every modifier, which is what keeps the playable
+        region reading as raised out of the board it sits in. No modifier (or an
+        unknown id) returns None, and the caller keeps its own locked colour.
+        """
+        panel = cls.panel_color(value)
+        if panel is None:
+            return None
+        return shade(panel, -cls.LOCKED_DARK)
+
+
+class Trial(TileArt):
     """A run-wide modifier applied to each run, exactly one per run.
 
     Each class constant is a trial's ID number (e.g. ``Trial.HANDS_TIED == 0``).
-    The trial's description explains its effect on the run.
+    The trial's description explains its effect on the run, and the tile art it
+    wears while it runs — its colour and its tessellation — is the data below
+    (see TileArt).
     """
     HANDS_TIED = 0
     CARD_CUTTER = 1
@@ -448,6 +549,10 @@ class Trial:
     INFLATION = 12
     EMPTY_POCKETS = 13
     DEAL_BREAKER = 14
+    X_RAY = 15
+    PHANTOM = 16
+    VERTIGO = 17
+    ELEPHANT = 18
 
     NAMES: ClassVar[dict[int, str]] = {
         HANDS_TIED: "Hands tied",
@@ -465,6 +570,10 @@ class Trial:
         INFLATION: "Inflation",
         EMPTY_POCKETS: "Empty pockets",
         DEAL_BREAKER: "Deal breaker",
+        X_RAY: "X-ray",
+        PHANTOM: "Phantom",
+        VERTIGO: "Vertigo",
+        ELEPHANT: "Elephant",
     }
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
         HANDS_TIED: "A random 1/4 of your blocks can score 1 fewer time per "
@@ -478,10 +587,8 @@ class Trial:
         BOUNCY_CASTLE: "Every solid block bounces like a bouncy block.",
         CRUMBLING: "A random 1/4 of your blocks are fragile: they shatter "
                    "when touched.",
-        MARBLE_WEIGHT: "The marble is randomly heavier or lighter: effect "
-                       "pushes (pistons, bouncy blocks, accelerators, black "
-                       "holes) are weaker or stronger, but it falls at the "
-                       "same speed.",
+        MARBLE_WEIGHT: "Randomly heavier or lighter: effect pushes are weaker "
+                       "or stronger, but it falls at the same speed.",
         SPEEDRUN: "Halves the ideal time for a run.",
         REPEATS_ONLY: "Only block types touched twice count toward the "
                       "uniqueness score.",
@@ -489,17 +596,20 @@ class Trial:
                    "upgrades, and disassembly.",
         EMPTY_POCKETS: "The end-of-run cash award skips its score-based bonus "
                        "(the flat $20, interest, and Cash-card payouts stay).",
-        DEAL_BREAKER: "Disables every card of one random condition.",
+        DEAL_BREAKER: "Blocks never score until you sell a card.",
+        X_RAY: "You can't see the marble or its trail.",
+        PHANTOM: "The marble starts phasing: it passes through every block for "
+                 "the first second of the run.",
+        VERTIGO: "Gravity pulls in a random direction.",
+        ELEPHANT: "The marble starts at double its size.",
     }
     ORDER: ClassVar[list[int]] = [HANDS_TIED, CARD_CUTTER, DEAD_ZONE, ALL_FINISHES,
                                   SLIM_PICKINGS, LONG_RUN, SHUFFLED,
                                   BOUNCY_CASTLE, CRUMBLING, MARBLE_WEIGHT,
                                   SPEEDRUN, REPEATS_ONLY, INFLATION,
-                                  EMPTY_POCKETS, DEAL_BREAKER]
-    # The base colour of each trial's tile: the field its tessellation is built
-    # from, and the hue the trial's icon in the collection and the trial-tinted
-    # panels (see panel_color) are derived from. One per trial, as unlike each
-    # other as the trials are.
+                                  EMPTY_POCKETS, DEAL_BREAKER, X_RAY, PHANTOM,
+                                  VERTIGO, ELEPHANT]
+    # The base colour of each trial's tile (see TileArt.COLORS).
     COLORS: ClassVar[dict[int, tuple]] = {
         HANDS_TIED: (58, 62, 76),       # chained slate
         CARD_CUTTER: (150, 60, 120),    # cut magenta
@@ -516,18 +626,20 @@ class Trial:
         INFLATION: (190, 60, 45),       # inflation red
         EMPTY_POCKETS: (120, 80, 50),   # empty brown
         DEAL_BREAKER: (140, 40, 60),    # broken crimson
+        X_RAY: (120, 180, 210),         # scanning blue
+        PHANTOM: (150, 205, 190),       # spectral green
+        VERTIGO: (170, 60, 200),        # dizzy violet
+        ELEPHANT: (140, 110, 95),       # heavy taupe
     }
-    # Which tessellation each trial's tile is drawn with (see
-    # ui._TRIAL_TESSELLATIONS): the pattern is always made of SHAPES — rows of
-    # triangles, rings, circles, chevrons, scales, diamonds, octagons, split
-    # cells — never a plain rectangle of flat colour, and the family is picked
-    # to echo what the trial does (interlocked rings for chained hands, circles
-    # bouncing in a castle, chevrons for speed, scales for repetition, cut cells
-    # for a cutter, climbing bars for inflation ...).
+    # Which tessellation each trial's tile is drawn with (see ui): the family is
+    # picked to echo what the trial does (interlocked rings for chained hands,
+    # circles bouncing in a castle, chevrons for speed, scales for repetition,
+    # cut cells for a cutter, climbing bars for inflation ...) and NO TWO
+    # TRIALS — nor either final boss — SHARE ONE, so a pattern names its trial.
     TILE_STYLES: ClassVar[dict[int, str]] = {
         HANDS_TIED: "rings",         # links of a chain
         CARD_CUTTER: "splits",       # cards cut corner to corner
-        DEAD_ZONE: "chevrons",       # bands, with a fall through them
+        DEAD_ZONE: "bands",          # bands, heavier down the tile
         ALL_FINISHES: "checker",     # the finish checkerboard, in triangles
         SLIM_PICKINGS: "octagons",   # tiles with gaps between them
         LONG_RUN: "bars",            # a long even track of bars
@@ -537,76 +649,14 @@ class Trial:
         MARBLE_WEIGHT: "dots",       # big marbles against small ones
         SPEEDRUN: "chevrons",        # speed
         REPEATS_ONLY: "scales",      # the same arc repeated
-        INFLATION: "climbers",       # bars climbing, price and all
-        EMPTY_POCKETS: "pockets",    # hollow rings
+        INFLATION: "ramps",          # prices climbing, one step at a time
+        EMPTY_POCKETS: "pockets",    # hollow rings, nothing inside
         DEAL_BREAKER: "tears",       # cells torn apart
+        X_RAY: "mesh",              # the scan grid you look the board through
+        PHANTOM: "crescents",       # moons fading in and out
+        VERTIGO: "gyres",           # dials, each turned a quarter further
+        ELEPHANT: "plates",         # heavy slabs, side by side
     }
-    # The extra colours a tile may use besides the trial's own: an accent (gold
-    # by default: the game's "payoff" colour) and the two ends of the light/dark
-    # range. Kept as fractions so every palette is derived from COLORS.
-    TILE_LIGHT = 0.34       # how much lighter the light shade is
-    TILE_DARK = 0.34        # how much darker the dark shade is
-    TILE_ACCENT_LIGHT = 0.72
-    PANEL_LIGHT = 0.22      # the board/inventory/shop tint (see panel_color)
-    LOCKED_DARK = 0.34      # how far a locked square sinks below a panel
-    # A tile brighter than this gets its panels DARKENED instead of lightened:
-    # the panels carry white text (the board/inventory/shop titles, prices and
-    # messages), so an all-finishes run cannot have near-white panels.
-    PANEL_LIGHT_LIMIT = 200
-
-    @classmethod
-    def palette(cls, trial):
-        """The few colours one trial's tile is built from.
-
-        Four shades derived from the trial's base colour — a light, the base
-        itself, a dark, and a pale accent — so a tile reads as one colour FAMILY
-        while its shapes still tell each other apart. The mesh lines drawn
-        between the shapes use the dark shade, so the same palette covers the
-        whole pattern.
-        """
-        base = cls.COLORS.get(trial, (60, 60, 70))
-        return {
-            "light": shade(base, cls.TILE_LIGHT),
-            "base": base,
-            "dark": shade(base, -cls.TILE_DARK),
-            "accent": shade(base, cls.TILE_ACCENT_LIGHT),
-        }
-
-    @classmethod
-    def panel_color(cls, trial):
-        """The colour the board/inventory/shop panels are filled with.
-
-        The trial's tile colour, a little lighter, so the panels read as part of
-        the run's palette instead of a separate red. The one exception is a tile
-        that is already very light (the all-finishes trial is near-white): its
-        panels are darkened instead of lightened, because they carry white text
-        and near-white panels would swallow it. No trial (or an unknown id)
-        keeps the game's own panel colour.
-        """
-        if trial is None:
-            return None
-        base = cls.COLORS.get(trial, (60, 60, 70))
-        if sum(base) / 3 > cls.PANEL_LIGHT_LIMIT:
-            return shade(base, -cls.TILE_DARK)
-        return shade(base, cls.PANEL_LIGHT)
-
-    @classmethod
-    def locked_color(cls, trial):
-        """The colour a LOCKED board square is filled with during that trial.
-
-        Always taken a step DOWN from panel_color (LOCKED_DARK) rather than
-        straight from the tile's base: the all-finishes tile is near-white and
-        its panel is darkened rather than lightened, so a locked square derived
-        from the base could come out the SAME as its own panel — or lighter.
-        Deriving from the panel makes a locked square darker than the unlocked
-        ones around it for every trial, which is what keeps the playable region
-        reading as raised out of the board it sits in. No trial (or an unknown
-        id) returns None, and the caller keeps its own locked colour.
-        """
-        panel = cls.panel_color(trial)
-        if panel is None:
-            return None
-        return shade(panel, -cls.LOCKED_DARK)
 
     @classmethod
     def name(cls, trial):
@@ -622,12 +672,19 @@ class Trial:
         return cls.ORDER[(idx + 1) % len(cls.ORDER)]
 
 
-class FinalBoss:
+class FinalBoss(TileArt):
     """The final run's boss modifier (the 24th run).
 
     Exactly one boss is chosen at random when the player reaches the last run.
     Each class constant is a boss's ID number (e.g. ``FinalBoss.SINGULARITY ==
     0``). The boss's description explains its effect on the run.
+
+    The boss REPLACES the trial in the run's display (see ui.draw_trial_box), so
+    it wears the run's tile art as well: the screen is covered in the boss's own
+    tessellation while its run is played, the panels take the boss's colour, and
+    the boss's entry in the collection shows the same tile (see
+    main.Game.tile_source). The rolled trial's RULES still apply to a boss run —
+    only its tile is the boss's.
     """
     SINGULARITY = 0
     SKY_HIGH = 1
@@ -642,6 +699,19 @@ class FinalBoss:
         SKY_HIGH: "The required score is tripled.",
     }
     ORDER: ClassVar[list[int]] = [SINGULARITY, SKY_HIGH]
+    # The bosses' tile colours (see TileArt.COLORS): the event horizon's indigo
+    # and a very high sky's cerulean, neither of them a trial's hue.
+    COLORS: ClassVar[dict[int, tuple]] = {
+        SINGULARITY: (58, 46, 84),      # event-horizon indigo
+        SKY_HIGH: (86, 172, 220),       # sky cerulean
+    }
+    # Their tessellations, each the boss's alone: rings closing on a black core
+    # for the singularity the marble falls into, and unit blocks stacked into a
+    # climbing stair for the run whose target is tripled.
+    TILE_STYLES: ClassVar[dict[int, str]] = {
+        SINGULARITY: "cores",        # rings collapsing into a black core
+        SKY_HIGH: "towers",          # blocks stacked into a stair
+    }
 
     @classmethod
     def name(cls, boss):
@@ -937,7 +1007,7 @@ class Card:
     FACTORY = 88  # resource conversions need half as many points
     MINESHAFT = 89  # board units cost $5
     MARKET = 90  # selling refunds 75% of the price instead of 50%
-    WATCH = 91  # the run ends at the ideal time; only the first 5 blocks score
+    WATCH = 91  # the run's time score factor is always at its maximum
     # The newest whole cards. Their ids continue the shared band upward;
     # Painting (92), Synthesizer (93) and Island (99) belong to the named cards,
     # so the free ids left in the band are 12..77.
@@ -946,6 +1016,20 @@ class Card:
     PROCRASTINATION = 96  # ends the run a second late: rewinds it once and refills triggers
     ESSENCE = 97  # $10 a run, one card slot fewer, 2 permanent tokens when sold
     CONCERT = 98  # +1 trigger per run for every block that is not a plain rect
+    # The two newest whole cards. Hoard takes the first free id of the 12..77
+    # band (nothing has claimed 14 yet); Infinity takes the next one.
+    HOARD = 14  # right-click a shop option to hold it across rerolls
+    INFINITY = 15  # the distance and uniqueness score factors never level off
+    # The two measured cards added after them. Both read a BUILD-state number
+    # — the cards' own sell value, and the slots no OTHER card is filling — so
+    # they fire at the start of a run like Painting and Synthesizer. They take
+    # the next free ids in the 12..77 band.
+    SWASHBUCKLER = 16  # +1/5 of the total sell price of your cards, as mult
+    STENCIL = 17       # +1 xMult for each card slot no other card fills
+    # The newest whole card: a passive rule like Coupon's or Showman's, read
+    # where the collision happens (Game._brain_loop_roll), so it takes the next
+    # free id in the 12..77 band.
+    BRAIN_LOOP = 18  # a sticky touch has a 1/3 chance of handing over an action
 
     NAMES: ClassVar[dict[int, str]] = {
         # The named cards (the classic cards).
@@ -985,6 +1069,11 @@ class Card:
         PROCRASTINATION: "Procrastination",
         ESSENCE: "Essence",
         CONCERT: "Concert",
+        HOARD: "Hoard",
+        INFINITY: "Infinity",
+        SWASHBUCKLER: "Swashbuckler",
+        STENCIL: "Stencil",
+        BRAIN_LOOP: "Brain Loop",
     }
     # Short flavor lines, one per whole card. The named cards' lines are the
     # ones their named conditions carried, which are in turn the comments the
@@ -1026,13 +1115,18 @@ class Card:
         PROCRASTINATION: "I'll do it in a second.",
         ESSENCE: "Distilled to the last drop.",
         CONCERT: "Turn it up to eleven.",
+        HOARD: "Mine, all mine.",
+        INFINITY: "No ceiling.",
+        SWASHBUCKLER: "Loot and plunder.",
+        STENCIL: "Less is more.",
+        BRAIN_LOOP: "Ideas on impact.",
     }
     # What each whole card does. A named card's line states the payoff it pays
     # at its own magnitude (the card has no scorer half to roll, so the number
     # is fixed — see Card.NAMED for the arithmetic).
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
         JOKER: "Adds 4 mult at the start of the run",
-        EXPLORER: "Multiplies the multiplier by up to x2 at the end of the run, in proportion to the distance the marble travelled",
+        EXPLORER: "Multiplies the multiplier by up to x2 at the end of the run, by the board units the marble has been in",
         ASTRONAUT: "Adds 4 mult at the end of the run for each second the marble was pulled by a black hole",
         PLANE: "Adds 15 chips at the end of the run for each second the marble was in the air",
         PILLAR: "Adds 1 mult at the start of the run for each block in the fullest column of the board",
@@ -1046,7 +1140,7 @@ class Card:
         SYNTHESIZER: "Adds 3 mult at the start of the run for each card in your card area",
         ISLAND: "Adds 0.5 xMult at the end of the run for each unconnected group of unlocked board units",
         FOUNTAIN: "Adds 0.25 xMult at the end of the run for every 3 different Pipe, Drain or Pipe Bend blocks the marble touches in a row",
-        INTANGIBLE: "Adds 0.5 mult at the end of the run for each second the marble is inside a block, and 15 mult for each second it is inside a locked board unit",
+        INTANGIBLE: "Adds, at the end of the run, 0.5 mult a second inside a block and 15 a second inside a locked board unit",
         ERR_404: r"\marblatro\main.py, line 2339: 'self._return_card()' CardNotFoundError: Card was not found [FATAL]",
         BLUEPRINT: "Copies the function of the card to its immediate left in the card area",
         SHOWMAN: "Lets cards you already own show up in the shop again, so you can own more than one of the same card",
@@ -1061,12 +1155,17 @@ class Card:
         FACTORY: "Resource conversions need half as many points (rounded up)",
         MINESHAFT: "Board units cost $5 instead of $8",
         MARKET: "Selling a card, block, or action refunds 75% of its price instead of 50%",
-        WATCH: "The run ends automatically at the ideal finish time, but only the first 5 blocks the marble touches contribute to score",
+        WATCH: "The run's time score factor is always at its maximum, however long the run takes",
         TESSERACT: "Every shop reroll permanently adds +0.1 xMult, applied at the start of each run",
         THOUSAND_HANDED: "Creates a random action after every run",
-        PROCRASTINATION: "The first time every marble has finished a run, the run rewinds 1 second instead of ending: every block gets its triggers back and the marbles fly their last second again",
+        PROCRASTINATION: "Rewinds the run 1 second the first time a marble finishes, refilling every block's triggers",
         ESSENCE: "Gives $10 at the end of every run, but takes a card slot away — selling it leaves 2 random permanent Spirit tokens",
         CONCERT: "Every block that is not a plain rect and has both an effect and a scorer can score 1 more time per run",
+        HOARD: "Right-click a shop option to hold it through rerolls; one held offer per copy of this card",
+        INFINITY: "Distance and uniqueness rise in straight lines instead of levelling off, meeting the usual curve at 0.75",
+        SWASHBUCKLER: "Adds mult at the start of the run equal to 1/5 of the total sell price of your cards",
+        STENCIL: "Gives +1 xMult at the start of the run for each empty card slot, counting its own",
+        BRAIN_LOOP: "Gives a 1/3 chance of a random action each time a marble collides with a sticky block",
     }
     # All whole-card prices are 20% lower (rounded down): 24->19, 42->33,
     # 60->48, 46->36, 48->38, 56->44. The nine utility cards are priced by how
@@ -1107,7 +1206,30 @@ class Card:
                                         MARKET: 26, WATCH: 40, TESSERACT: 44,
                                         THOUSAND_HANDED: 42,
                                         PROCRASTINATION: 46, ESSENCE: 48,
-                                        CONCERT: 44}
+                                        CONCERT: 44,
+                                        # Hoard is priced as a shop utility
+                                        # (cheap next to Coupon's discount) and
+                                        # Infinity above Inferno: it rewrites
+                                        # two of the three factors the total
+                                        # score's exponent is made of, and it
+                                        # is the only thing in the game that
+                                        # has no ceiling at all.
+                                        HOARD: 36, INFINITY: 52,
+                                        # Swashbuckler is a mult engine fuelled
+                                        # by what the player's cards are worth
+                                        # (it counts its own price too, so it
+                                        # pays about a Joker's worth even
+                                        # alone), and Stencil is priced as a
+                                        # build-defining multiplier: five
+                                        # empty slots is x5, and it is paid
+                                        # for by owning nothing else.
+                                        SWASHBUCKLER: 42, STENCIL: 46,
+                                        # Brain Loop is a Rare: it hands out
+                                        # actions (worth $24-$70 each) for the
+                                        # right blocks, where 1000-handed
+                                        # ($42) hands one over after every run
+                                        # whatever the board looks like.
+                                        BRAIN_LOOP: 40}
     # Face colors and center glyphs for the mini-card look (one per card).
     COLORS: ClassVar[dict[int, tuple]] = {
         # The named cards: one identity colour each (the jester's violet, the
@@ -1150,6 +1272,11 @@ class Card:
         PROCRASTINATION: (125, 115, 160),  # sleepy lavender
         ESSENCE: (60, 150, 175),    # distilled cyan
         CONCERT: (185, 75, 150),    # stage magenta
+        HOARD: (170, 140, 45),      # hoarded brass
+        INFINITY: (205, 195, 235),  # silver-lilac
+        SWASHBUCKLER: (140, 45, 60),  # buccaneer maroon
+        STENCIL: (150, 165, 120),   # stencil sage
+        BRAIN_LOOP: (205, 115, 170),  # synapse pink
     }
     # How far a card's face has to sit from its rarity border to be worth the
     # name, and the shades that move a face which is too close (smallest first,
@@ -1175,6 +1302,9 @@ class Card:
         PROCRASTINATION: "Z",
         ESSENCE: "E",
         CONCERT: "N",
+        HOARD: "H", INFINITY: "8",
+        SWASHBUCKLER: "X", STENCIL: "A",
+        BRAIN_LOOP: "Q",
     }
     # Every whole card, in id order, so the shop pool and the codex list the
     # named cards first and then the utility cards. The match-group cards are
@@ -1190,7 +1320,9 @@ class Card:
                                   PAINTING, SYNTHESIZER,
                                   TESSERACT,
                                   THOUSAND_HANDED, PROCRASTINATION, ESSENCE,
-                                  CONCERT, ISLAND, FOUNTAIN, INTANGIBLE]
+                                  CONCERT, ISLAND, FOUNTAIN, INTANGIBLE,
+                                  HOARD, INFINITY,
+                                  SWASHBUCKLER, STENCIL, BRAIN_LOOP]
     # How rare each whole card is. A whole card's tier follows its price, the
     # codebase's usual rarity rule (see component_weight): up to $28 Common,
     # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
@@ -1218,16 +1350,21 @@ class Card:
         # Unusual: single-mechanic helpers.
         BLUEPRINT: Rarity.UNUSUAL, GARDEN: Rarity.UNUSUAL,
         COMPOUND_INTEREST: Rarity.UNUSUAL, RIGGED_CASINO: Rarity.UNUSUAL,
+        HOARD: Rarity.UNUSUAL,
         # Rare: cards that change a rule for the whole game.
         WATCH: Rarity.RARE, THOUSAND_HANDED: Rarity.RARE,
         CONQUISTADOR: Rarity.RARE, PEDESTAL: Rarity.RARE,
         FACTORY: Rarity.RARE, TESSERACT: Rarity.RARE, CONCERT: Rarity.RARE,
-        # Epic: the economy cards that compound over a whole game.
+        # Swashbuckler is Rare: the scaling mult engine (its own band), and so
+        # is Brain Loop ($40), an action engine that needs sticky blocks.
+        SWASHBUCKLER: Rarity.RARE, BRAIN_LOOP: Rarity.RARE,
+        # Epic: the economy cards that compound over a whole game, and Stencil
+        # ($46), whose x5 wants a deliberately empty card area.
         COUPON: Rarity.EPIC, DOPPELGANGER: Rarity.EPIC,
-        PROCRASTINATION: Rarity.EPIC,
+        PROCRASTINATION: Rarity.EPIC, STENCIL: Rarity.EPIC,
         # Legendary: the most expensive whole cards.
         SHOWMAN: Rarity.LEGENDARY, ESSENCE: Rarity.LEGENDARY,
-        INFERNO: Rarity.LEGENDARY,
+        INFERNO: Rarity.LEGENDARY, INFINITY: Rarity.LEGENDARY,
     }
     # --- The measured whole cards' effects: id -> (phase, scorer, ratio, measure) ---
     # Each card fires ONCE per run (or once per fragile break) and pays a
@@ -1248,7 +1385,7 @@ class Card:
     #           "fragile"-> cards.on_fragile_broken, each fragile break
     NAMED: ClassVar[dict[int, tuple]] = {
         JOKER: ("start", Scorer.MULT_ADD, 1.0, "start"),
-        EXPLORER: ("end", Scorer.MULT_MUL, 1.0, "distance"),
+        EXPLORER: ("end", Scorer.MULT_MUL, 1.0, "visited_units"),
         ASTRONAUT: ("end", Scorer.MULT_ADD, 1.0, "black_hole"),
         PLANE: ("end", Scorer.CHIPS_ADD, 0.5, "air_time"),
         PILLAR: ("start", Scorer.MULT_ADD, 0.25, "fullest_column"),
@@ -1279,6 +1416,13 @@ class Card:
         # be in (see Game._count_inside_time). It fires at the END of the run,
         # because both measures are only final once the marbles have stopped.
         INTANGIBLE: ("end", Scorer.MULT_ADD, 0.125, "inside_time"),
+        # Swashbuckler pays 1/5 of the cards' sell value as mult: 4 x (1/20) x
+        # dollars = a fifth of the dollars, and the mult stays fractional (only
+        # the chips base rounds). Stencil is the xMult shape of the same idea:
+        # 1 + 0.25 x 4.0 x slots = 1 + one xMult a slot, so five empty slots
+        # multiply the multiplier by 5.
+        SWASHBUCKLER: ("start", Scorer.MULT_ADD, 1.0 / 20.0, "card_sell_total"),
+        STENCIL: ("start", Scorer.MULT_MUL, 4.0, "stencil_slots"),
     }
 
     @classmethod
@@ -1548,6 +1692,10 @@ class Action:
     STRENGTH = 4
     SPIRIT = 5
     CLEANSWEEP = 6
+    EXPANSION = 7
+    BRAINSTORM = 8
+    MASS_PRODUCTION = 9
+    GRACE = 10
 
     NAMES: ClassVar[dict[int, str]] = {
         DEATH: "Death",
@@ -1557,6 +1705,10 @@ class Action:
         STRENGTH: "Strength",
         SPIRIT: "Spirit",
         CLEANSWEEP: "Cleansweep",
+        EXPANSION: "Expansion",
+        BRAINSTORM: "Brainstorm",
+        MASS_PRODUCTION: "Mass production",
+        GRACE: "Grace",
     }
     # What the v1 action does. The descriptions mention the v2 upgrade so the
     # shop and collection show both versions at a glance.
@@ -1569,6 +1721,11 @@ class Action:
         SPIRIT: "Destroys a chosen block and applies its scorer at the start of the next 2 runs (v2: permanently).",
         CLEANSWEEP: "Spends every dollar you hold (cash goes to $0) to fill each empty card slot with a "
                     "random card (v2: keeps your cash).",
+        EXPANSION: "Unlocks 4 locked board squares next to the playable board (v2: the whole board).",
+        BRAINSTORM: "Gives 2 free shop rerolls (v2: halves the price of every reroll).",
+        MASS_PRODUCTION: "Triples the resource points this run earns (v2: doubles them for the "
+                         "rest of the game).",
+        GRACE: "Adds +1 xMult to this run (v2: this run's required score drops to 0).",
     }
     # What the upgraded (v2) action does.
     V2_DESCRIPTIONS: ClassVar[dict[int, str]] = {
@@ -1579,6 +1736,10 @@ class Action:
         STRENGTH: "Triples a chosen block's scorer amount.",
         SPIRIT: "Destroys a chosen block and applies its scorer at the start of every run, permanently.",
         CLEANSWEEP: "Fills each empty card slot with a random card, without spending your cash.",
+        EXPANSION: "Unlocks every locked board square.",
+        BRAINSTORM: "Halves the price of every shop reroll, for the rest of the game.",
+        MASS_PRODUCTION: "Doubles every resource point you earn, for the rest of the game.",
+        GRACE: "This run's required score becomes 0: it is cleared whatever it scores.",
     }
     # Short flavor lines, one per action.
     COMMENTS: ClassVar[dict[int, str]] = {
@@ -1589,6 +1750,10 @@ class Action:
         STRENGTH: "Swing harder.",
         SPIRIT: "It lingers on.",
         CLEANSWEEP: "The house takes the rest.",
+        EXPANSION: "Room to grow.",
+        BRAINSTORM: "Fresh ideas on demand.",
+        MASS_PRODUCTION: "Make more of less.",
+        GRACE: "This one's on the house.",
     }
     # Actions are cheap one-use power-ups: their prices were halved (48 -> 24,
     # 56 -> 28), so a run can afford one almost any time. Deja Vu costs a little
@@ -1599,7 +1764,8 @@ class Action:
     # sweeps away, and what it buys is up to five cards.
     PRICES: ClassVar[dict[int, int]] = {DEATH: 24, RECOGNITION: 24, DEJA_VU: 28,
                                         ANOINTMENT: 32, STRENGTH: 28, SPIRIT: 36,
-                                        CLEANSWEEP: 70}
+                                        CLEANSWEEP: 70, EXPANSION: 25, BRAINSTORM: 25,
+                                        MASS_PRODUCTION: 36, GRACE: 25}
     # Face colors and center glyphs for the mini-action look (one per action).
     COLORS: ClassVar[dict[int, tuple]] = {
         DEATH: (120, 45, 45),        # deathly red
@@ -1609,18 +1775,25 @@ class Action:
         STRENGTH: (175, 85, 35),     # brawny amber
         SPIRIT: (140, 140, 160),     # spectral grey
         CLEANSWEEP: (40, 140, 160),  # sweeping teal
+        EXPANSION: (110, 150, 55),   # survey green
+        BRAINSTORM: (205, 165, 45),  # idea gold
+        MASS_PRODUCTION: (170, 60, 130),  # industry magenta
+        GRACE: (150, 200, 225),      # halo sky
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         DEATH: "D", RECOGNITION: "R", DEJA_VU: "V",
         ANOINTMENT: "A", STRENGTH: "S", SPIRIT: "P",
-        CLEANSWEEP: "C",
+        CLEANSWEEP: "C", EXPANSION: "E", BRAINSTORM: "B",
+        MASS_PRODUCTION: "M", GRACE: "G",
     }
     ORDER: ClassVar[list[int]] = [DEATH, RECOGNITION, DEJA_VU, ANOINTMENT,
-                                  STRENGTH, SPIRIT, CLEANSWEEP]
+                                  STRENGTH, SPIRIT, CLEANSWEEP, EXPANSION,
+                                  BRAINSTORM, MASS_PRODUCTION, GRACE]
     # Actions that act on the game itself rather than on a chosen block or card:
     # they need no subject, so selecting one and pressing S uses it straight
     # away (see Game._apply_action).
-    NO_TARGET: ClassVar[tuple[int, ...]] = (CLEANSWEEP,)
+    NO_TARGET: ClassVar[tuple[int, ...]] = (CLEANSWEEP, EXPANSION, BRAINSTORM,
+                                            MASS_PRODUCTION, GRACE)
 
     @classmethod
     def name(cls, action):
@@ -1886,9 +2059,8 @@ def shape_description(shape):
         Shape.BUMP: "A solid dome along the bottom: the marble rolls up and over it.",
         Shape.KEY: "A pass-through key: a marble that passes through it opens the Lock "
                    "block with the same key number.",
-        Shape.LOCK: "A solid locked door filling the unit: it blocks marbles until the "
-                    "marble passes through the matching Key block (locks close again at "
-                    "the start of every run).",
+        Shape.LOCK: "A solid locked door: it blocks marbles until one passes "
+                    "through the matching Key block.",
     }.get(shape, "Unknown shape.")
 
 
@@ -1913,9 +2085,8 @@ def effect_description(effect, magnitude=None):
         Effect.GRAVITY: "Redirects gravity to the direction of its arrow.",
         Effect.BLACK_HOLE: f"Pulls marbles toward it with {magnitude:g} px/s^2 of gravity"
                            f"{dev}, stronger up close",
-        Effect.PORTAL: "Teleports marbles to its matching numbered portal. "
-                       "Each portal pair can only be used 100 times per run "
-                       "before the portal stops working for that run.",
+        Effect.PORTAL: "Teleports marbles to its matching numbered portal, up to "
+                       "100 times per run.",
         Effect.ROTATE: f"Rotates at {magnitude:g} deg/s and flings marbles along its spin{dev}",
         Effect.SLIPPERY: "Marbles slide over it and keep all their speed.",
         Effect.FRAGILE: "Shatters into a no-hitbox field after a marble touches it and leaves.",
@@ -1933,6 +2104,8 @@ def effect_description(effect, magnitude=None):
                       f"{magnitude:g} second{_plural(magnitude)}{dev}",
         Effect.SPLITTER: "Splits the marble in two when touched: the copy is flung back "
                          "the opposite way (reflected over the block's surface).",
+        Effect.GONDOLA: f"Slides at {magnitude:g} px/s along its arrow (up/down or "
+                        "left/right), turning back at anything solid.",
     }.get(effect, "Unknown effect.")
     return f"{text}." if text[-1] != "." else text
 
@@ -1988,7 +2161,7 @@ def scorer_description(scorer, amount=None):
         Scorer.SATANIC: f"Multiplies the multiplier by {amount:g}{dev} when touched, then is "
                         "permanently destroyed once a marble leaves it.",
         Scorer.SUMMIT: f"Gives +{amount:g} mult{dev} for each unit above the bottom row it is located on",
-        Scorer.AIRBALL: f"Gives +{amount:g} mult{dev} for each second the marble was airborne (touching no block, including Shape.None) before touching it",
+        Scorer.AIRBALL: f"Gives +{amount:g} mult{dev} for each second the marble was airborne before touching it",
         Scorer.SEED: f"Gives +{amount:g} mult{dev} for each Seed block on the board when touched",
         Scorer.DRILL: f"When touched, drills out {amount:g} locked board square{_plural(amount)}"
                       f"{dev} next to unlocked ones — they unlock after the run",
@@ -1997,14 +2170,13 @@ def scorer_description(scorer, amount=None):
         Scorer.RALLY: f"Gives +{amount:g} mult{dev} for each fresh block touch this run before it — re-touches count, its own touch doesn't",
         Scorer.ECHO: "Re-fires the scoring effect of the block the marble touched right before it.",
         Scorer.POWERLINE: f"Gives +{amount:g} chips{dev} for each block in its row (including itself)",
-        Scorer.FRONTIER: f"Gives +{amount:g} mult{dev} for each locked board unit or outer board border orthogonally adjacent to it (up/down/left/right, not diagonally)",
+        Scorer.FRONTIER: f"Gives +{amount:g} mult{dev} for each locked unit or board border adjacent to it (not diagonal)",
         Scorer.GILDED: "Gives 1/6 of your current chips as mult when touched.",
         Scorer.BOMB: "When touched, unlocks every board unit within 1 cell (including diagonally) after a run, then destroys itself.",
         Scorer.CLUSTER: f"Gives +{amount:g} mult{dev} for each block adjacent to it (up/down/left/right, not diagonally)",
         Scorer.COLOSSUS: f"Gives +{amount:g} xMult{dev} for each pixel the marble's radius is above its "
                          "base size (8 px) when touched",
-        Scorer.UNDERTAKER: f"Gives +{amount:g} mult{dev} for each block destroyed this run (a fragile block "
-                           "breaking or a Satanic block dying) before touching it",
+        Scorer.UNDERTAKER: f"Gives +{amount:g} mult{dev} for each block destroyed this run before touching it",
         Scorer.DEBT: f"Gives {amount:.0f} chips{dev} when touched, but the run then pays no interest "
                      "($1 for every $10 you hold is lost after the run).",
     }.get(scorer, "Unknown scorer.")
@@ -2158,6 +2330,10 @@ COMPONENT_PRICES = {
     (Component.EFFECT, Effect.ZIPPER): 22,
     (Component.EFFECT, Effect.PHASE): 26,
     (Component.EFFECT, Effect.SPLITTER): 124,
+    # The gondola is a moving platform: dearer than a static wall effect (it
+    # patrols a whole lane and can carry a marble with it), but nowhere near
+    # the splitter's "another marble" price.
+    (Component.EFFECT, Effect.GONDOLA): 46,
     (Component.SCORER, Scorer.NONE): 6,
     (Component.SCORER, Scorer.CHIPS_ADD): 12,
     (Component.SCORER, Scorer.MULT_ADD): 17,

@@ -349,9 +349,9 @@ class CollisionBehaviorTests(unittest.TestCase):
         self.assertFalse(getattr(block, "broke_fragile_this_frame", False))
 
     def test_marble_weight_trial_scales_effect_pushes(self):
-        # The marble-weight trial multiplies the mass used for effect pushes
-        # only: a heavy marble (effect_mass_mult 2.0) is flung less by a
-        # piston, a light one (0.5) flung more.
+        # The marble-weight trial multiplies the mass used for the effects that
+        # DRIVE the marble: a heavy marble (effect_mass_mult 2.0) is flung less
+        # by a piston, a light one (0.5) flung more.
         def fling(mult):
             block = main.Block(5, 8, shape=main.Shape.RECT, effect=main.Effect.PISTON,
                                scorer=main.Scorer.NONE)
@@ -365,6 +365,59 @@ class CollisionBehaviorTests(unittest.TestCase):
         light = fling(0.5)
         self.assertAlmostEqual(heavy, main.PISTON_FORCE / 2.0, delta=main.PISTON_FORCE * 0.1)
         self.assertAlmostEqual(light, main.PISTON_FORCE / 0.5, delta=main.PISTON_FORCE * 0.1)
+
+    def test_marble_weight_trial_scales_accelerators_and_conveyors(self):
+        # An accelerator and a conveyor both MOVE the marble, so the trial's
+        # weight factor scales them (a heavy marble is pushed and carried half
+        # as hard).
+        def push(mult):
+            block = main.Block(3, 8, shape=main.Shape.NONE,
+                               effect=main.Effect.ACCELERATOR, angle=90,
+                               scorer=main.Scorer.NONE)
+            marble = main.Marble(block.rect.centerx, block.rect.centery)
+            marble.velocity = np.array([0.0, 0.0])
+            marble.effect_mass_mult = mult
+            marble.physics.update(marble, main.DT, [block])
+            # Gravity pulls straight down, so the accelerator's own push is the
+            # x component on its own.
+            return float(marble.velocity[0])
+
+        normal = push(1.0)
+        self.assertGreater(normal, 0.0)
+        self.assertAlmostEqual(push(2.0), normal / 2.0, delta=normal * 0.02)
+        self.assertAlmostEqual(push(0.5), normal / 0.5, delta=normal * 0.02)
+
+        def belt_speed(mult):
+            block = main.Block(5, 5, effect=main.Effect.CONVEYOR,
+                               scorer=main.Scorer.NONE)
+            marble = main.Marble(block.rect.centerx,
+                                 block.rect.top - main.MARBLE_RADIUS)
+            marble.velocity = np.array([0.0, 0.0])
+            marble.effect_mass_mult = mult
+            for _ in range(30):
+                # A long belt: keep the marble on it so the carried speed shows.
+                marble.position[0] = block.rect.centerx
+                marble.physics.update(marble, main.DT, [block])
+            return float(marble.velocity[0])
+
+        self.assertAlmostEqual(belt_speed(1.0), main.CONVEYOR_SPEED, delta=10.0)
+        self.assertAlmostEqual(belt_speed(2.0), main.CONVEYOR_SPEED / 2.0, delta=10.0)
+
+    def test_marble_weight_trial_does_not_change_a_bounce(self):
+        # A bounce is the marble's OWN behaviour, not the board driving it, so
+        # the trial's weight factor leaves it exactly where it was — a heavy
+        # marble bounces just as high off a bouncy block as a light one.
+        def bounce(mult):
+            block = main.Block(5, 8, shape=main.Shape.RECT, effect=main.Effect.BOUNCY,
+                               scorer=main.Scorer.NONE)
+            marble = main.Marble(block.rect.centerx, block.rect.top - 40)
+            marble.velocity = np.array([0.0, 300.0])
+            marble.effect_mass_mult = mult
+            marble.physics.resolve_collision(marble, block, np.array([0.0, -1.0]))
+            return float(marble.velocity[1])
+
+        self.assertAlmostEqual(bounce(1.0), bounce(2.0), delta=1e-6)
+        self.assertAlmostEqual(bounce(1.0), bounce(0.9), delta=1e-6)
 
     def test_marble_weight_trial_does_not_change_fall_speed(self):
         # Fall speed reads marble.mass, not effect_mass_mult, so a "heavy"

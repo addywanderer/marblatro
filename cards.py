@@ -54,11 +54,10 @@ del _card_source
 def _card_disabled(game, card):
     """True when a card is disabled for the run.
 
-    The Card-cutter trial disables one random card (game.disabled_card); the
-    deal-breaker trial disables every card of one random condition
-    (game.deal_broken_cards). Either way the card's score effect is skipped,
-    and a Blueprint cannot copy it. The predicate itself lives on Game so the
-    passive whole-card effects (Game._has_card) share this single rule.
+    The Card-cutter trial disables one random card (game.disabled_card): the
+    card's score effect is skipped, and a Blueprint cannot copy it. The
+    predicate itself lives on Game so the passive whole-card effects
+    (Game._has_card) share this single rule.
     """
     return game._card_disabled(card)
 
@@ -157,11 +156,21 @@ def _named_card_units(game, measure):
       +0.5 mult a block second and +15 mult a locked-unit second, and 30 is that
       rate ratio (15 / 0.5), so one ratio serves both clauses (see
       Card.NAMED[Card.INTANGIBLE] and Game._count_inside_time).
+    * visited_units = 4x the fraction of the board's units a marble has been
+      in this run (see card_visited_fraction): the Explorer card's measure, so
+      the whole board multiplies the multiplier by x2 and a quarter of it by
+      x1.25 (see Card.NAMED[Card.EXPLORER]).
+    * card_sell_total = the total sell price of the player's cards in dollars
+      (see card_sell_total): Swashbuckler pays ratio 1/20 of it as mult, which
+      is the fifth of that total the card asks for.
+    * stencil_slots = the card slots no OTHER card is filling, less the 1 the
+      multiplier already has (see stencil_units), so Stencil alone in a
+      five-slot area reads 4 and multiplies the multiplier by 5 (ratio 4.0).
     """
     if measure == "start":
         return 1.0
-    if measure == "distance":
-        return 4 * card_distance_fraction(game)
+    if measure == "visited_units":
+        return 4 * card_visited_fraction(game)
     if measure == "black_hole":
         return getattr(game, "black_hole_time", 0.0)
     if measure == "air_time":
@@ -200,6 +209,10 @@ def _named_card_units(game, measure):
         # the ratio between the Intangible card's two rates (see the docstring).
         return (getattr(game, "inside_block_time", 0.0)
                 + 30 * getattr(game, "inside_locked_time", 0.0))
+    if measure == "card_sell_total":
+        return card_sell_total(game)
+    if measure == "stencil_slots":
+        return stencil_units(game)
     return 0.0
 
 
@@ -224,7 +237,7 @@ def _apply_named_card(game, card, value, fx=None, fy=None, units=None):
     # The three standard bases, at scale 1.0 (a whole card has no scorer half to
     # roll) — the same arithmetic _apply_unit_card pays for a unit card. The
     # per-unit chip count is whole, but a fractional unit count (Plane's air
-    # time, Astronaut's black-hole seconds, Explorer's distance) keeps its
+    # time, Astronaut's black-hole seconds, Explorer's visited units) keeps its
     # fractional payoff: nothing is rounded internally, only the particle text.
     if scorer == Scorer.CHIPS_ADD:
         gained = int(30 * ratio + 0.5) * units
@@ -322,9 +335,9 @@ def effective_card_amount(game, index):
 # ---------------------------------------------------------------------------
 # The per-run measures the named cards scale by (see _named_card_units): the
 # islands the unlocked board units form, the board's total sell value, the
-# distance the marble travelled, the fullest column, the slippery blocks owned,
-# ... A match-group card measures nothing — it pays one standard unit per
-# matching collision.
+# board units a marble has been in, the fullest column, the slippery blocks
+# owned, ... A match-group card measures nothing — it pays one standard unit
+# per matching collision.
 #
 # They used to be read through `_condition_units(game, condition)`: one
 # condition id in, a unit count out. The named conditions are whole cards now
@@ -357,6 +370,40 @@ def island_group_count(game):
                     remaining.discard(neighbour)
                     stack.append(neighbour)
     return islands
+
+
+def card_sell_total(game):
+    """The total sell price of the player's cards, in dollars.
+
+    Swashbuckler's measure. Every card in the card area counts, the card asking
+    included, and each is valued at what a plain sale would refund for it
+    (Game._sell_price, i.e. the card's price x the game's sell fraction), so the
+    Market card's 75% raises this measure exactly as it raises a sale. A card
+    the Card cutter has disabled is still OWNED and still worth what it is
+    worth: cutting a card stops its effect, never its resale value.
+    """
+    return sum(max(0, game._sell_price(card)) for card in game.cards)
+
+
+def stencil_units(game):
+    """Stencil's unit count: one per card slot no OTHER card is filling.
+
+    The area's size is Game.max_cards (the Essence card takes a slot away from
+    the whole area, itself included) and a slot counts when the card in it is
+    not a Stencil, so the Stencil's OWN slot is one of them: alone in a
+    five-slot area there are five such slots, which is the x5 the card
+    promises. TWO Stencils each read the same number, so a second copy
+    multiplies again by the same factor.
+
+    One unit of xMult is +0.25 on the factor and the card's ratio is 4.0, so a
+    unit is a whole +1 — and the factor already STARTS at 1, which is why the
+    count hands back one fewer than it counted: N slots pay a factor of
+    1 + (N - 1) = N, the multiplier multiplied by N. With no headroom at all
+    (every other slot taken) the count is 0, which is the card's gate: no
+    units, no payoff, no particle — exactly what Island does with no groups.
+    """
+    others = sum(1 for card in game.cards if card.value != Card.STENCIL)
+    return max(0, game.max_cards - others - 1)
 
 
 def board_sell_total(game):
@@ -904,10 +951,10 @@ def run_finish_pos(game):
 def apply_cards_on_finish(game):
     """Apply the end-of-run card effects.
 
-    The named cards whose phase is "end" pay here — Explorer's distance xMult,
-    Astronaut's black-hole mult, Plane's air-time chips, Skater's slippery
-    xMult, Fountain's pipe streaks, Island's groups — because their measures are
-    only final once the marbles have stopped (and, for the xMult ones, because
+    The named cards whose phase is "end" pay here — Explorer's visited-units
+    xMult, Astronaut's black-hole mult, Plane's air-time chips, Skater's
+    slippery xMult, Fountain's pipe streaks, Island's groups — because their
+    measures are only final once the marbles have stopped (and, for the xMult ones, because
     xMult is a run-end calculation: the finish path flushes the whole banked
     product right after this, see Game._flush_run_xmult). A Blueprint copies the card to its immediate left; a card disabled
     by the Card cutter or Deal breaker trial is skipped (and can't be copied
@@ -938,15 +985,20 @@ def apply_card_finish(game, card, value, fx, fy):
     _apply_named_card(game, card, value, fx, fy)
 
 
-def card_distance_fraction(game):
-    """The fraction of the marble box's total grid units the marble(s) travelled.
+def card_visited_fraction(game):
+    """The fraction of the marble box's grid units a marble has been in.
 
     Explorer's units are 4x this fraction (so a full board is 4 units, i.e. the
-    x2 the card tops out at).
+    x2 the card tops out at). The units counted are the ones the marbles' own
+    frames recorded in Game.visited_cells — the board cell each marble's centre
+    sat in, at most once per unit however long it stayed there and however many
+    marbles passed through (see Game._note_visited_cell) — so the measure is
+    "the fraction of grid units a marble has been in" and the same units
+    ui.draw_board paints while the card is owned.
     """
-    total_px = sum(getattr(m, "distance", 0.0) for m in game.marbles)
     total_grid_units = GRID_WIDTH * GRID_HEIGHT
-    return (total_px / GRID_SIZE) / total_grid_units
+    visited = len(getattr(game, "visited_cells", ()))
+    return min(visited, total_grid_units) / total_grid_units
 
 
 def fullest_column_count(game):

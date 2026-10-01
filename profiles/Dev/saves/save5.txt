@@ -1,1 +1,430 @@
-{"version": 1}
+{
+  "version": 1,
+  "cash": 9,
+  "run_number": 1,
+  "round_index": 0,
+  "run_in_round": 1,
+  "required_score": 200,
+  "required_scores": [
+    100,
+    200
+  ],
+  "run_results": [
+    true
+  ],
+  "runs_cleared": 1,
+  "failed_runs": 0,
+  "current_trial": 18,
+  "trial_decision": {
+    "trial": 18
+  },
+  "difficulty": 4,
+  "final_boss": null,
+  "cards": [],
+  "actions": [],
+  "toolbox": [
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 20,
+      "effects": [
+        18
+      ],
+      "effect_amounts": {
+        "18": 40.82
+      },
+      "scorer": 9,
+      "scorer_amount": 0.537,
+      "price": 48,
+      "name": "Key Parts",
+      "portal_number": 0,
+      "key_number": 1,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": 270,
+      "triggers_left": 0,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "price": 53,
+      "name": "Rect Finish",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": 0,
+      "triggers_left": 1,
+      "random_rolls": null
+    }
+  ],
+  "grid": [
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 8,
+      "shape": 0,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 0,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 0,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 8,
+      "shape": 21,
+      "effects": [
+        18
+      ],
+      "effect_amounts": {
+        "18": 40.82
+      },
+      "scorer": 9,
+      "scorer_amount": 0.537,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 1,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 48,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 5,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 109,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 6,
+      "shape": 2,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 0,
+      "scorer_amount": 0.0,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 9,
+      "random_rolls": null
+    }
+  ],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 11,
+      "amount": 0,
+      "price": 12,
+      "name": "Curved Slope Line",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 2,
+      "amount": 0,
+      "price": 12,
+      "name": "Line",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 11,
+      "amount": 0,
+      "price": 24,
+      "name": "Shrinking",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 4,
+      "amount": 0,
+      "price": 20,
+      "name": "Gravity",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 8,
+      "amount": 3.032,
+      "price": 24,
+      "name": "Sharp",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 26,
+      "amount": 0,
+      "price": 34,
+      "name": "Echo",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 9,
+      "amount": 1.167,
+      "price": 11,
+      "name": "Parts",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "kind": "card",
+      "value": 2,
+      "price": 27,
+      "amount": 0,
+      "col": 1,
+      "row": 3,
+      "name": "Astronaut",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 3761,
+      "price": 29,
+      "amount": 4.181,
+      "col": 2,
+      "row": 3,
+      "name": "Zipper card (Frontier)",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 3,
+      "price": 22,
+      "amount": 0,
+      "col": 3,
+      "row": 3,
+      "name": "Plane",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 86,
+      "price": 36,
+      "amount": 0,
+      "col": 4,
+      "row": 3,
+      "name": "Compound Interest",
+      "random_rolls": null
+    },
+    {
+      "kind": "action",
+      "value": 2,
+      "price": 28,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Deja Vu"
+    },
+    {
+      "kind": "action",
+      "value": 4,
+      "price": 28,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Strength"
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 2,
+      "effects": [
+        12
+      ],
+      "effect_amounts": {
+        "12": 0.3513
+      },
+      "scorer": 2,
+      "scorer_amount": 2.891,
+      "price": 38,
+      "name": "Line +Mult",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 8,
+      "row": 3,
+      "shape": 20,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 33,
+      "scorer_amount": 14.26,
+      "price": 25,
+      "name": "Key Undertaker",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    }
+  ],
+  "shop_locked": [],
+  "component_purchases": [
+    [
+      "shape",
+      20,
+      1
+    ],
+    [
+      "effect",
+      18,
+      1
+    ],
+    [
+      "scorer",
+      9,
+      1
+    ],
+    [
+      "shape",
+      2,
+      1
+    ]
+  ],
+  "wrecking_bonus": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      1.0
+    ]
+  ],
+  "tesseract_bonus": 1.0,
+  "tokens": [],
+  "shred_points": 0,
+  "rubble_points": 0,
+  "idea_points": 0,
+  "free_rerolls": 0,
+  "option_points": 0,
+  "bonus_slots": 0,
+  "resource_gain_mult": 1.0,
+  "resource_gain_bonus": 1.0,
+  "reroll_discount": 1.0,
+  "run_xmult_bonus": 0.0,
+  "marble_type": 2,
+  "upgrades_enabled": true,
+  "game_over": false,
+  "game_won": false,
+  "game_perfect": false,
+  "continue_past_game_over": false,
+  "score_chips": 30,
+  "score_mult": 4,
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
+  "unlocked_cells": [
+    [
+      5,
+      5
+    ],
+    [
+      5,
+      8
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      4,
+      5
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      4,
+      7
+    ]
+  ],
+  "board_units": 0
+}

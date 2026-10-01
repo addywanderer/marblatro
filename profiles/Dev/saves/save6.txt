@@ -1,1 +1,667 @@
-{"version": 1}
+{
+  "version": 1,
+  "cash": 6203,
+  "run_number": 33,
+  "round_index": 11,
+  "run_in_round": 0,
+  "required_score": 858993459200,
+  "required_scores": [
+    100,
+    200,
+    400,
+    800,
+    1600,
+    3200,
+    6400,
+    12800,
+    25600,
+    51200,
+    102400,
+    204800,
+    409600,
+    819200,
+    1638400,
+    3276800,
+    6553600,
+    13107200,
+    26214400,
+    52428800,
+    104857600,
+    209715200,
+    419430400,
+    838860800,
+    1677721600,
+    3355443200,
+    6710886400,
+    13421772800,
+    26843545600,
+    53687091200,
+    107374182400,
+    214748364800,
+    429496729600,
+    858993459200
+  ],
+  "run_results": [
+    true,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "runs_cleared": 1,
+  "failed_runs": 32,
+  "current_trial": 2,
+  "trial_decision": null,
+  "difficulty": 4,
+  "final_boss": null,
+  "cards": [],
+  "actions": [],
+  "toolbox": [
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 34,
+      "scorer_amount": 52.12,
+      "price": 22,
+      "name": "Rect Debt",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 34,
+      "scorer_amount": 52.12,
+      "price": 22,
+      "name": "Rect Debt",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 34,
+      "scorer_amount": 52.12,
+      "price": 22,
+      "name": "Rect Debt",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 12,
+      "effects": [
+        17,
+        13
+      ],
+      "effect_amounts": {
+        "13": 3686.0
+      },
+      "scorer": 22,
+      "scorer_amount": 2.444,
+      "price": 137,
+      "name": "Half Pipe Drill",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 8,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 12,
+      "scorer_amount": 1.323,
+      "price": 19,
+      "name": "Pipe Bend Ideas",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 5,
+      "effects": [
+        15,
+        10,
+        5,
+        4
+      ],
+      "effect_amounts": {
+        "5": 2371.0
+      },
+      "scorer": 11,
+      "scorer_amount": 0.843,
+      "price": 84,
+      "name": "Curved Slope Rubble",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "shape": 11,
+      "effects": [
+        4
+      ],
+      "effect_amounts": {},
+      "scorer": 12,
+      "scorer_amount": 1.117,
+      "price": 34,
+      "name": "Curved Slope Line Ideas",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    }
+  ],
+  "grid": [
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 7,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 109,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 8,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 53,
+      "random_rolls": null
+    }
+  ],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 16,
+      "amount": 0,
+      "price": 7,
+      "name": "Peg",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 10,
+      "amount": 0,
+      "price": 12,
+      "name": "Flat Line",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 8,
+      "amount": 0,
+      "price": 12,
+      "name": "Slippery",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 15,
+      "amount": 0,
+      "price": 22,
+      "name": "Zipper",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 1,
+      "amount": 45.45,
+      "price": 12,
+      "name": "+Chips",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 9,
+      "amount": 1.232,
+      "price": 11,
+      "name": "Parts",
+      "col": 6,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 16,
+      "amount": 1.217,
+      "price": 17,
+      "name": "Picky",
+      "col": 7,
+      "row": 1
+    },
+    {
+      "kind": "card",
+      "value": 3242,
+      "price": 38,
+      "amount": 3.224,
+      "col": 2,
+      "row": 3,
+      "name": "No Shape card (Seed)",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 3158,
+      "price": 46,
+      "amount": 16.4,
+      "col": 3,
+      "row": 3,
+      "name": "Curved Slope/Convex Slope card (Undertaker)",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 80,
+      "price": 36,
+      "amount": 0,
+      "col": 4,
+      "row": 3,
+      "name": "Garden",
+      "random_rolls": null
+    },
+    {
+      "kind": "action",
+      "value": 3,
+      "price": 32,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Anointment"
+    },
+    {
+      "kind": "action",
+      "value": 5,
+      "price": 36,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Spirit"
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 7,
+      "row": 3,
+      "shape": 2,
+      "effects": [
+        9
+      ],
+      "effect_amounts": {},
+      "scorer": 6,
+      "scorer_amount": 0.0,
+      "price": 36,
+      "name": "Line Quick",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 8,
+      "row": 3,
+      "shape": 8,
+      "effects": [
+        5
+      ],
+      "effect_amounts": {
+        "5": 3743.0
+      },
+      "scorer": 22,
+      "scorer_amount": 2.715,
+      "price": 44,
+      "name": "Pipe Bend Drill",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    }
+  ],
+  "shop_locked": [],
+  "component_purchases": [
+    [
+      "shape",
+      0,
+      3
+    ],
+    [
+      "scorer",
+      34,
+      3
+    ]
+  ],
+  "wrecking_bonus": [
+    [
+      1,
+      0
+    ],
+    [
+      2,
+      0
+    ],
+    [
+      3,
+      1.0
+    ]
+  ],
+  "tesseract_bonus": 1.0,
+  "tokens": [
+    {
+      "block": {
+        "kind": "block",
+        "placed": true,
+        "x": 0,
+        "y": 0,
+        "shape": 14,
+        "effects": [
+          9
+        ],
+        "effect_amounts": {},
+        "scorer": 1,
+        "scorer_amount": 33.41,
+        "angle": 0,
+        "portal_number": 0,
+        "key_number": 0,
+        "trigger_limit": 1,
+        "trigger_paid": 0,
+        "spin": 0.0,
+        "triggers_left": 1,
+        "portal_uses_left": 0,
+        "fragile_shape": null,
+        "resale_price": null,
+        "random_rolls": null
+      },
+      "runs_left": null
+    },
+    {
+      "block": {
+        "kind": "block",
+        "placed": true,
+        "x": 0,
+        "y": 0,
+        "shape": 0,
+        "effects": [
+          12
+        ],
+        "effect_amounts": {
+          "12": 0.4999
+        },
+        "scorer": 23,
+        "scorer_amount": 0.0,
+        "angle": 0,
+        "portal_number": 0,
+        "key_number": 0,
+        "trigger_limit": 1,
+        "trigger_paid": 0,
+        "spin": 0.0,
+        "triggers_left": 1,
+        "portal_uses_left": 0,
+        "fragile_shape": null,
+        "resale_price": null,
+        "random_rolls": {
+          "chips": false,
+          "cash": true,
+          "scorer": 23,
+          "run": "kept"
+        }
+      },
+      "runs_left": null
+    },
+    {
+      "block": {
+        "kind": "block",
+        "placed": true,
+        "x": 0,
+        "y": 0,
+        "shape": 12,
+        "effects": [
+          4
+        ],
+        "effect_amounts": {},
+        "scorer": 11,
+        "scorer_amount": 1.071,
+        "angle": 0,
+        "portal_number": 0,
+        "key_number": 0,
+        "trigger_limit": 1,
+        "trigger_paid": 0,
+        "spin": 0.0,
+        "triggers_left": 1,
+        "portal_uses_left": 0,
+        "fragile_shape": null,
+        "resale_price": null,
+        "random_rolls": null
+      },
+      "runs_left": null
+    },
+    {
+      "block": {
+        "kind": "block",
+        "placed": true,
+        "x": 0,
+        "y": 0,
+        "shape": 9,
+        "effects": [
+          6,
+          1
+        ],
+        "effect_amounts": {
+          "1": 60.7
+        },
+        "scorer": 6,
+        "scorer_amount": 0.0,
+        "angle": 0,
+        "portal_number": 0,
+        "key_number": 0,
+        "trigger_limit": 1,
+        "trigger_paid": 0,
+        "spin": 0.0,
+        "triggers_left": 1,
+        "portal_uses_left": 100,
+        "fragile_shape": null,
+        "resale_price": null,
+        "random_rolls": null
+      },
+      "runs_left": null
+    }
+  ],
+  "shred_points": 0,
+  "rubble_points": 0.7484999999999998,
+  "idea_points": 0,
+  "free_rerolls": 0,
+  "option_points": 0,
+  "bonus_slots": 0,
+  "resource_gain_mult": 1.0,
+  "resource_gain_bonus": 1.0,
+  "reroll_discount": 1.0,
+  "run_xmult_bonus": 0.0,
+  "marble_type": 2,
+  "upgrades_enabled": true,
+  "game_over": false,
+  "game_won": false,
+  "game_perfect": false,
+  "continue_past_game_over": true,
+  "score_chips": 63.41,
+  "score_mult": 4,
+  "last_run_cash_gained": 609,
+  "last_run_cash_breakdown": {
+    "base": 20,
+    "interest": 549,
+    "score": 0,
+    "cards": 0,
+    "scorers": 40,
+    "essence": 0,
+    "debt": false
+  },
+  "unlocked_cells": [
+    [
+      5,
+      8
+    ],
+    [
+      4,
+      6
+    ],
+    [
+      5,
+      7
+    ],
+    [
+      5,
+      6
+    ],
+    [
+      4,
+      8
+    ],
+    [
+      4,
+      14
+    ],
+    [
+      4,
+      7
+    ]
+  ],
+  "board_units": 0
+}

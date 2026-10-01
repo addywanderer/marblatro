@@ -2026,6 +2026,52 @@ class ShopTests(GameTestCase):
         self.game.disabled_card = None
 
 
+    def test_the_shop_skips_actions_the_player_is_holding(self):
+        # The rule the card slots follow, for the actions in hand: an action
+        # the player is already holding is not offered again (both slots still
+        # fill — the catalogue is far bigger than the two slots).
+        self.game.actions = [main.ActionItem(main.Action.DEATH, 24)]
+        self.assertEqual(self.game.shop.owned_actions(), {main.Action.DEATH})
+        for _ in range(200):
+            self.game.shop.refresh()
+            offered = [item for item in self.game.shop.items
+                       if item.kind == "action"]
+            self.assertEqual(len(offered), main.SHOP_ACTION_SLOTS)
+            self.assertEqual(len({i.value for i in offered}),
+                             main.SHOP_ACTION_SLOTS)
+            self.assertNotIn(main.Action.DEATH, {i.value for i in offered})
+        self.game.actions.append(main.ActionItem(main.Action.GRACE, 25))
+        self.assertEqual(self.game.shop.owned_actions(),
+                         {main.Action.DEATH, main.Action.GRACE})
+        # The Showman card lifts the rule here exactly as it does for cards.
+        self.game.cards.append(main.CardItem(main.Card.SHOWMAN, 48))
+        self.assertEqual(self.game.shop.owned_actions(), set())
+
+    def test_a_bought_card_or_action_leaves_the_shelf(self):
+        # A bought card moves into the card area and a bought action into the
+        # action area, so the offer itself comes off the shelf for the rest of
+        # the refresh (like a Slim pickings removal) instead of showing the
+        # same purchase twice.
+        self.game.cash = 1000
+        card = next(i for i in self.game.shop.items if i.kind == "card")
+        action = next(i for i in self.game.shop.items if i.kind == "action")
+        before = len(self.game.shop.items)
+        self.game._buy_shop_item(card)
+        self.assertNotIn(card, self.game.shop.items)
+        self.assertIn(card, self.game.cards)
+        self.game._buy_shop_item(action)
+        self.assertNotIn(action, self.game.shop.items)
+        self.assertIn(action, self.game.actions)
+        self.assertEqual(len(self.game.shop.items), before - 2)
+        # A component stays on the shelf on purpose: it is a repeatable buy
+        # whose price rises with every purchase (see _buy_price).
+        component = next(i for i in self.game.shop.items
+                         if i.kind in (main.Component.SHAPE,
+                                       main.Component.EFFECT,
+                                       main.Component.SCORER))
+        self.game._buy_shop_item(component)
+        self.assertIn(component, self.game.shop.items)
+
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_shop_card_slots_combine_conditions_and_unsplittables_equally(self):
         # Each card slot draws equally from a combined pool of conditions and

@@ -101,6 +101,23 @@ TIME_SCALE = 50.0  # leniency on how close time can be for more exponent effect
 DISTANCE_SCALE = 5000.0  # px traveled that count as a 1/2 distance contribution
 UNIQUE_SCALE = 20  # unique shape/effect/scorer types for a 1/2 uniqueness contribution
 CASH_SCALE = 25
+# The Watch whole card pins the run's TIME factor at its ceiling — the value the
+# ideal window pays (see Game._score_factors). The run's length then never costs
+# score again; it simply cannot earn more than the ceiling, so a long slow build
+# scores as well as a fast one (both far better than the quadratic penalty the
+# time factor hands a slow run without the card).
+TIME_GOOD_MAX = 1.0
+# The Infinity whole card swaps the DISTANCE and UNIQUENESS factors — both
+# saturating curves, `atan(value / scale) * 2 / pi` — for straight lines. Each
+# line is pinned to its curve at INFINITY_ANCHOR: the factor value where the
+# line and the curve agree, so the card changes the curve's SHAPE and not its
+# scale. Below the anchor the line pays LESS than the curve did, above it more,
+# and it never levels off (see infinity_factor / Game._score_factors).
+INFINITY_ANCHOR = 0.75
+# tan() of the angle the anchor sits at, so the pinned point is exact: the
+# saturating curve reads INFINITY_ANCHOR at SCALE * tan(INFINITY_ANCHOR * pi/2)
+# — 12071 px of travel, or 48.3 types, for the game's own two scales.
+INFINITY_ANCHOR_TANGENT = math.tan(INFINITY_ANCHOR * math.pi / 2)
 QUICK_SCALE = 0.05  # chips a Quick scorer grants per px/s of the marble's speed
 RECENT_SPEED_DECAY = 0.9
 # Growing/Shrinking blocks multiply the marble's radius by these factors on
@@ -130,6 +147,10 @@ TRIAL_BOX_COORDS = (620, 50, 200, 80)  # trial box above the cards (top-left sta
 SHOP_GRID_COLS = SHOP_COORDS[2] // GRID_SIZE
 SHOP_GRID_ROWS = SHOP_COORDS[3] // GRID_SIZE
 SHOP_MESSAGE_DURATION = 90  # Frames a shop purchase message stays visible
+# Seconds between autosaves while a game is being played (see
+# Game._tick_autosave): the game otherwise only saves when the player presses P
+# or quits, so a long session could lose everything since the last one.
+AUTOSAVE_INTERVAL = 30.0
 TOOLBOX_COORDS = (620, 190, 400, 280)  # x, y, width, height of the toolbox (the inventory)
 ASSEMBLER_COORDS = (620, 670, 320, 80)  # x, y, width, height of the assembler/disassembler (overlay on the shop's bottom-left)
 MAX_CARDS = 5  # Maximum owned cards the card area can hold at once
@@ -164,6 +185,13 @@ ACTION_UPGRADE_COST = 200  # Cash to upgrade an action from v1 to v2
 # random_action_version).
 ACTION_V2_CHANCE = 0.01
 SHOP_REFRESH_COST = 20  # Cash cost to reroll the shop
+# What the four later actions move (see their handlers in Game._action_*).
+EXPANSION_SQUARES = 4            # locked squares Expansion (v1) unlocks
+BRAINSTORM_REROLLS = 2           # free rerolls Brainstorm (v1) banks
+BRAINSTORM_REROLL_FACTOR = 0.5   # Brainstorm's v2 reroll price factor
+MASS_PRODUCTION_RUN_FACTOR = 3.0      # Mass production's v1 resource factor
+MASS_PRODUCTION_FOREVER_FACTOR = 2.0  # ...and the permanent one its v2 sets
+GRACE_RUN_XMULT = 1.0            # xMult Grace (v1) adds to the run
 TRIAL_CHANGE_COST = 50  # Cash to swap this run's trial for a different random one
 TRIAL_DISABLE_COST = 100  # Cash to play this run with no trial at all
 DISASSEMBLE_COST = 56  # Cash cost to break a block back into its parts
@@ -275,7 +303,10 @@ MARKET_SELL_FRACTION = 0.75
 # this-many touched blocks contribute score at all (so one run keeps a list of
 # at most the larger of the two: see Game.run_first_blocks).
 PEDESTAL_RETRIGGERS = 3
-WATCH_BLOCK_LIMIT = 5
+WATCH_BLOCK_LIMIT = 8
+# The Brain Loop whole card's chance of handing over a random action on a fresh
+# touch of a Sticky block (see Game._brain_loop_roll).
+BRAIN_LOOP_ACTION_CHANCE = 1 / 3
 # The Fountain whole card pays +0.25 xMult for every this-many PIPE-GROUP blocks
 # (Pipe, Drain, Pipe Bend — see components.PIPE_GROUP_SHAPES) a marble touches in
 # a row without touching anything else; the run's sightings are counted in
@@ -375,6 +406,23 @@ SAWTOOTH_HEIGHT = 13
 CONVEYOR_SPEED = Effect.MAGNITUDE[Effect.CONVEYOR]  # px/s a conveyor carries a marble along at (the AVERAGE; each belt rolls its own)
 PHASE_DURATION = Effect.MAGNITUDE[Effect.PHASE]  # seconds of no block collisions after a phase touch (the AVERAGE; each phase block rolls its own)
 MAX_MARBLES = 16  # cap on marbles alive at once (splitter copies included)
+# The Phantom trial starts every marble inside a block pass-through window for
+# this many seconds (see Game._release_start_marble): a plain second, not a
+# phase block's rolled PHASE_DURATION, because the trial grants it rather than a
+# block the player built.
+PHANTOM_PHASE_SECONDS = 1.0
+# The Vertigo trial's gravity: every direction EXCEPT straight down (the
+# trial-free default — a Vertigo run that changed nothing would just be a
+# missing trial), as unit vectors. Which one a run pulls in is rolled once by
+# Game._roll_trial_decision and stored as an index in the run's trial decision,
+# so a replay (R, T, a retry) and a loaded save pull the same way.
+VERTIGO_DIRECTIONS = ((0.0, -1.0),          # up
+                      (0.7071, -0.7071),    # up-right
+                      (1.0, 0.0),           # right
+                      (0.7071, 0.7071),     # down-right
+                      (-0.7071, 0.7071),    # down-left
+                      (-1.0, 0.0),          # left
+                      (-0.7071, -0.7071))   # up-left
 
 # Sound effects are synthesized in their own module; importing it also starts
 # the mixer (it degrades to silent no-ops when no audio device is available).
@@ -439,6 +487,14 @@ class Block:
         # back up at the start of each run. Non-portal blocks never use it.
         self.portal_uses_left = (
             PORTAL_MAX_ACTIVATIONS if Effect.PORTAL in self.effects else 0)
+        # A cable car (Effect.GONDOLA) slides along a lane of its own for the
+        # length of a run. Its travel is kept as a FLOAT of pixels from its own
+        # cell — a car rolling at 24 px/s covers 0.4 of a pixel a frame, which
+        # a whole-pixel rect cannot hold — and its direction is learned from its
+        # arrow the first time it moves (see Game._slide_gondola, which explains
+        # why the travel cannot live in the rect, and Game._reset_gondola).
+        self.gondola_travel = 0.0
+        self.gondola_dir = None
 
 # =============================================================================
 
@@ -1171,6 +1227,20 @@ def weighted_sample_without_replacement(options, weights, k):
     return result
 
 
+def infinity_factor(value, scale):
+    """The Infinity whole card's straight-line form of a score factor.
+
+    A measure the game scores by is normally read as ``atan(value / scale) * 2 /
+    pi``, which creeps up toward 1 and so has a soft ceiling — past a point, more
+    distance (or more unique types) buys almost nothing. Infinity replaces that
+    curve with the straight line through the point where the curve reads
+    INFINITY_ANCHOR: ``anchor * value / (scale * tan(anchor * pi / 2))``. The two
+    agree at exactly that value — 0.75, i.e. 12071 px of travel or 48.3 touched
+    types — and the line keeps climbing where the curve would have flattened out.
+    """
+    return INFINITY_ANCHOR * value / (scale * INFINITY_ANCHOR_TANGENT)
+
+
 def block_resale_price(block):
     """A placed block's own price: what it was placed with, never a recount.
 
@@ -1559,6 +1629,10 @@ class CardItem:
         # (an old save, a hand-built test card) is 0 — both pay, price and
         # describe at the average, exactly as they did before magnitudes.
         self.amount = amount or 0
+        # True while the Shuffled trial has the card turned face over: the card
+        # is DRAWN upside down (see ui.draw_card), and pays exactly what it paid
+        # — the trial is a handicap, not a change to what the card does.
+        self.flipped = False
 
 
 class ActionItem:
@@ -1599,8 +1673,9 @@ class ScorerToken:
 
     def __init__(self, block, runs_left=None):
         self.block = block
-        # A token is not a marble-touched board block: marking it keeps the
-        # Watch card from gating it (see Game._watch_blocks_out_of_play).
+        # A token is not a marble-touched board block: the flag marks it as a
+        # kept copy of a block, so the token's own drawing and firing paths can
+        # tell it from the block the player placed (see _fire_token).
         block.is_token = True
         self.runs_left = runs_left  # None = permanent (v2)
         # True once the run's start has picked this token up: a multiplier
@@ -1680,6 +1755,11 @@ class Shop:
         # Extra offers added by the Picky scorer (one per banked slot). The
         # Game keeps the persistent count and sets this before refreshing.
         self.bonus_slots = 0
+        # The cells the Hoard whole card is holding (see Game._toggle_shop_lock):
+        # a held cell keeps the offer it holds through every reroll. A list, so
+        # the ORDER the player pinned things in survives and the last one pinned
+        # is the first to be released when the card's cap falls.
+        self.locked = []
         # The Game this shop belongs to, so the card slots can tell which cards
         # the player already owns (and whether the Showman card lifts the
         # one-copy rule). None when a shop is built on its own (in a test):
@@ -1706,13 +1786,43 @@ class Shop:
             return set()
         return {card.value for card in game.cards}
 
+    def owned_actions(self):
+        """The actions the shop's action slots must not offer again.
+
+        The same rule the card slots follow (see owned_cards): an action the
+        player is already HOLDING is not offered — a second copy of an action
+        they have in hand is a wasted slot — unless the Showman card lifts the
+        one-copy rule, or the action area has room and they simply want
+        another. Actions are one-use goods, so only what is in hand counts
+        (there is no permanent ownership of an action); a shop built before the
+        game has an action area filters nothing.
+        """
+        game = self.game
+        if game is None or not hasattr(game, "actions"):
+            return set()
+        if game._has_card(Card.SHOWMAN):
+            return set()
+        return {action.value for action in game.actions}
+
     def refresh(self):
         """Reroll the shop's random selection of components and blocks.
 
         Rarer (more expensive) components show up less often, and a block's
         rarity is the product of its components' rarities, so a block made of
-        several rare parts is multiplicatively harder to find.
+        several rare parts is multiplicatively harder to find. The offers the
+        Hoard whole card is holding are put back afterwards, so a held cell is
+        the one part of the row a reroll does not touch.
         """
+        # Hoard's held offers, remembered by CELL: refresh rebuilds the whole
+        # row, so the cell is the only thing that can carry an offer across one
+        # (see slot_key). The held cells are clipped to what the player may hold
+        # right now, so a Hoard that has been sold or cut by the Card cutter
+        # releases what it was holding (see Game.shop_lock_cap). Only the HELD
+        # cells are remembered: every other cell is about to be rerolled, and
+        # carrying those over too would make the reroll a no-op.
+        self.locked = self.locked[:self._lock_cap()]
+        held_offers = {self.slot_key(item): item for item in self.items
+                       if self.slot_key(item) in self.locked}
         self.items = []
         # All shop items line up next to each other in a single horizontal row.
         col = 1
@@ -1774,9 +1884,16 @@ class Shop:
         # The catalogue is bigger than the room left in the row, so each refresh
         # shows a random SHOP_ACTION_SLOTS of them — always DISTINCT actions
         # (random.sample never repeats) — and each is rolled for its version, so
-        # a v2 action shows up on its own now and then.
+        # a v2 action shows up on its own now and then. An action the player is
+        # already holding is left out (see owned_actions), which is why the
+        # pool may come up short: the whole catalogue is the fallback, so the
+        # row always fills its two slots.
         action_col = cond_col
-        for action in random.sample(Action.ORDER, SHOP_ACTION_SLOTS):
+        held = self.owned_actions()
+        action_pool = [a for a in Action.ORDER if a not in held]
+        if len(action_pool) < SHOP_ACTION_SLOTS:
+            action_pool = list(Action.ORDER)
+        for action in random.sample(action_pool, SHOP_ACTION_SLOTS):
             self.items.append(ActionItem(action, Action.PRICES.get(action, 60),
                                          version=random_action_version(),
                                          col=action_col, row=3))
@@ -1816,6 +1933,36 @@ class Shop:
             if bcol > self.cols:
                 bcol = 1
                 brow += 1
+        # Hoard: the held cells take their offers back, unchanged — the same
+        # item at the same price, in the cell the player pinned it to. Every
+        # other cell keeps what this reroll rolled for it.
+        for index, item in enumerate(self.items):
+            kept = held_offers.get(self.slot_key(item))
+            if kept is not None:
+                self.items[index] = kept
+
+    @staticmethod
+    def slot_key(item):
+        """The CELL a shop offer sits in — what the Hoard card holds.
+
+        An offer has no identity to carry across a reroll (refresh rebuilds the
+        row from scratch), but its cell does, and the row's layout is fixed: a
+        cell always sells the same KIND of thing (the card row always holds
+        cards, the component row components), so a held cell keeps holding the
+        same sort of offer. This is also what a save stores (see
+        save_system._save_data).
+        """
+        return (item.col, item.row)
+
+    def _lock_cap(self):
+        """How many offers may be held right now (see Game.shop_lock_cap).
+
+        A shop built on its own (in a test) has no game to ask, so it holds
+        nothing.
+        """
+        if self.game is None or not hasattr(self.game, "cards"):
+            return 0
+        return self.game.shop_lock_cap()
 
     def _scorer_offer(self, scorer, col, row):
         """The shop offer for a drawn scorer.
@@ -2285,6 +2432,23 @@ class Game:
         self.rubble_run_gain = 0
         self.idea_run_gain = 0
         self.option_run_gain = 0
+        # Bonuses bought with actions (see _action_mass_production,
+        # _action_brainstorm and _action_grace).
+        #   resource_gain_mult — Mass production v1: a factor on every resource
+        #     point THIS RUN banks, set when the action is used and spent when
+        #     the run's points are committed (see _commit_resource_points).
+        #   resource_gain_bonus — Mass production v2: the same factor, but
+        #     permanent for the game (saved).
+        #   reroll_discount — Brainstorm v2: the factor every shop reroll costs
+        #     from then on (0.5 halves it; saved).
+        #   run_xmult_bonus — Grace v1: xMult added to the bank of the run the
+        #     action was used for. Read whenever a run starts (see reset_run),
+        #     so a restart or a board edit keeps it, and spent when that run
+        #     ends (see _continue_run).
+        self.resource_gain_mult = 1.0
+        self.resource_gain_bonus = 1.0
+        self.reroll_discount = 1.0
+        self.run_xmult_bonus = 0.0
         # Permanent per-component purchase counts that drive the duplicate-price
         # increase. They only ever go up — never down when a copy is sold or
         # consumed — so a component's price stays elevated once it has risen.
@@ -2331,8 +2495,9 @@ class Game:
         # touch counts (re-touches count); a Rally block subtracts its own.
         self.run_fresh_touches = 0
         # The first WATCH_BLOCK_LIMIT distinct non-role blocks freshly touched
-        # THIS RUN, in touch order. Pedestal retriggers the first
-        # PEDESTAL_RETRIGGERS of them and Watch lets only these blocks score.
+        # THIS RUN, in touch order: the list is capped at the larger of the two
+        # cards' limits, Pedestal retriggers the first PEDESTAL_RETRIGGERS of
+        # them and Watch lets only these blocks score at all.
         self.run_first_blocks = []
         # The block freshly touched right before the current one (Echo copies
         # its scorer); None until a second block has been contacted.
@@ -2362,6 +2527,14 @@ class Game:
         # and is applied where the measure is read, not here.
         self.inside_block_time = 0.0
         self.inside_locked_time = 0.0
+        # Board units a marble has BEEN IN this run (see _note_visited_cell).
+        # The Explorer card's whole payoff is the fraction of the board this
+        # set covers, and while the card is owned ui.draw_board paints these
+        # units in the title screen's own colour — so the set is the measure
+        # AND the display. Reset with the run, never saved: it is per-run state
+        # like air_time (a save is taken in the build phase, where the set is
+        # cleared by the next run anyway).
+        self.visited_cells = set()
         # Strength of the marble-box fire (0..FIRE_MAX_INTENSITY): it grows
         # while the score passes the required score and dies down after the run.
         self.fire_intensity = 0.0
@@ -2432,22 +2605,21 @@ class Game:
         # run (see _trigger_limit and TRIAL_TRIGGER_PENALTY).
         self.trial_debuffed_blocks = set()
         self.disabled_card = None
-        # The deal-breaker trial disables every owned card whose 
-        
-
-
-
-        # matches one randomly chosen condition. The affected CardItems are
-        # resolved at run start (see _apply_trial); cards.py skips them like
-        # the Card-cutter's single disabled card.
-        self.deal_broken_cards = set()
+        # The deal-breaker trial's gag: while it is on and no card has been sold
+        # yet this run, NO block scores (see _deal_breaker_gags). Selling a card
+        # lifts it for the rest of the run.
+        self.deal_breaker_released = False
         # The crumbling trial's chosen fragile blocks (see _apply_trial): a
         # random 1/4 of the placed blocks shatter like real fragile blocks.
         self.trial_fragile_blocks = set()
         # The marble-weight trial rolls heavier or lighter once per run; the
-        # factor (2.0 heavy / 0.9 light) scales only effect pushes, not the
-        # marble's fall speed.
+        # factor (2.0 heavy / 0.9 light) scales only the DRIVING effects that
+        # move the marble (accelerators, pistons, rotating shapes, conveyors,
+        # black holes, repulsors), never fall speed or a bounce.
         self.trial_marble_weight = 1.0
+        # The vertigo trial's gravity direction, rolled once per run (see
+        # _roll_trial_decision / _apply_trial); None means straight down.
+        self.trial_gravity_dir = None
         # This run's rolled trial choices (see _roll_trial_decision): every
         # random pick a trial makes is decided ONCE and replayed from here, so
         # restarting (R) or retrying a run can never reroll it. None until the
@@ -2515,6 +2687,11 @@ class Game:
         self.drawing = False
         self.erasing = False
         self.paused = False
+        # Seconds of play since the last autosave (see _tick_autosave). Reset
+        # with every game, and only ever counted while the game is being
+        # played — a save needs a slot, and the autosave skips the states it
+        # would have to roll back (a run in flight, a run awaiting RETRY).
+        self.autosave_timer = 0.0
         # The dynamic board: which (col, row) squares of the 10x15 box are
         # playable. A fresh game (see save_system.start_new_game_in_slot) locks
         # the board down to a small centered 2x3 region; a Board Unit bought in
@@ -2534,7 +2711,9 @@ class Game:
         # ScoreParticle). They are purely cosmetic and clear on a new game.
         self.score_particles = []
         # Shrinking/fading marble trail dots (see TrailParticle), cleared on
-        # each new run.
+        # each new run. A dot laid while the board's fire is burning carries
+        # that fire, so these are also the marble's fire trail: the flames stand
+        # where the marble has been rather than following its current heading.
         self.trail_particles = []
         # Compact bottom popups (achievement unlocks, collection discoveries)
         # that slide up from under the screen, hold, then slide back down.
@@ -3252,8 +3431,13 @@ class Game:
                             keep_selection = inside_grid and self.has_selected
                         if not keep_selection and self.selected_toolbox_item is not None:
                             self._clear_toolbox_selection()
-                if event.button == 3 and not self.game_over:
-                    # Right-click erases blocks; the info box is hover-driven now.
+                # Right-clicking a SHOP OPTION is the Hoard whole card's
+                # business: it holds that offer in place across rerolls (and
+                # says so when it cannot — no Hoard, or the cap is full).
+                # Anywhere else, right-click erases blocks; the info box is
+                # hover-driven now.
+                if (event.button == 3 and not self.game_over
+                        and not self._toggle_shop_lock(mouse_pos)):
                     self.erasing = True
 
             elif event.type == pygame.MOUSEBUTTONUP:
@@ -3826,6 +4010,25 @@ class Game:
             return amount
         return int(amount * COUPON_PRICE_FACTOR)
 
+    def _consume_shop_offer(self, item):
+        """Take a bought card or action off the shop's shelf for this refresh.
+
+        A bought card moves into the card area and a bought action into the
+        action area, so leaving the offer on the shelf showed the same purchase
+        twice — and let the same action be bought again. The offer is removed
+        exactly like a Slim pickings removal (see _trim_shop_for_trial): the
+        slot simply stands empty until the next refresh. Components and blocks
+        are NOT removed: they are repeatable buys whose price rises with every
+        purchase (see _buy_price), so their offer is meant to stay.
+        """
+        if item in self.shop.items:
+            self.shop.items.remove(item)
+        # A bought offer cannot be held: its cell stands empty until the next
+        # refresh, so the hold it had (if any) is released with it.
+        slot = self.shop.slot_key(item)
+        if slot in self.shop.locked:
+            self.shop.locked.remove(slot)
+
     def _buy_shop_item(self, item):
         price = self._buy_price(item)
         if self.cash < price:
@@ -3851,6 +4054,7 @@ class Game:
             self.cards.append(make_card_item(value))
             self.cash -= price
             self._discover_owned_card(value)
+            self._consume_shop_offer(item)
             self._set_shop_message(f"Bought card: {Card.name(value)}")
             sounds.play_coin()
             return
@@ -3868,6 +4072,7 @@ class Game:
             self.cards.append(item)
             self.cash -= price
             self._discover_owned_card(item.value)
+            self._consume_shop_offer(item)
             self._set_shop_message(f"Bought card: {item.name}")
             sounds.play_coin()
             return
@@ -3880,6 +4085,7 @@ class Game:
             self.actions.append(item)
             self.cash -= price
             self._discover_action(item.value)
+            self._consume_shop_offer(item)
             self._set_shop_message(f"Bought action: {self._item_name(item)}")
             sounds.play_coin()
             return
@@ -4019,6 +4225,24 @@ class Game:
         trial is in effect, whatever id the game happens to be holding.
         """
         return self.current_trial if self.trials_enabled else None
+
+    @property
+    def tile_source(self):
+        """(class, id) of the tile art the screen and panels wear this run.
+
+        The final boss of the 24th run REPLACES the trial in the run's display
+        (see ui.draw_trial_box), so that run is covered in — and tinted by — the
+        boss's own tile, and the boss's collection entry wears it too; every
+        other run wears its trial's. (None, None) when neither applies: a run
+        with no trial, or one whose trial was bought away. The EFFECTS side
+        still reads active_trial — a boss run plays its rolled trial's rules as
+        well, and only the art is the boss's.
+        """
+        if self.final_boss is not None:
+            return (FinalBoss, self.final_boss)
+        if self.active_trial is not None:
+            return (Trial, self.active_trial)
+        return (None, None)
 
     def _concert_boosts(self, item):
         """True when the Concert whole card's extra trigger applies to a block.
@@ -4161,19 +4385,16 @@ class Game:
     def _card_disabled(self, card):
         """True when a card is disabled for this run.
 
-        The Card cutter trial disables one random owned card and the Deal
-        breaker trial disables every card built on one random match group (see
-        _apply_trial). A disabled card is treated as if it were not owned at
-        all, so its collision effect (cards.py) and every passive card effect it
-        drives (_has_card) stop for the run. The state is cleared when the run
-        advances (see _continue_run), so building, buying and selling between
-        runs are never affected.
+        The Card cutter trial disables one random owned card (see _apply_trial).
+        A disabled card is treated as if it were not owned at all, so its
+        collision effect (cards.py) and every passive card effect it drives
+        (_has_card) stop for the run. The state is cleared when the run advances
+        (see _continue_run), so building, buying and selling between runs are
+        never affected.
         """
         if card is None:
             return False
-        if card is self.disabled_card:
-            return True
-        return card in getattr(self, "deal_broken_cards", ())
+        return card is self.disabled_card
 
     def _owns_card(self, value):
         """True when the player owns a card of this value, disabled or not.
@@ -4187,13 +4408,33 @@ class Game:
     def _has_card(self, value):
         """True when an owned card's EFFECT applies right now (e.g. Showman).
 
-        A card disabled for the run (Card cutter / Deal breaker) counts as not
+        A card disabled for the run (Card cutter) counts as not
         owned, so every passive whole-card effect it drives — Coupon's discount,
-        Market's resale, Inferno's exponent, Watch's auto-finish, ... — stops
+        Market's resale, Inferno's exponent, Watch's time factor, ... — stops
         with it. Use _owns_card when the question is ownership, not effect.
         """
         return any(c.value == value and not self._card_disabled(c)
                    for c in self.cards)
+
+    def _card_count(self, value):
+        """How many owned copies of a card currently APPLY (see _has_card).
+
+        _has_card answers "is this card's effect on at all?"; the Hoard whole
+        card needs the COUNT instead, because each copy of it holds one more
+        shop offer in place. A copy the run's trial has cut (Card cutter) is not
+        counted, exactly as it is not counted as having the effect at all.
+        """
+        return sum(1 for c in self.cards
+                   if c.value == value and not self._card_disabled(c))
+
+    def shop_lock_cap(self):
+        """How many shop offers the player may hold across rerolls.
+
+        The Hoard whole card holds one offer per copy — none at all without it
+        — so the cap is simply the card's own count: a second Hoard pins a
+        second offer. See Game._toggle_shop_lock and Shop.refresh.
+        """
+        return self._card_count(Card.HOARD)
 
     @property
     def max_cards(self):
@@ -4229,7 +4470,15 @@ class Game:
         here), and the sale message says so. Every other card just keeps its
         sale message, so a new whole card only has to declare its own rule in
         this one place.
+
+        A sale is also what releases the Deal breaker trial's gag, so the
+        release is registered here — this is the one place a card leaves by
+        SALE (see _deal_breaker_gags).
         """
+        if (self.active_trial == Trial.DEAL_BREAKER
+                and not self.deal_breaker_released):
+            self.deal_breaker_released = True
+            message += " — Deal breaker paid off: your blocks score again"
         if card.value != Card.ESSENCE:
             return message
         granted = self._grant_permanent_tokens(ESSENCE_TOKENS)
@@ -4338,6 +4587,14 @@ class Game:
         applied = False
         if action.value == Action.CLEANSWEEP:
             applied = self._action_cleansweep(action)
+        elif action.value == Action.EXPANSION:
+            applied = self._action_expansion(action)
+        elif action.value == Action.BRAINSTORM:
+            applied = self._action_brainstorm(action)
+        elif action.value == Action.MASS_PRODUCTION:
+            applied = self._action_mass_production(action)
+        elif action.value == Action.GRACE:
+            applied = self._action_grace(action)
         elif action.value == Action.DEATH:
             applied = self._action_death(action, subject)
         elif action.value == Action.RECOGNITION:
@@ -4388,6 +4645,102 @@ class Game:
             self._set_shop_message(f"Cleansweep drew {cards_text}")
         if drawn:
             sounds.play_coin()
+        return True
+
+    def _action_expansion(self, action):
+        """Expansion opens board squares: 4 of them (v1) or the whole board (v2).
+
+        The squares come from the same frontier a Drill trigger or the
+        Conquistador card expands into (see _grant_locked_units), so the board
+        grows the way it always does — one edge-adjacent ring at a time. v2
+        sweeps the whole board: each pass unlocks the current frontier, and the
+        loop runs until a pass unlocks nothing, which is what takes it past the
+        first ring. Refused (and kept) when nothing is left to unlock, so the
+        action is never wasted on a finished board.
+        """
+        if action.version < 2:
+            if not self._grant_locked_units(EXPANSION_SQUARES):
+                self._set_shop_message("The board is already fully unlocked")
+                return False
+            return True
+        total = 0
+        while True:
+            granted = self._grant_locked_units(GRID_WIDTH * GRID_HEIGHT,
+                                               announce=False)
+            if not granted:
+                break
+            total += granted
+        if not total:
+            self._set_shop_message("The board is already fully unlocked")
+            return False
+        plural = "s" if total != 1 else ""
+        self._set_shop_message(
+            f"{action.name} unlocked the whole board ({total} square{plural})")
+        sounds.play_coin()
+        return True
+
+    def _action_brainstorm(self, action):
+        """Brainstorm buys shop luck: 2 free rerolls (v1) or half-price ones (v2).
+
+        The free rerolls go straight into the same bank Fresh fills, and they
+        are NOT counted in free_rerolls_run_gain: that counter is what a retry
+        claws back (rerolls a RUN granted), while these were bought and are the
+        player's to keep. v2 lowers the price of every future reroll for the
+        rest of the game (see refresh_cost), which is set rather than
+        multiplied so a second Brainstorm cannot stack it to free.
+        """
+        if action.version < 2:
+            self.free_rerolls += BRAINSTORM_REROLLS
+            left = (f" ({self.free_rerolls} banked)" if self.free_rerolls
+                    else "")
+            self._set_shop_message(
+                f"{action.name} banked {BRAINSTORM_REROLLS} free rerolls{left}")
+            return True
+        self.reroll_discount = BRAINSTORM_REROLL_FACTOR
+        self._set_shop_message(
+            f"{action.name} halved the reroll price (now ${self.refresh_cost()})")
+        return True
+
+    def _action_mass_production(self, action):
+        """Mass production multiplies resource points: x3 this run (v1), x2 for good (v2).
+
+        The run factor is applied where a resource point is BANKED (see
+        _add_resource_points), so every Shreds/Rubble/Ideas/Picky trigger of the
+        run pays the multiplied fraction, and it is spent when that run's points
+        are committed. The permanent factor is set, not multiplied, so a second
+        Mass production cannot compound it into a runaway.
+        """
+        if action.version < 2:
+            self.resource_gain_mult = MASS_PRODUCTION_RUN_FACTOR
+            self._set_shop_message(
+                f"{action.name} tripled this run's resource points")
+            return True
+        self.resource_gain_bonus = MASS_PRODUCTION_FOREVER_FACTOR
+        self._set_shop_message(
+            f"{action.name} doubled resource points for the rest of the game")
+        return True
+
+    def _action_grace(self, action):
+        """Grace makes a run easier: +1 xMult (v1) or a required score of 0 (v2).
+
+        v1 banks xMult the way a Sharp block does, plus one whole point rather
+        than a factor ("+1 xMult": a x2.0 bank becomes x3.0, not x4.0), and the
+        bonus is recorded on the game so that the run it was used for keeps it
+        through a restart, a board edit or a retry — it is spent when that run
+        ends (see _continue_run). v2 drops the run's score target to 0, which
+        the run's own completion check clears whatever it scores
+        (score_total >= 0).
+        """
+        if action.version < 2:
+            self.run_xmult_bonus += GRACE_RUN_XMULT
+            self.run_xmult_pending += GRACE_RUN_XMULT
+            self._set_shop_message(
+                f"{action.name} added +{GRACE_RUN_XMULT:g} xMult to this run "
+                f"(x{self.run_xmult_pending:g} banked)")
+            return True
+        self.required_score = 0
+        self._set_shop_message(
+            f"{action.name}: this run needs a score of 0 — it cannot be failed")
         return True
 
     def _action_death(self, action, subject):
@@ -4983,6 +5336,54 @@ class Game:
         return (f" — {names} already upgraded "
                 f"(a free ${self._inflated(ACTION_UPGRADE_COST)})")
 
+    def _clip_shop_locks(self):
+        """Release held shop offers past what the player can hold right now.
+
+        The cap is the Hoard card count, so it falls when a Hoard is sold or
+        cut by the Card cutter; the offer pinned LAST gives way first, so what
+        the player pinned first is what stays held.
+        """
+        cap = self.shop_lock_cap()
+        if len(self.shop.locked) > cap:
+            del self.shop.locked[cap:]
+
+    def _toggle_shop_lock(self, pos):
+        """Hoard: hold (or release) the shop offer under the mouse.
+
+        Returns True when the click was this card's business — the offer is now
+        held, or released, or the player is told why it cannot be — so that the
+        caller does not fall through to the board's own right-click (which
+        erases blocks). A right-click on an EMPTY shop cell is not this card's
+        business at all, so it stays the board's.
+        """
+        item = self.shop.item_at(pos)
+        if item is None:
+            return False
+        self._clip_shop_locks()
+        slot = self.shop.slot_key(item)
+        if slot in self.shop.locked:
+            self.shop.locked.remove(slot)
+            self._set_shop_message(
+                f"Released {item.name} — it will change on the next reroll")
+            return True
+        cap = self.shop_lock_cap()
+        if cap <= 0:
+            self._set_shop_message(
+                "Hoard holds a shop offer in place through rerolls — "
+                "you do not own it")
+            return True
+        if len(self.shop.locked) >= cap:
+            self._set_shop_message(
+                f"Hoard is already holding {cap} offer"
+                f"{'' if cap == 1 else 's'} — release one first")
+            return True
+        self.shop.locked.append(slot)
+        self._set_shop_message(
+            f"Holding {item.name} ({len(self.shop.locked)}/{cap}) — it stays "
+            "on the shelf through rerolls")
+        sounds.play_mech()
+        return True
+
     def _refresh_shop(self):
         """Reroll the shop — free while a Fresh reroll is banked, else for cash."""
         if self.free_rerolls > 0:
@@ -4993,7 +5394,7 @@ class Game:
             self._set_shop_message(f"Free reroll{left}{self._tesseract_reroll_note()}"
                                    f"{self._v2_shelf_note()}")
             return
-        cost = self._inflated(SHOP_REFRESH_COST)
+        cost = self.refresh_cost()
         if self.cash < cost:
             self._set_shop_message(f"Need ${cost} to refresh the shop")
             return
@@ -5003,6 +5404,17 @@ class Game:
         self._set_shop_message(f"Refreshed shop (${cost})"
                                f"{self._tesseract_reroll_note()}"
                                f"{self._v2_shelf_note()}")
+
+    def refresh_cost(self):
+        """The cash a shop reroll costs right now.
+
+        The inflation trial inflates it (see _inflated) and Brainstorm's v2
+        halves it (see reroll_discount), rounded to the nearer dollar and never
+        below $1. The shop's REFRESH button reads this too, so the price on the
+        button and the price charged can never drift apart.
+        """
+        cost = self._inflated(SHOP_REFRESH_COST) * self.reroll_discount
+        return max(1, int(cost + 0.5))
 
     def _tesseract_reroll_note(self):
         """Grow the Tesseract bonus for this reroll; a note for the message.
@@ -5032,8 +5444,13 @@ class Game:
         """
         if self.active_trial != Trial.SLIM_PICKINGS:
             return
-        if len(self.shop.items) > 2:
-            for item in random.sample(self.shop.items, 2):
+        # A held offer is left alone: Hoard's whole promise is that the offer it
+        # holds stays put, and this trim runs right after every reroll — the
+        # exact moment a held offer would otherwise vanish.
+        free = [item for item in self.shop.items
+                if self.shop.slot_key(item) not in self.shop.locked]
+        if len(free) > 2:
+            for item in random.sample(free, 2):
                 self.shop.items.remove(item)
 
     def _add_resource_points(self, scorer, amount=1):
@@ -5050,13 +5467,23 @@ class Game:
         grants its reroll immediately, so neither is handled here.)
         """
         if scorer == Scorer.SHREDS:
-            self.shred_run_gain += amount
+            self.shred_run_gain += amount * self.resource_point_multiplier()
         elif scorer == Scorer.RUBBLE:
-            self.rubble_run_gain += amount
+            self.rubble_run_gain += amount * self.resource_point_multiplier()
         elif scorer == Scorer.IDEAS:
-            self.idea_run_gain += amount
+            self.idea_run_gain += amount * self.resource_point_multiplier()
         elif scorer == Scorer.PICKY:
-            self.option_run_gain += amount
+            self.option_run_gain += amount * self.resource_point_multiplier()
+
+    def resource_point_multiplier(self):
+        """How much a banked resource point is worth right now.
+
+        The product of Mass production's two bonuses: the factor bought for
+        THIS RUN (v1, spent when the run's points are committed) and the
+        permanent one (v2). Neither is applied to anything else — the points
+        are what their scorers bank, multiplied here (see _add_resource_points).
+        """
+        return self.resource_gain_mult * self.resource_gain_bonus
 
     def _commit_resource_points(self):
         """Move this run's resource points into the bank and convert them.
@@ -5071,6 +5498,10 @@ class Game:
         cost = self._resource_cost()
         self.shred_points += self.shred_run_gain
         self.shred_run_gain = 0
+        # Mass production's run factor belongs to the run that just finished:
+        # the points it tripled have been folded in above (and the permanent
+        # factor, if any, stays).
+        self.resource_gain_mult = 1.0
         while self.shred_points >= cost and self._grant_random_card():
             self.shred_points -= cost
         self.rubble_points += self.rubble_run_gain
@@ -5601,6 +6032,9 @@ class Game:
     def _action_hint(self, item, source):
         """A short hint telling the player how to act on the hovered item."""
         if source == "shop":
+            if self._has_card(Card.HOARD):
+                return ("Left-click to buy | Right-click to hold it in place "
+                        "across rerolls")
             return "Left-click to buy"
         if source == "cards":
             return "Click another card to swap order | B to sell"
@@ -5681,10 +6115,49 @@ class Game:
         """
         return not pygame.Rect(SHOP_COORDS).collidepoint(pygame.mouse.get_pos())
 
+    def _tick_autosave(self, dt):
+        """Autosave to the current slot every AUTOSAVE_INTERVAL seconds.
+
+        The game otherwise writes a save only when the player asks (P) or
+        quits, so a long session — and a crash — can cost everything since the
+        last one. The clock runs while the game is being PLAYED: update()
+        returns early on the title screen and the full-screen tabs, and a game
+        with no slot chosen (the title-screen game itself, a test's bare Game)
+        is never written anywhere.
+
+        The save is SILENT: the autosave is not something the player did, and a
+        message every 30 seconds would sit over the shop. It also only happens
+        while the game is being BUILT — a save of a run in flight, or of a
+        finished run awaiting RETRY/CONTINUE, would roll that run back, because
+        every save path puts the game into its build state first (see
+        _retry_run). An interval that comes due mid-run therefore keeps its
+        clock and saves at the next build phase, rather than restarting it.
+        """
+        if self.save_slot is None:
+            return
+        self.autosave_timer += dt
+        if self.autosave_timer < AUTOSAVE_INTERVAL:
+            return
+        if not self._autosave_ready():
+            return
+        self.autosave_timer = 0.0
+        self._retry_run()
+        save_system.save_game(self, announce=False)
+
+    def _autosave_ready(self):
+        """True when the game is in a state an autosave may capture.
+
+        The build phase between runs: a run in flight is being played, and a
+        finished run awaiting RETRY/CONTINUE holds a result the player has not
+        committed yet — a timer must never take either away.
+        """
+        return not self.run_active and not self.awaiting_after_run
+
     def update(self):
         if (self.title_screen or self.achievements_open or self.marble_selecting
                 or self.upgrades_open or self.collection_open):
             return
+        self._tick_autosave(DT)
         # Achievement unlock conditions are checked every frame while playing.
         self._check_achievements()
         # Bottom popups (achievement unlocks, collection discoveries) animate
@@ -5706,14 +6179,9 @@ class Game:
                 self.shop_message = ""
         if not self.paused and self.run_active:
             self.run_time += DT
-            # The Watch whole card ends the run exactly at the run's ideal
-            # finish time: every marble is marked finished, so the normal
-            # end-of-run path (finish cards, cash award, results) runs this
-            # same frame. Watch also limits which blocks score — see
-            # _watch_blocks_out_of_play.
-            if self._has_card(Card.WATCH) and self.run_time >= TIME_IDEAL:
-                for marble in self.marbles:
-                    marble.finished = True
+            # The cable cars slide before the frame's block list is built, so
+            # the marbles meet each gondola where it has just moved to.
+            self._update_gondolas(DT)
             # Locked board squares act as solid walls this frame (they confine
             # the marbles to the unlocked region but never score or count as
             # block contacts).
@@ -5740,7 +6208,17 @@ class Game:
                 # spends inside a block, and much more for a second inside a
                 # locked board unit, so accumulate both as the run plays.
                 self._count_inside_time(marble)
-                # Leave a shrinking trail dot wherever the marble has moved.
+                # Record the board unit the marble is in: the Explorer card's
+                # xMult is the fraction of the board those units cover, and they
+                # are drawn salmon while it is owned (see ui.draw_board).
+                self._note_visited_cell(marble)
+                # Leave a shrinking trail dot wherever the marble has moved. A
+                # dot laid while the marble-box fire is burning carries that
+                # fire — and the direction the marble is moving NOW — so the
+                # marble's fire trail IS its own trail particles: each one burns
+                # where the marble was and keeps pointing the way it was laid,
+                # which is what stops the fire from swinging about when the
+                # marble bounces off something (see ui.TrailParticle).
                 moved = marble.distance - marble._last_trail_distance
                 marble._last_trail_distance = marble.distance
                 marble._trail_accum += moved
@@ -5748,7 +6226,9 @@ class Game:
                     marble._trail_accum -= TRAIL_SPACING
                     self.trail_particles.append(TrailParticle(
                         marble.position[0], marble.position[1],
-                        max(1.5, marble.radius * TRAIL_RADIUS_SCALE), marble.color))
+                        max(1.5, marble.radius * TRAIL_RADIUS_SCALE),
+                        marble.color, fire=np.log(7*self.fire_intensity + 1),
+                        velocity=marble.velocity))
             # Split marbles share the board: separate any that overlap, so a
             # splitter's copy can collide with the marble it came from (a
             # phasing marble passes through the others too).
@@ -5847,12 +6327,25 @@ class Game:
         marble.finish_on_border = trial == Trial.ALL_FINISHES
         # The bouncy-castle trial makes every solid block reflect the
         # marble like a bouncy block (physics.resolve_collision reads it).
-        # The marble-weight trial scales only effect pushes by
-        # 1/effect_mass_mult (2.0 heavy / 0.5 light, rolled in _apply_trial);
-        # fall speed reads marble.mass and stays normal.
+        # The marble-weight trial scales how hard the DRIVING effects push the
+        # marble (accelerators, pistons, rotating shapes, conveyors, black
+        # holes, repulsors) by 1/effect_mass_mult (rolled in _apply_trial);
+        # gravity, the marble's own bounce and every other move stay normal.
         marble.bouncy_castle = trial == Trial.BOUNCY_CASTLE
         marble.effect_mass_mult = (self.trial_marble_weight
                                    if trial == Trial.MARBLE_WEIGHT else 1.0)
+        # The phantom trial starts the marble INSIDE the phase window a phase
+        # block grants, so it passes through every block for the first second;
+        # the elephant trial starts it at twice its size, which is what the
+        # one-cell gaps (and the Colossus scorer) care about.
+        marble.phase_timer = (PHANTOM_PHASE_SECONDS if trial == Trial.PHANTOM
+                              else 0.0)
+        marble.radius = MARBLE_RADIUS * 2 if trial == Trial.ELEPHANT else MARBLE_RADIUS
+        # The vertigo trial pulls in the direction the run rolled (see
+        # _apply_trial); every other trial — and no trial at all — leaves the
+        # marble's gravity pointing straight down.
+        marble.base_gravity_dir = (self.trial_gravity_dir
+                                   if trial == Trial.VERTIGO else None)
         # The save's marble type drives the marble's behavior and look: the
         # 8 ball retriggers block scorers, the rubber ball bounces (and
         # wears two random half-colors), the ping-pong ball is very light.
@@ -5951,6 +6444,9 @@ class Game:
         self._reset_wrecking_run_gain()
         # Fresh run: no air time has accumulated yet (plane).
         self.air_time = 0.0
+        # Fresh run: no board unit has been visited yet (Explorer). The marble
+        # records the unit it is in every frame (see _note_visited_cell).
+        self.visited_cells = set()
         # Fresh run: no Drill-scorer locked squares earned yet.
         self.drill_run_units = 0
         # Fresh run: no blocks destroyed yet (Undertaker) and no Debt block has
@@ -5961,8 +6457,9 @@ class Game:
         # marbles below are newly built, so their motion-history deques start
         # empty too — a new run can never rewind into the last one's past.
         self.procrastination_used = False
-        # Fresh run: no Rally touches, no previous-contact block for Echo, and
-        # no primed Bomb blocks yet.
+        # Fresh run: no Rally touches, no previous-contact block for Echo, no
+        # primed Bomb blocks yet, and no opening blocks remembered for
+        # Pedestal/Watch.
         self.run_fresh_touches = 0
         self.run_first_blocks = []
         self._prev_contact_block = None
@@ -5970,17 +6467,16 @@ class Game:
         # Fresh run: no xMult banked yet. Every xMult the run earns (blocks,
         # cards and Spirit tokens alike) is banked here and multiplied into the
         # multiplier once, as the run settles (see _apply_xmult /
-        # _flush_run_xmult).
-        self.run_xmult_pending = 1.0
+        # _flush_run_xmult). Grace's v1 bonus is part of the run's bank from the
+        # first frame (see run_xmult_bonus), so a run started after the action
+        # carries it too.
+        self.run_xmult_pending = 1.0 + self.run_xmult_bonus
         # Fresh run: no pipe streak in progress and no completed streaks yet.
         # A streak is the run of FRESH contacts that are PIPE-GROUP blocks (see
         # _count_pipe_streak): its completed groups of three are what the
         # Fountain whole card pays +0.25 xMult for.
         self.pipe_streak_blocks = []
         self.pipe_streak_run_units = 0
-        # Fresh run: nothing banked from the last run's xMult either (see
-        # _apply_xmult).
-        self.run_xmult_pending = 1.0
         # Fresh run: the type bonus counts only the types touched THIS run.
         self.touched_shapes = set()
         self.touched_effects = set()
@@ -6007,6 +6503,10 @@ class Game:
         # blocks that shattered are rebuilt to their original shape.
         for block in self.grid.values():
             block.triggers_left = self._trigger_limit(block)
+            # A cable car starts every run back on its own cell, facing the way
+            # its arrow points (see _reset_gondola).
+            if block.has_effect(Effect.GONDOLA):
+                self._reset_gondola(block)
             # A portal pair's travel budget refills each run (see
             # PORTAL_MAX_ACTIVATIONS): 100 travels are allowed per run.
             if block.has_effect(Effect.PORTAL):
@@ -6212,7 +6712,7 @@ class Game:
         The picks are: which cells Hands tied debuffs, which card slot Card
         cutter disables, the order Shuffled leaves the cards in, which cells
         Crumbling makes fragile, whether Marble weight is heavy or light, and
-        which condition Deal breaker breaks. A trial that makes no random pick
+        which way Vertigo's gravity pulls. A trial that makes no random pick
         (the rest of them) returns just its own id.
         """
         decision = {"trial": self.current_trial}
@@ -6248,16 +6748,11 @@ class Game:
             # stronger pushes) for the whole run. Only effect pushes change;
             # fall speed is untouched.
             decision["weight"] = random.choice((2.0, 0.9))
-        elif self.current_trial == Trial.DEAL_BREAKER:
-            # Deal breaker disables every card of one shape group or effect, so
-            # the picked group is one the player actually holds a card of —
-            # otherwise the trial would not bite. Cards that are not built on a
-            # match group (Coupon, Showman, ...) are never affected.
-            groups = {match_group_card_meta(card.value)[0]
-                      for card in self.cards
-                      if match_group_card_meta(card.value) is not None}
-            if groups:
-                decision["group"] = random.choice(sorted(groups, key=MATCH_GROUPS.index))
+        elif self.current_trial == Trial.VERTIGO:
+            # Which way gravity pulls for the whole run: an INDEX into
+            # VERTIGO_DIRECTIONS (every direction but straight down), so the
+            # pick rides through a save as a plain number.
+            decision["gravity"] = random.randrange(len(VERTIGO_DIRECTIONS))
         return decision
 
     def _apply_shuffled_order(self, order):
@@ -6289,16 +6784,20 @@ class Game:
         Hands tied debuffs a random 1/4 of the blocks in the marble box: each
         of them scores TRIAL_TRIGGER_PENALTY fewer times this run. Card cutter
         disables a random owned card, whose score effect is skipped for the run.
-        Shuffled puts the card area into one decided order. Crumbling marks a
-        random 1/4 of the placed blocks as fragile (they shatter like real
-        fragile blocks once a marble touches and leaves, then rebuild next
-        run). Deal breaker disables every owned card built on one decided match
-        group (a shape group or an effect). Marble weight uses a decided
-        heavier-or-lighter effect-push factor.
+        Shuffled shuffles the card area into one decided order AND turns every
+        owned card face over (see CardItem.flipped). Crumbling marks a random
+        1/4 of the placed blocks as fragile (they shatter like real fragile
+        blocks once a marble touches and leaves, then rebuild next run). Marble
+        weight uses a decided heavier-or-lighter drive-push factor (read when
+        each marble is released). Vertigo sets the direction the run's gravity
+        pulls in. Deal breaker starts the run with the board GAGGED: no block
+        scores until a card is sold (see _deal_breaker_gags).
 
-        Slim pickings has no branch here: it acts on the SHOP rather than on
-        the board or the card area, so it is applied wherever a shop is built
-        or met instead (see _trim_shop_for_trial).
+        Three trials have nothing to apply here: Slim pickings acts on the SHOP
+        rather than on the board or the card area, so it is applied wherever a
+        shop is built or met instead (see _trim_shop_for_trial), and Phantom and
+        Elephant are applied to each marble as it is released (see
+        _release_start_marble).
 
         The trial state is cleared again when the run advances (see
         _continue_run), so the NEXT run decides its own picks.
@@ -6310,9 +6809,17 @@ class Game:
             decision = self.trial_decision = self._roll_trial_decision()
         self.trial_debuffed_blocks = set()
         self.disabled_card = None
-        self.deal_broken_cards = set()
         # A non-MARBLE_WEIGHT trial keeps the normal 1.0 factor.
         self.trial_marble_weight = 1.0
+        # The deal-breaker trial gags every block scorer until a card is sold
+        # (see _deal_breaker_gags / _card_sold_message); no other trial gags.
+        self.deal_breaker_released = False
+        # Only a Vertigo run redraws gravity (see _release_start_marble).
+        self.trial_gravity_dir = None
+        # Shuffled turns the player's cards face over for the run; every other
+        # trial (and none at all) leaves them the right way up.
+        for card in self.cards:
+            card.flipped = False
         # Blocks chosen by an earlier crumbling run are un-marked first so the
         # fragility never lingers into a trial that isn't crumbling.
         for block in self.grid.values():
@@ -6335,6 +6842,12 @@ class Game:
                 self.disabled_card = self.cards[index]
         elif self.current_trial == Trial.SHUFFLED:
             self._apply_shuffled_order(decision.get("order"))
+            # "Flips and shuffles your cards": the shuffle is the decided order
+            # above, and the FLIP is a real one — every owned card is drawn face
+            # over (upside down) for the run. It is a handicap, not a change to
+            # what a card does: a flipped card still pays exactly what it paid.
+            for card in self.cards:
+                card.flipped = True
         elif self.current_trial == Trial.CRUMBLING:
             for cell in decision.get("cells", ()):
                 block = self.grid.get(cell)
@@ -6343,14 +6856,10 @@ class Game:
                     self.trial_fragile_blocks.add(block)
         elif self.current_trial == Trial.MARBLE_WEIGHT:
             self.trial_marble_weight = decision.get("weight", 1.0)
-        elif self.current_trial == Trial.DEAL_BREAKER:
-            # Disable every owned card built on the decided match group.
-            chosen = decision.get("group")
-            if chosen is not None:
-                self.deal_broken_cards = {
-                    card for card in self.cards
-                    if match_group_card_meta(card.value) is not None
-                    and match_group_card_meta(card.value)[0] == chosen}
+        elif self.current_trial == Trial.VERTIGO:
+            index = min(int(decision.get("gravity", 0)),
+                        len(VERTIGO_DIRECTIONS) - 1)
+            self.trial_gravity_dir = VERTIGO_DIRECTIONS[index]
 
     def _apply_cards(self):
         """Apply the start-of-run card effects.
@@ -6363,7 +6872,7 @@ class Game:
         cards.apply_cards(self)
 
     def _apply_cards_on_finish(self):
-        """Apply the cards that fire when the run ends (Explorer's distance
+        """Apply the cards that fire when the run ends (Explorer's visited-units
         xMult, Astronaut's black-hole mult, Plane's air-time chips, Skater's
         slippery xMult) — see cards.apply_cards_on_finish."""
         cards.apply_cards_on_finish(self)
@@ -6444,7 +6953,10 @@ class Game:
 
         Returns (time_good, dist_good, uniq_good, unique_types). Time is a
         reciprocal (fast runs are best; a zero run time counts as fastest),
-        distance and uniqueness grow with their value.
+        distance and uniqueness grow with their value. The three are the whole
+        of the total score's exponent (see _compute_total_score), so the cards
+        that rewrite them are rewriting the run's final payoff: Watch pins time
+        at its best, Infinity un-caps distance and uniqueness.
         """
         total_distance = sum(getattr(m, "distance", 0.0) for m in self.marbles)
         # The uniqueness score counts every distinct type touched — EXCEPT under
@@ -6472,14 +6984,29 @@ class Game:
         # time_good = 1/(((self.run_time - ideal_time) / TIME_SCALE) * ((self.run_time - ideal_time) / TIME_SCALE) + 1)
         # time_good -= (scale_sq / (scale_sq + ideal_sq)) * 1/(self.run_time * self.run_time + 1) # modulator: run_time = 0 -> time_good = 0
         time_good = (1 if 0 <= self.run_time <= ideal_time else -((self.run_time - ideal_time) ** 2) / TIME_SCALE + 1)
-        dist_good = np.atan(total_distance / DISTANCE_SCALE) * 2 / np.pi
-        uniq_good = np.atan(unique_types / UNIQUE_SCALE) * 2 / np.pi
+        # The Watch whole card makes the time factor always the best it can be:
+        # the run's LENGTH never costs score again (it still earns no more than
+        # the ceiling). Without it the factor is a quadratic penalty on a long
+        # run, so this is the card that makes a slow, long build legal.
+        if self._has_card(Card.WATCH):
+            time_good = TIME_GOOD_MAX
+        # The Infinity whole card swaps the two saturating curves for straight
+        # lines pinned to them at INFINITY_ANCHOR — traded for a slower start in
+        # exchange for never levelling off (see infinity_factor).
+        if self._has_card(Card.INFINITY):
+            dist_good = infinity_factor(total_distance, DISTANCE_SCALE)
+            uniq_good = infinity_factor(unique_types, UNIQUE_SCALE)
+        else:
+            dist_good = np.atan(total_distance / DISTANCE_SCALE) * 2 / np.pi
+            uniq_good = np.atan(unique_types / UNIQUE_SCALE) * 2 / np.pi
         return time_good, dist_good, uniq_good, unique_types
 
     def _compute_total_score(self):
         """Total score: (chips * mult) raised to a linear function of time,
         distance, and uniqueness. time_good max is 0.5, other two max are 1.
-        Exp ranges from 0 to 2.
+        Exp ranges from 0 to 2 — except for the two cards that rewrite it: the
+        Inferno card raises it (see INFERNO_EXPONENT_BONUS) and Infinity lifts
+        the 1-point ceiling off distance and uniqueness entirely.
         """
         base = max(self.score_chips * self.score_mult, 1)
         time_good, dist_good, uniq_good, _ = self._score_factors()
@@ -6523,6 +7050,214 @@ class Game:
             self.fire_intensity = max(0.0, self.fire_intensity - FIRE_DECAY_SPEED * dt)
         if self.fire_intensity < 0.01:
             self.fire_intensity = 0.0
+
+    def _brain_loop_roll(self, block):
+        """Brain Loop: a fresh touch of a Sticky block may hand over an action.
+
+        A BRAIN_LOOP_ACTION_CHANCE roll per fresh contact with a block carrying
+        the Sticky effect, taken from the RUN's own RNG (Game.run_rng) so a
+        replayed run makes the same rolls it made before — the rule every other
+        random output follows (see Glitch, the 8 ball's retrigger). The ACTION
+        itself is drawn like any other grant (see _grant_random_action, which
+        also refuses it, with a message, when the action area is full), so a
+        full area never silently swallows the roll. Read through _has_card, so
+        the Card cutter silences the card like any other passive.
+        """
+        if not self._has_card(Card.BRAIN_LOOP):
+            return
+        if not block.has_effect(Effect.STICKY):
+            return
+        if self.run_rng.random() < BRAIN_LOOP_ACTION_CHANCE:
+            self._grant_random_action()
+
+    def _gondola_axis(self, block):
+        """The (axis, sign) a cable car slides on, read from its arrow.
+
+        The effect's whole rule is "up and down, or left to right, depending on
+        the block's angle": the block's own arrow (the vector the Accelerator
+        pushes along and the Gravity block pulls along, see
+        Block._get_angle_vector, which includes a Rotate block's spin) decides
+        which axis the car travels on — the longer of its two components — and
+        which way it sets off first. "x" means left/right and "y" up/down.
+        """
+        vector = block._get_angle_vector()
+        dx, dy = float(vector[0]), float(vector[1])
+        if abs(dx) >= abs(dy):
+            return "x", 1 if dx >= 0 else -1
+        return "y", 1 if dy >= 0 else -1
+
+    def _gondola_solids(self, block):
+        """The blocks a cable car must not slide into.
+
+        Every placed block plus, while the board is locked, the solid walls
+        covering the locked squares (see _simulation_blocks) — which is what
+        makes a locked square turn a gondola around without any extra rule.
+        Only the blocks that are physically THERE stop it: a Shape.NONE field
+        and an opened Lock are pass-through for the marble, so the car sails
+        through them too. Two gondolas stop each other like any two blocks.
+        """
+        solids = []
+        for other in self._simulation_blocks():
+            if other is block or other.shape == Shape.NONE:
+                continue
+            if other.shape == Shape.LOCK and not other.locked:
+                continue
+            solids.append(other)
+        return solids
+
+    def _update_gondolas(self, dt):
+        """Slide every cable car one frame along its lane (see Effect.GONDOLA).
+
+        Called once a frame while a run is in play — not once per marble, which
+        would make the cars faster the more marbles a run has — and before the
+        frame's block list is built, so the marbles meet each car where it has
+        just moved to. Their travel is per-run state, undone by _reset_gondola.
+        """
+        gondolas = [block for block in self.grid.values()
+                    if block.has_effect(Effect.GONDOLA)]
+        if not gondolas:
+            return
+        for block in gondolas:
+            self._slide_gondola(block, dt)
+
+    @staticmethod
+    def _gondola_home_rect(block):
+        """The rect a cable car sits on in its own cell, before it has moved.
+
+        A car only ever leaves its cell for the length of a run: the cell — the
+        key it is stored under, and where it is rebuilt from — is what its lane
+        is measured from, exactly as _reset_gondola puts it back there.
+        """
+        return pygame.Rect(block.x * GRID_SIZE + MARBLE_BOX_COORDS[0],
+                           block.y * GRID_SIZE + MARBLE_BOX_COORDS[1],
+                           GRID_SIZE, GRID_SIZE)
+
+    def _gondola_rect(self, block, travel):
+        """The rect a cable car occupies after sliding ``travel`` px from its cell.
+
+        The travel is measured along the car's own axis and is floored here into
+        the whole pixels a rect holds. A SLOW car — the roll can land as low as a
+        tenth of the average speed, a tenth of a pixel a frame — is why the
+        travel is a float at all: flooring it once, on the way into the rect,
+        keeps a tenth of a pixel from being thrown away on EVERY frame.
+        """
+        rect = self._gondola_home_rect(block)
+        offset = math.floor(travel)
+        axis, _sign = self._gondola_axis(block)
+        if axis == "x":
+            rect.x += offset
+        else:
+            rect.y += offset
+        return rect
+
+    def _gondola_solid_rects(self, block, static=False):
+        """The rects a cable car must stay clear of, as rects (see _gondola_solids).
+
+        ``static`` measures the lane the board was BUILT with, every other cable
+        car sitting on its own cell. That is the lane the cables are drawn from
+        (ui._draw_gondola_cables), so the drawn track stays put while the other
+        cars patrol; the motion itself always uses the rects as they are now.
+        """
+        rects = []
+        for other in self._gondola_solids(block):
+            if static and other.has_effect(Effect.GONDOLA):
+                rects.append(self._gondola_home_rect(other))
+            else:
+                rects.append(other.rect)
+        return rects
+
+    def _gondola_lane(self, block, static=False):
+        """How far a cable car may slide each way, as pixel travel from its cell.
+
+        Returns ``(low, high)``: the most the car can slide backwards (negative
+        or zero) and forwards (positive or zero) before its next step would put
+        it into something solid — a block, a locked square's wall or the board's
+        border (see _gondola_solids). It is the whole of the effect's geography:
+        the car turns around at these two ends, and they are where the cables
+        stop, so the drawn track spans exactly the ground the car can cover.
+        """
+        axis, _sign = self._gondola_axis(block)
+        home = self._gondola_home_rect(block)
+        if axis == "x":
+            low = MARBLE_BOX_COORDS[0] - home.left
+            high = MARBLE_BOX_COORDS[0] + MARBLE_BOX_COORDS[2] - home.right
+        else:
+            low = MARBLE_BOX_COORDS[1] - home.top
+            high = MARBLE_BOX_COORDS[1] + MARBLE_BOX_COORDS[3] - home.bottom
+        for rect in self._gondola_solid_rects(block, static):
+            if axis == "x":
+                if rect.bottom <= home.top or rect.top >= home.bottom:
+                    continue
+                if rect.right <= home.left:
+                    low = max(low, rect.right - home.left)
+                elif rect.left >= home.right:
+                    high = min(high, rect.left - home.right)
+                else:
+                    # It covers the car's own cell already (a shape that reaches
+                    # outside it): there is nowhere to go.
+                    low = high = 0
+                    break
+            else:
+                if rect.right <= home.left or rect.left >= home.right:
+                    continue
+                if rect.bottom <= home.top:
+                    low = max(low, rect.bottom - home.top)
+                elif rect.top >= home.bottom:
+                    high = min(high, rect.top - home.bottom)
+                else:
+                    low = high = 0
+                    break
+        # Both ends always include the car's own cell: a car wedged where it
+        # stands (or one on a board so small it has no room) still has a lane,
+        # it is just a lane of no length.
+        return min(low, 0), max(high, 0)
+
+    def _slide_gondola(self, block, dt):
+        """Move one cable car, turning it around at the end of its lane.
+
+        The car slides along its own axis at its rolled speed until the next
+        frame of travel would take it past the end of its lane — another block,
+        a locked square's wall or the board's border (see _gondola_lane) — where
+        it reverses and uses the rest of the frame on the way back, so a car
+        parked against a wall is never stuck. The travel itself is kept as a
+        float and only floored into the rect (see _gondola_rect): quantizing it
+        into the rect every frame, which is what Rect.move does, throws away the
+        fraction and leaves a slow car standing still forever. Only the rect
+        moves: its cell — the key it is stored under, and where it is rebuilt
+        from — never changes, exactly like a rotating block keeps its cell.
+        """
+        _axis, sign = self._gondola_axis(block)
+        if block.gondola_dir is None:
+            block.gondola_dir = sign
+        speed = block.effect_magnitude(Effect.GONDOLA)
+        low, high = self._gondola_lane(block)
+        travel = block.gondola_travel + speed * dt * block.gondola_dir
+        if travel < low or travel > high:
+            # Blocked: turn around and use the rest of this frame going back.
+            block.gondola_dir = -block.gondola_dir
+            travel = block.gondola_travel + speed * dt * block.gondola_dir
+        block.gondola_travel = min(high, max(low, travel))
+        moved = self._gondola_rect(block, block.gondola_travel)
+        if moved != block.rect:
+            block.rect = moved
+            # The block's geometry (its shape's cached points, walls, arcs) is
+            # built from the rect, so it has to be rebuilt to move.
+            block._refresh_geometry()
+
+    @staticmethod
+    def _reset_gondola(block):
+        """Put one cable car back on its own cell, facing its arrow again.
+
+        The build phase shows the board the player built, so a run's travel is
+        undone with the rest of the run's state (triggers, locked doors, spin)
+        — and the direction is forgotten rather than stored, so rotating a
+        block between runs sends the car off along the new arrow the first time
+        it moves (see _gondola_axis).
+        """
+        block.rect = Game._gondola_home_rect(block)
+        block.gondola_travel = 0.0
+        block.gondola_dir = None
+        block._refresh_geometry()
 
     def _count_fresh_touch(self, block):
         """Count one fresh touch of a block's types (for the repeats-only trial).
@@ -6575,6 +7310,29 @@ class Game:
             # three different blocks after these).
             self.pipe_streak_blocks = []
             self.pipe_streak_run_units += 1
+
+    def _note_visited_cell(self, marble):
+        """Record the board unit a marble is in this frame (Explorer card).
+
+        The unit is the board's own grid cell containing the marble's CENTRE
+        ("the fraction of grid units a marble has been in"), floor-divided from
+        the marble box's top-left corner — the same origin the board wall
+        blocks and ui.draw_board's cell loop use — so the recorded cell is
+        exactly the square ui.draw_board repaints. Positions outside the board
+        (a marble flung past the edge before the box pushes it back) are
+        ignored: the measure is a fraction OF the board's units.
+
+        The cell is added to visited_cells, a set, so a unit the marble sits in
+        for many frames counts once, and two marbles in one unit do not double
+        count — "the fraction of grid units a marble has been in", not a
+        fraction of marble-time. Reset with the run (see reset_run), so the
+        card measures this run only, and never saved.
+        """
+        origin_x, origin_y = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
+        gx = int((marble.position[0] - origin_x) // GRID_SIZE)
+        gy = int((marble.position[1] - origin_y) // GRID_SIZE)
+        if 0 <= gx < GRID_WIDTH and 0 <= gy < GRID_HEIGHT:
+            self.visited_cells.add((gx, gy))
 
     def _count_inside_time(self, marble):
         """Accumulate the time a marble spends inside a block, and in a lock.
@@ -6732,6 +7490,9 @@ class Game:
                     # The repeats-only trial counts DISTINCT fresh touches per
                     # type (a type qualifies once it's been touched twice).
                     self._count_fresh_touch(block)
+                    # Brain Loop: a fresh touch of a Sticky block may hand over
+                    # a random action (see _brain_loop_roll).
+                    self._brain_loop_roll(block)
                     # Track the run's first/last freshly-contacted blocks for
                     # Effective cards (Start cards check the first block after
                     # the start; End cards check the last block before the
@@ -6759,8 +7520,8 @@ class Game:
                         # breaks it (see _count_pipe_streak).
                         self._count_pipe_streak(block)
                         # Remember the run's opening blocks (in touch order) for
-                        # Pedestal (retrigger the first few) and Watch (only the
-                        # first few may score). Distinct blocks only: with two
+                        # Pedestal (retrigger the first few) and Watch (only
+                        # these may score). Distinct blocks only: with two
                         # marbles the same block can be freshly touched twice,
                         # and that must not use up two slots. The list is
                         # capped, so a long run never grows it.
@@ -6839,8 +7600,8 @@ class Game:
                 return
             # The end-of-run steps settle the run before the total is worked
             # out: the Spirit tokens whose payoff is a MULTIPLIER fire first,
-            # then the cards that read a finished run (Explorer's distance
-            # xMult, Astronaut's black-hole mult, Plane's air time, Skater's
+            # then the cards that read a finished run (Explorer's visited
+            # units, Astronaut's black-hole mult, Plane's air time, Skater's
             # slippery blocks, Fountain's pipe streaks, Island's groups), and
             # finally the xMult every one of them banked lands at once (see
             # _flush_run_xmult).
@@ -7060,15 +7821,30 @@ class Game:
             self._spawn_card_particle(card, "-1s", BLUE)
         return True
 
+    def _deal_breaker_gags(self):
+        """True while the Deal breaker trial is stopping every block scoring.
+
+        The trial's rule is "blocks never score until you sell a card": with it
+        active and no sale yet, EVERY block scorer pays nothing. The trigger is
+        still spent, so the block shows its used-up red state and a run cannot
+        bank triggers.
+
+        Selling any card releases the board for the rest of the run — the sale
+        is registered in _card_sold_message, the one place a card leaves by sale
+        — and the gag comes back whenever the trial is applied again (a new run,
+        a restart, or a retry: see _apply_trial).
+        """
+        return (self.active_trial == Trial.DEAL_BREAKER
+                and not self.deal_breaker_released)
+
     def _watch_blocks_out_of_play(self, block):
         """True when the Watch card stops this block from contributing score.
 
-        Watch ends the run at the ideal finish time and lets only the first
-        WATCH_BLOCK_LIMIT blocks the marble touches contribute score; every
-        later block's scorer pays nothing (its trigger is still spent, like any
-        block whose reward comes out zero). Watch gates BLOCK scorers only —
-        collision cards still fire on the touch, so a Watch run stays a
-        card-driven build.
+        Watch lets only the first WATCH_BLOCK_LIMIT distinct blocks the marble
+        touches contribute score; every later block's scorer pays nothing (its
+        trigger is still spent, like any block whose reward comes out zero).
+        Watch gates BLOCK scorers only — collision cards still fire on the
+        touch, so a Watch run stays a card-driven build.
         """
         if not self._has_card(Card.WATCH):
             return False
@@ -7087,6 +7863,11 @@ class Game:
         scoring effect on collision.
         """
         if block.scorer == Scorer.NONE and not block.has_effect(Effect.PORTAL):
+            return True
+        # Deal breaker: while the board is gagged nothing scores (see
+        # _deal_breaker_gags). The trigger is still spent, so the block still
+        # shows its used-up red state.
+        if self._deal_breaker_gags():
             return True
         # Watch: only the run's opening blocks may score (see
         # _watch_blocks_out_of_play). The trigger is still spent, so the block
@@ -7601,12 +8382,20 @@ class Game:
         # dropped its decided picks) re-applies fresh when it starts.
         self.trial_debuffed_blocks = set()
         self.disabled_card = None
-        self.deal_broken_cards = set()
         self.trial_fragile_blocks = set()
         for block in self.grid.values():
             block.trial_fragile = False
         self.trial_marble_weight = 1.0
+        # ...and nothing of the new trials is left either: no gag on the board,
+        # no gravity pulled sideways, and no card left face over.
+        self.deal_breaker_released = False
+        self.trial_gravity_dir = None
+        for card in self.cards:
+            card.flipped = False
         self.trial_decision = None
+        # Grace's xMult belonged to the run that just finished (its bank has
+        # already been flushed), so the next run starts without it.
+        self.run_xmult_bonus = 0.0
         self.shop.refresh()
         # Slim pickings removes two random shop options for this run.
         self._trim_shop_for_trial()
@@ -7846,10 +8635,17 @@ class Game:
         A group is not something the player buys, so its entry describes the
         FAMILY the group stands for: the collision every card of it fires on,
         and how many cards that is (one per card scorer, each with its own
-        rolled magnitude).
+        rolled magnitude). A group whose label already names several shapes
+        ("Flat Line/Curved Slope Line/Half Pipe") is described by that label
+        instead: spelling the same shapes out again is what pushed those lines
+        past the box (see ui.draw_collection).
         """
+        label = match_group_label(group)
+        if "/" in label:
+            return (f"Cards that fire on {label} blocks — "
+                    f"one per card scorer.")
         return (f"Cards that fire {match_group_trigger(group)} — "
-                f"{len(CARD_SCORERS)} of them, one per card scorer.")
+                f"one per card scorer.")
 
     def _collection_entries(self):
         """Every collection entry: (kind, value, name, description, has_icon,
@@ -7893,7 +8689,7 @@ class Game:
         for value in FinalBoss.ORDER:
             d = collection.is_final_boss_discovered(value)
             entries.append(("final_boss", value, FinalBoss.name(value) if d else "???",
-                            FinalBoss.description(value) if d else "???", False, d))
+                            FinalBoss.description(value) if d else "???", True, d))
         return entries
 
     def _toggle_crt_filter(self):

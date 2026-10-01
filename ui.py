@@ -66,6 +66,8 @@ SHOP_REFRESH_COST = _ui_source.SHOP_REFRESH_COST
 TOTAL_RUNS = _ui_source.TOTAL_RUNS
 TOKEN_COORDS = _ui_source.TOKEN_COORDS
 TRAIL_LIFE = _ui_source.TRAIL_LIFE
+TRAIL_RADIUS_SCALE = _ui_source.TRAIL_RADIUS_SCALE
+TRAIL_SPACING = _ui_source.TRAIL_SPACING
 TRIAL_BOX_COORDS = _ui_source.TRIAL_BOX_COORDS
 TRIAL_CHANGE_COST = _ui_source.TRIAL_CHANGE_COST
 TRIAL_DISABLE_COST = _ui_source.TRIAL_DISABLE_COST
@@ -291,14 +293,18 @@ def draw_board(game, border_color=(30, 30, 30)):
     """Draw the dynamic marble box (the board), same look as draw_marble_box.
 
     Unlocked squares get the normal board fill; LOCKED squares are painted
-    locked_fill(game) — a darker shade of the same colour while a trial runs, so
+    locked_fill(game) — a darker shade of the same colour while a trial (or the
+    final boss) runs, so
     they stay in the run's palette, and the red void when there is no trial, so
-    the board reads as floating. The original thin grid overlay stays across the
-    whole 10x15 area — including over locked squares — so the player can see
-    every unit they can expand the board into. The boundary between the
-    playable region and the locked squares gets a thick border of its own (see
-    _draw_locked_boundary), and the thick outer border is drawn last exactly
-    like draw_marble_box.
+    the board reads as floating. While the Explorer card is owned, every board
+    unit a marble has BEEN IN this run (game.visited_cells) is repainted in
+    BG_COLOR instead — the very colour the title screen's background is filled
+    with — so the player watches the card's measure fill up square by square.
+    The original thin grid overlay stays across the whole 10x15 area — including
+    over locked squares — so the player can see every unit they can expand the
+    board into. The boundary between the playable region and the locked squares
+    gets a thick border of its own (see _draw_locked_boundary), and the thick
+    outer border is drawn last exactly like draw_marble_box.
     """
     x, y = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
     width = GRID_SIZE * GRID_WIDTH
@@ -315,6 +321,19 @@ def draw_board(game, border_color=(30, 30, 30)):
                     pygame.draw.rect(game.screen, locked,
                                      (x + gx * GRID_SIZE, y + gy * GRID_SIZE,
                                       GRID_SIZE, GRID_SIZE))
+    # Explorer's visited units, painted exactly as the card is measured: the
+    # same set Game._note_visited_cell fills in (a unit per board cell a
+    # marble's centre has been in this run, cleared by every new run). Painted
+    # after the fills above so the trail reads over the trial's panel and a
+    # locked square alike, and before the thin grid lines and every block, so
+    # the units' own borders and whatever sits on them are still drawn on top.
+    # _has_card, not _owns_card: a card disabled by the Card cutter no longer
+    # applies its effect, so it must not paint the trail either.
+    if game._has_card(Card.EXPLORER):
+        for gx, gy in getattr(game, "visited_cells", ()):
+            pygame.draw.rect(game.screen, BG_COLOR,
+                             (x + gx * GRID_SIZE, y + gy * GRID_SIZE,
+                              GRID_SIZE, GRID_SIZE))
     # Thin interior grid lines (same style as draw_marble_box), across locked
     # squares too so their unit boundaries stay visible.
     for gx in range(1, GRID_WIDTH):
@@ -617,24 +636,53 @@ def _build_action_art(action):
             r(13 + i * 4, 34, 2, 5)
         rr(3, 5, 9, 12, 2)              # a card being swept away
         rr(2, 21, 9, 12, 2)             # ...and another
+    elif action == Action.EXPANSION:          # board squares, with one being added
+        r(4, 4, 14, 14)                 # the squares the player has
+        r(4, 21, 14, 14)
+        r(21, 4, 14, 14)
+        r(26, 20, 5, 19)                # a plus in the empty quadrant: the
+        r(19, 27, 19, 5)                # square about to open up
+    elif action == Action.BRAINSTORM:         # a lightbulb thinking
+        c(20, 18, 9)                    # the bulb
+        r(16, 26, 9, 4)                 # its neck
+        r(17, 31, 7, 3)                 # the screw base
+        r(18, 2, 4, 5)                  # rays all round it
+        r(18, 36, 4, 3)
+        r(2, 16, 6, 4)
+        r(32, 16, 6, 4)
+    elif action == Action.MASS_PRODUCTION:    # boxes rolling off a conveyor
+        r(2, 26, 36, 6)                 # the belt
+        c(9, 35, 3)                     # its rollers
+        c(20, 35, 3)
+        c(31, 35, 3)
+        r(6, 12, 12, 12)                # a box
+        r(22, 12, 12, 12)               # ...and another, and another
+        r(1, 3, 9, 3)                   # an arrow driving the line on
+        p([(10, 0), (10, 9), (17, 4.5)])
+    elif action == Action.GRACE:              # a pass: this one is on the house
+        p([(11, 22), (19, 30), (33, 10), (28, 7), (18, 23), (14, 18)])
     return art
 
 
-# --- Trial tiles: tessellations, not icons -----------------------------------
-# A trial's tile is a square LATTICE CELL whose art is a TESSELLATION of one or
-# a few shapes — rows of triangles, interlocked rings, packed circles, chevron
-# bands, fish scales, diamonds, octagons, split cells — in the few shades of the
-# trial's own colour (see components.Trial.palette). Two rules shape them:
+# --- Tile art: tessellations, not icons ---------------------------------------
+# A run modifier's tile is a square LATTICE CELL whose art is a TESSELLATION of
+# one or a few shapes — rows of triangles, interlocked rings, packed circles,
+# chevron bands, fish scales, diamonds, octagons, split cells — in the few
+# shades of the modifier's own colour (see components.TileArt.palette). Trials
+# and final bosses both wear one (components.Trial / components.FinalBoss), and
+# NO TWO OF THEM SHARE A FAMILY, so a pattern names what is in play. Two rules
+# shape them:
 #
 # * they must tile SEAMLESSLY, because the whole screen is covered in them while
-#   the trial runs. Every family is periodic inside the tile (its shapes repeat
-#   with a period that DIVIDES the tile size), so the seam between two tiles is
-#   just another edge of the same lattice;
+#   that modifier is in play. Every family is periodic inside the tile (its
+#   shapes repeat with a period that DIVIDES the tile size), so the seam between
+#   two tiles is just another edge of the same lattice;
 # * the shapes are never plain rectangles, and the family is chosen to echo what
-#   the trial does (rings for chained hands, circles for a bouncy castle,
-#   chevrons for speed, scales for repetition, cut cells for a cutter, climbing
-#   bars for inflation ...).
-TRIAL_TILE_SIZE = 80      # divides 1200x800, so the background tiles exactly
+#   the modifier does (rings for chained hands, circles for a bouncy castle,
+#   chevrons for speed, scales for repetition, cut cells for a cutter, a
+#   climbing ramp for inflation, rings closing on a black core for the
+#   singularity ...).
+TILE_SIZE = 80            # divides 1200x800, so the background tiles exactly
 
 
 def _tess_triangles(art, size, pal, rows=4):
@@ -799,8 +847,8 @@ def _tess_dots(art, size, pal, n=2):
                              max(1, int(size / 60)))
 
 
-def _tess_rings(art, size, pal, n=2, hollow=False):
-    """Interlocked rings on a half-drop lattice: a chain (or empty pockets).
+def _tess_rings(art, size, pal, n=2):
+    """Interlocked rings on a half-drop lattice: the links of a chain.
 
     The rows are offset by half a cell, so the rings of one row drop into the
     gaps of the row above — the lattice's period is two rows by two cells, which
@@ -814,12 +862,9 @@ def _tess_rings(art, size, pal, n=2, hollow=False):
         for col in range(n + 1):
             cx = col * cell + offset + cell / 2 - cell / 2
             cy = row * cell + cell / 2
-            pygame.draw.rect(art, pal["dark"] if not hollow else pal["base"],
+            pygame.draw.rect(art, pal["dark"],
                              (col * cell + offset - cell / 2, row * cell, cell, cell))
-            if hollow:
-                pygame.draw.circle(art, pal["dark"], (cx, cy), radius)
-            pygame.draw.circle(art, pal["base"] if not hollow else pal["light"],
-                               (cx, cy), radius, width)
+            pygame.draw.circle(art, pal["base"], (cx, cy), radius, width)
 
 
 def _tess_scales(art, size, pal, rows=2):
@@ -871,12 +916,11 @@ def _tess_cracked(art, size, pal, rows=4):
                            (size * x, size * y), size * r)
 
 
-def _tess_bars(art, size, pal, n=4, climbing=False):
-    """Vertical bars — even ones for a long track, a climbing ramp for prices."""
+def _tess_bars(art, size, pal, n=4):
+    """Vertical bars, all the same height: a long, even track."""
     bar_w = size / n
     for col in range(n):
-        height = (size * (col + 1) / n) if climbing else size
-        top = size - height
+        top = 0
         colour = pal["base"] if col % 2 == 0 else pal["light"]
         pygame.draw.polygon(art, colour, [
             (col * bar_w, top), (col * bar_w + bar_w * 0.72, top - bar_w * 0.18),
@@ -885,9 +929,216 @@ def _tess_bars(art, size, pal, n=4, climbing=False):
                          max(1, int(size / 60)))
 
 
-_TRIAL_TESSELLATIONS = {
+def _tess_pockets(art, size, pal, n=3):
+    """Hollow rings on a PLAIN square lattice: pockets, and nothing in them.
+
+    The empty pockets' pattern: a thin ring in every cell with the cell's own
+    shade showing through the middle — nothing inside it, which is the whole
+    point. The lattice is the plain one (no half-drop, unlike the chain of
+    rings), so the two patterns never read as each other.
+    """
+    cell = size / n
+    width = max(2, int(size / 26))
+    radius = max(3, int(cell * 0.34))
+    for row in range(n):
+        for col in range(n):
+            pygame.draw.rect(art, pal["dark"],
+                             (int(col * cell), int(row * cell),
+                              int(cell) + 1, int(cell) + 1))
+            colour = pal["base"] if (row + col) % 2 == 0 else pal["light"]
+            pygame.draw.circle(art, colour,
+                               (int(col * cell + cell / 2),
+                                int(row * cell + cell / 2)), radius, width)
+
+
+def _tess_ramps(art, size, pal, cols=4):
+    """Rows of upward triangles that grow across the tile: prices climbing.
+
+    Inflation's ramp: four sizes of arrow, smallest first, and the tile is a
+    whole number of them wide, so the series repeats and the ramp continues over
+    a seam.
+    """
+    col_w = size / cols
+    for col in range(cols):
+        x = col * col_w
+        height = size * (col + 1) / cols
+        colour = pal["base"] if col % 2 == 0 else pal["light"]
+        pygame.draw.polygon(art, colour, [
+            (x, size), (x + col_w, size), (x + col_w / 2, size - height)])
+        pygame.draw.lines(art, pal["accent"], False,
+                          [(x, size), (x + col_w / 2, size - height),
+                           (x + col_w, size)], max(1, int(size / 64)))
+
+
+def _tess_mesh(art, size, pal, cells=4):
+    """A crossed scan grid with one lit node in every other cell.
+
+    The X-ray's mesh: thin lines through the tile in its dark shade, so the
+    pattern reads as a pane the player looks through, and a lit node at the
+    crossings of a checkerboard of cells. The lines sit on cell boundaries and
+    the tile holds a whole number of cells, so the grid continues over a seam.
+    """
+    cell = size / cells
+    width = max(1, int(size / 40))
+    for index in range(cells + 1):
+        pos = round(index * cell)
+        pygame.draw.line(art, pal["dark"], (pos, 0), (pos, int(size)), width)
+        pygame.draw.line(art, pal["dark"], (0, pos), (int(size), pos), width)
+    for row in range(cells):
+        for col in range(cells):
+            if (row + col) % 2:
+                continue
+            node = (int((col + 0.5) * cell), int((row + 0.5) * cell))
+            pygame.draw.circle(art, pal["light"], node, max(2, int(cell * 0.30)))
+            pygame.draw.circle(art, pal["accent"], node, max(1, int(cell * 0.13)))
+
+
+def _tess_crescents(art, size, pal, rows=2):
+    """Rows of crescents on the half-drop lattice: a moon, there and gone.
+
+    Each cell holds a disc with a second disc bitten out of its side, so the
+    shape left behind is a crescent. The rows drop half a cell into the gaps of
+    the row above (the chain of rings' lattice), which is what makes the pattern
+    repeat every two rows and carry over a seam.
+    """
+    cell = size / rows
+    for row in range(rows + 1):
+        offset = cell / 2 if row % 2 else 0
+        for col in range(-1, rows + 2):
+            x, y = col * cell + offset, row * cell
+            pygame.draw.rect(art, pal["dark"],
+                             (int(x), int(y), int(cell) + 1, int(cell) + 1))
+            cx, cy = int(x + cell / 2), int(y + cell / 2)
+            radius = max(3, int(cell * 0.36))
+            colour = pal["base"] if (row + col) % 2 == 0 else pal["light"]
+            pygame.draw.circle(art, colour, (cx, cy), radius)
+            pygame.draw.circle(art, pal["dark"],
+                               (cx + int(radius * 0.62), cy),
+                               max(1, int(radius * 0.85)))
+
+
+def _tess_gyres(art, size, pal, n=2):
+    """Concentric arcs around each cell's centre, turned a quarter each cell.
+
+    Vertigo's dials: every cell carries an outer and an inner arc, and the pair
+    is rotated a quarter turn from cell to cell, so the lattice reads as a set of
+    dials all spinning at once. The quarter turns cycle every four cells, which
+    is what makes the whole tile periodic.
+    """
+    cell = size / n
+    width = max(2, int(size / 26))
+    for row in range(n):
+        for col in range(n):
+            x, y = col * cell, row * cell
+            pygame.draw.rect(art, pal["dark"],
+                             (int(x), int(y), int(cell) + 1, int(cell) + 1))
+            cx, cy = x + cell / 2, y + cell / 2
+            turn = ((row * n + col) % 4) * math.pi / 2
+            for index, radius in enumerate((cell * 0.40, cell * 0.23)):
+                colour = (pal["base"] if (row + col) % 2 == 0 else pal["light"])
+                if index:
+                    colour = pal["accent"]
+                radius = max(2, radius)
+                start = turn + index * math.pi / 2
+                pygame.draw.arc(
+                    art, colour,
+                    pygame.Rect(int(cx - radius), int(cy - radius),
+                                int(radius * 2), int(radius * 2)),
+                    start, start + math.pi * 1.25, width)
+
+
+def _tess_plates(art, size, pal, n=2):
+    """Heavy rounded slabs, one per cell, the next row stepping half across.
+
+    The elephant's slabs: a wide, weighty mass rather than a circle. The
+    half-drop lattice (rows offset by half a cell) is the one the chain of rings
+    and the scales use, so the pattern repeats every two rows and continues over
+    a seam.
+    """
+    cell = size / n
+    inset = cell * 0.11
+    corner = max(2, int(cell * 0.26))
+    side = int(cell - 2 * inset)
+    for row in range(n + 1):
+        offset = cell / 2 if row % 2 else 0
+        for col in range(-1, n + 1):
+            rect = pygame.Rect(int(col * cell + offset + inset),
+                               int(row * cell + inset), side, side)
+            face = pal["base"] if (row + col) % 2 == 0 else pal["light"]
+            pygame.draw.rect(art, face, rect, border_radius=corner)
+            pygame.draw.rect(art, pal["accent"], rect, max(1, int(size / 64)),
+                             border_radius=corner)
+
+
+def _tess_cores(art, size, pal, n=2):
+    """A black core with rings closing on it, one to a cell.
+
+    The singularity's pull: each cell has a filled near-black core and two rings
+    closing in on it. Every cell is identical, so the tile repeats and the pull
+    carries on across a seam.
+    """
+    cell = size / n
+    width = max(2, int(size / 30))
+    core = shade(pal["base"], -0.85)
+    for row in range(n):
+        for col in range(n):
+            x, y = col * cell, row * cell
+            pygame.draw.rect(art, pal["light"],
+                             (int(x), int(y), int(cell) + 1, int(cell) + 1))
+            centre = (int(x + cell / 2), int(y + cell / 2))
+            for radius, colour in ((cell * 0.44, pal["base"]),
+                                   (cell * 0.30, pal["accent"])):
+                pygame.draw.circle(art, colour, centre, max(2, int(radius)), width)
+            pygame.draw.circle(art, core, centre, max(2, int(cell * 0.14)))
+
+
+def _tess_towers(art, size, pal, n=4):
+    """Unit blocks stacked into a stair: each column one block taller.
+
+    Sky High triples the required score, so the pattern climbs: four columns of
+    blocks rise a step at a time, and the tile is a whole number of blocks wide
+    and tall, so the stair repeats and the blocks continue over a seam.
+    """
+    unit = size / n
+    gap = unit * 0.12
+    for col in range(n):
+        for index in range(col + 1):
+            rect = pygame.Rect(int(col * unit + gap),
+                               int(size - (index + 1) * unit + gap),
+                               int(unit - 2 * gap), int(unit - 2 * gap))
+            face = pal["base"] if index % 2 == 0 else pal["light"]
+            pygame.draw.rect(art, face, rect)
+            pygame.draw.rect(art, pal["accent"], rect, max(1, int(size / 64)))
+
+
+def _tess_bands(art, size, pal, bands=5):
+    """Stacked full-width bands, each one thicker than the band above it.
+
+    The dead zone's bands: gravity is tripled in the board's bottom third, so
+    the pattern gets heavier as it goes down. The thicknesses are the band
+    numbers themselves (1, 2, 3 ... up to the band count), so the stack of them
+    fills the tile exactly and the same run of bands repeats over a seam.
+    """
+    weights = [index + 1 for index in range(bands)]
+    total = sum(weights)
+    cuts = [0]
+    running = 0
+    for weight in weights:
+        running += weight
+        cuts.append(round(size * running / total))
+    for index in range(bands):
+        colour = pal["base"] if index % 2 == 0 else pal["dark"]
+        top, bottom = cuts[index], cuts[index + 1]
+        pygame.draw.rect(art, colour, (0, top, int(size), bottom - top))
+        pygame.draw.line(art, pal["light"], (0, top), (int(size), top),
+                         max(1, int(size / 64)))
+
+
+_TILE_TESSELLATIONS = {
     # Each family draws one tile; the arrow-style ones tilt their shapes so the
-    # pattern reads as movement even before the colours are taken in.
+    # pattern reads as movement even before the colours are taken in. Every
+    # name belongs to its own drawer, so two modifiers can never share a
+    # pattern (see components.Trial.TILE_STYLES / FinalBoss.TILE_STYLES).
     "rings": _tess_rings,
     "triangles": _tess_triangles,
     "chevrons": _tess_chevrons,
@@ -901,118 +1152,132 @@ _TRIAL_TESSELLATIONS = {
     "octagons": _tess_octagons,
     "cracked": _tess_cracked,
     "bars": _tess_bars,
-    "pockets": _tess_rings,
-    "climbers": _tess_bars,
+    "bands": _tess_bands,
+    "pockets": _tess_pockets,
+    "ramps": _tess_ramps,
+    "mesh": _tess_mesh,
+    "crescents": _tess_crescents,
+    "gyres": _tess_gyres,
+    "plates": _tess_plates,
+    "cores": _tess_cores,
+    "towers": _tess_towers,
 }
 
+# The classes that own tile art, by the kind name the collection uses for their
+# entries (see Game._collection_entries and draw_collection_icon).
+_TILE_SOURCES = {"trial": Trial, "final_boss": FinalBoss}
 
-def _build_trial_tile(trial):
-    """Draw one trial's tile: a seamless tessellation in its own colours.
 
-    The tile is BOTH the trial's icon and the pattern the whole screen is
-    covered in while that trial runs (see draw_trial_tile, draw_background and
-    draw_collection_icon). Its family comes from Trial.TILE_STYLES and its few
-    colours from Trial.palette, so every trial is recognisable by its shapes and
-    its hue at once, at 40px (the collection icon) and at 80px (the background)
-    alike.
+def _build_tile(source, value):
+    """Draw one run modifier's tile: a seamless tessellation in its colours.
+
+    ``source`` is the class the art belongs to — Trial or FinalBoss — and the
+    tile is BOTH that modifier's icon and the pattern the whole screen is
+    covered in while it is in play (see draw_tile, draw_background and
+    draw_collection_icon). Its family comes from the source's TILE_STYLES and
+    its few colours from the source's palette, so a modifier is recognisable by
+    its shapes and its hue at once, at 40px (the collection icon) and at 80px
+    (the background) alike.
     """
-    palette = Trial.palette(trial)
-    art = pygame.Surface((TRIAL_TILE_SIZE, TRIAL_TILE_SIZE))
+    palette = source.palette(value)
+    art = pygame.Surface((TILE_SIZE, TILE_SIZE))
     art.fill(palette["base"])
-    style = Trial.TILE_STYLES.get(trial, "triangles")
-    if style == "pockets":
-        _tess_rings(art, TRIAL_TILE_SIZE, palette, hollow=True)
-    elif style == "climbers":
-        _tess_bars(art, TRIAL_TILE_SIZE, palette, climbing=True)
-    else:
-        _TRIAL_TESSELLATIONS[style](art, TRIAL_TILE_SIZE, palette)
+    style = source.TILE_STYLES.get(value, "triangles")
+    _TILE_TESSELLATIONS[style](art, TILE_SIZE, palette)
     return art
 
 
-def _trial_tile(trial):
-    """The cached tile for a trial (see _build_trial_tile)."""
-    art = _ICON_ART_CACHE.get(("trial", trial))
-    if art is None:
-        art = _build_trial_tile(trial)
-        _ICON_ART_CACHE[("trial", trial)] = art
-    return art
+def _tile_art(source, value):
+    """The cached tile for one modifier (see _build_tile).
 
-
-def draw_trial_tile(surface, trial, rect):
-    """Blit a trial's tile into ``rect``.
-
-    This is the ONE place a trial tile is drawn, and a tile appears in exactly
-    two places: the whole screen is tiled with it while the trial runs (see
-    draw_background) and the collection shows one as the trial's entry icon
-    (see draw_collection_icon). Nothing else in the game uses it.
+    The cache key carries the SOURCE as well as the id: a trial and a final
+    boss number their ids from 0 separately, so keying on the id alone would
+    hand the singularity the hands-tied tile.
     """
-    surface.blit(_trial_tile(trial), rect.topleft)
+    art = _ICON_ART_CACHE.get((source, value))
+    if art is None:
+        art = _build_tile(source, value)
+        _ICON_ART_CACHE[(source, value)] = art
+    return art
 
 
-_TRIAL_BACKGROUND_CACHE = {}
+def draw_tile(surface, source, value, rect):
+    """Blit a modifier's tile into ``rect``.
+
+    This is the ONE place a tile is drawn, and a tile appears in exactly two
+    places: the whole screen is tiled with it while the modifier is in play
+    (see draw_background) and the collection shows one as the modifier's entry
+    icon (see draw_collection_icon). Nothing else in the game uses it.
+    """
+    surface.blit(_tile_art(source, value), rect.topleft)
 
 
-def _trial_background(trial):
-    """The cached full-screen background for a trial: its tile edge to edge.
+_TILE_BACKGROUND_CACHE = {}
 
-    Built once per trial (the screen never changes size) instead of every
+
+def _tile_background(source, value):
+    """The cached full-screen background for a modifier: its tile edge to edge.
+
+    Built once per modifier (the screen never changes size) instead of every
     frame, because it is 15x10 tile blits. The tile size divides the screen, so
     no partial tile is left at the edges and no shading pass is needed on top:
     the tessellation IS the background (the panels drawn over it echo it in a
     lighter shade — see panel_fill).
     """
-    background = _TRIAL_BACKGROUND_CACHE.get(trial)
+    background = _TILE_BACKGROUND_CACHE.get((source, value))
     if background is None:
         background = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        for y in range(0, SCREEN_HEIGHT, TRIAL_TILE_SIZE):
-            for x in range(0, SCREEN_WIDTH, TRIAL_TILE_SIZE):
-                draw_trial_tile(background, trial,
-                                pygame.Rect(x, y, TRIAL_TILE_SIZE, TRIAL_TILE_SIZE))
-        _TRIAL_BACKGROUND_CACHE[trial] = background
+        for y in range(0, SCREEN_HEIGHT, TILE_SIZE):
+            for x in range(0, SCREEN_WIDTH, TILE_SIZE):
+                draw_tile(background, source, value,
+                          pygame.Rect(x, y, TILE_SIZE, TILE_SIZE))
+        _TILE_BACKGROUND_CACHE[(source, value)] = background
     return background
 
 
 def panel_fill(game):
     """The fill for the board, inventory, shop and info-box panels of a run.
 
-    While a trial is running these panels are filled with that trial's tile
-    colour, a little lighter (components.Trial.panel_color), so the play areas
-    read as part of the run's palette instead of a separate colour. With no
-    trial — not even a switched-off one, see Game.active_trial — it is the
-    game's own panel colour.
+    While a run modifier is in play these panels are filled with that
+    modifier's tile colour, a little lighter (components.TileArt.panel_color),
+    so the play areas read as part of the run's palette instead of a separate
+    colour. With no modifier — not even a switched-off one, see Game.tile_source
+    and Game.active_trial — it is the game's own panel colour.
     """
-    tint = Trial.panel_color(game.active_trial)
+    source, value = game.tile_source
+    tint = None if source is None else source.panel_color(value)
     return MARBLE_BOX_COLOR if tint is None else tint
 
 
 def locked_fill(game):
     """The fill for a LOCKED board square in a run.
 
-    The trial's tile colour again, a step darker than the panels (see
-    components.Trial.locked_color), so the squares the board cannot be played on
-    yet stay inside the run's palette instead of showing the red void through
-    it, while still reading as unlit next to the unlocked ones. With no trial it
-    is the void itself, exactly as before: there is no tile colour to match.
+    The run modifier's tile colour again, a step darker than the panels (see
+    components.TileArt.locked_color), so the squares the board cannot be played
+    on yet stay inside the run's palette instead of showing the red void through
+    it, while still reading as unlit next to the unlocked ones. With no modifier
+    it is the void itself, exactly as before: there is no tile colour to match.
     """
-    tint = Trial.locked_color(game.active_trial)
+    source, value = game.tile_source
+    tint = None if source is None else source.locked_color(value)
     return BG_COLOR if tint is None else tint
 
 
 def draw_background(game):
     """Paint the screen behind everything the game draws onto it.
 
-    While a trial is running the WHOLE screen is tiled with that trial's
-    tessellation, so the run's modifier is what the player sees around the
-    board; with no trial (and on the title, collection and other full-screen
+    While a run modifier is in play (a trial, or the final boss of the 24th run
+    — see Game.tile_source) the WHOLE screen is tiled with that modifier's
+    tessellation, so what the player sees around the board is the run's
+    modifier; with none (and on the title, collection and other full-screen
     tabs, which fill their own background) it is the plain background colour.
-    This is one of the two places a trial tile is ever drawn — see
-    draw_trial_tile.
+    This is one of the two places a tile is ever drawn — see draw_tile.
     """
-    trial = game.active_trial
-    if trial is None:
+    source, value = game.tile_source
+    if source is None:
         game.screen.fill(BG_COLOR)
         return
-    game.screen.blit(_trial_background(trial), (0, 0))
+    game.screen.blit(_tile_background(source, value), (0, 0))
 
 
 def _build_whole_card_art(card):
@@ -1292,6 +1557,43 @@ def _build_whole_card_art(card):
         r(16, 8, 3, 22)                 # its stem, up to the beam
         r(31, 5, 3, 22)                 # the other stem
         r(16, 8, 18, 4)                 # the beam joining them
+    elif card == Card.HOARD:                  # a strongbox with its lid shut
+        rr(6, 16, 28, 18, 3)            # the box
+        rr(6, 6, 28, 11, 3)             # the lid, sitting on it
+        r(4, 15, 32, 3)                 # the band between lid and box
+        r(18, 13, 4, 9)                 # the hasp over the band
+        r(17, 22, 6, 7)                 # the latch
+        c(20, 25, 1.5)                  # its keyhole
+    elif card == Card.INFINITY:               # a lemniscate: two rings in a row
+        c(12, 20, 9, 3)                 # the left loop
+        c(28, 20, 9, 3)                 # the right one, crossing at the middle
+        c(20, 20, 1.5)                  # where they cross
+    elif card == Card.SWASHBUCKLER:           # a cutlass
+        p([(14, 26), (29, 5), (32, 7), (17, 29)])   # the blade, swept back
+        p([(28, 4), (33, 2), (34, 8), (30, 9)])     # its point
+        l(8, 30, 20, 34, 3)                         # the crossguard
+        l(13, 28, 9, 37, 3)                         # the grip
+        c(8, 38, 2)                                 # the pommel
+    elif card == Card.STENCIL:                # a stencil plate with an A cut out
+        rr(4, 6, 32, 28, 3)             # the plate
+        # The letter, punched clean through the plate with a transparent ink so
+        # the card's own face shows in the cut (the same trick the Lock's
+        # padlock and the action icons' eyes use). The A is the card's glyph.
+        pygame.draw.polygon(art, (0, 0, 0, 0),
+                            [(20, 11), (15, 27), (18, 27), (20, 21),
+                             (25, 21), (27, 27), (30, 27)])
+        pygame.draw.rect(art, (0, 0, 0, 0), (18, 23, 9, 3))   # its crossbar
+    elif card == Card.BRAIN_LOOP:             # a brain inside a loop of cable
+        c(20, 20, 14, 3)                # the loop
+        p([(32, 26), (37, 20), (30, 17)])   # its arrowhead
+        rr(7, 16, 26, 10, 5)            # the brain, sitting inside the loop
+        for x in (7, 16, 25):
+            c(x + 4, 17, 4)             # the bumps along its top
+        # Its folds, punched through so the card's own face shows in them: the
+        # midline and a pair of crevices are what make the blob read as a brain
+        # rather than as a face (the padlock/action-eye trick again).
+        pygame.draw.line(art, (0, 0, 0, 0), (20, 12), (20, 26), 2)
+        pygame.draw.line(art, (0, 0, 0, 0), (11, 20), (17, 20), 2)
     return art
 
 
@@ -1441,7 +1743,21 @@ def draw_card(screen, item, rect, selected=False):
     legendary whole card), plus a green outline when the card is selected. The
     face is components.Card.face_color, which moves a colour that is too close
     to that border aside so the border still reads.
+
+    A card the Shuffled trial has flipped (see CardItem.flipped) is drawn the
+    same way, upside down: drawn to its own surface and turned as one piece, so
+    the face, its rarity border and its icon all turn over together.
     """
+    if getattr(item, "flipped", False):
+        face = pygame.Surface(rect.size, pygame.SRCALPHA)
+        _draw_card_face(face, item, pygame.Rect(0, 0, *rect.size), selected)
+        screen.blit(pygame.transform.rotate(face, 180), rect.topleft)
+        return
+    _draw_card_face(screen, item, rect, selected)
+
+
+def _draw_card_face(screen, item, rect, selected=False):
+    """The card itself, right way up (see draw_card, which handles the flip)."""
     value = getattr(item, "value", None)
     pygame.draw.rect(screen, Card.face_color(value), rect, border_radius=6)
     # The 2px frame is the card's tier; the 1px pass under it rounds the corners
@@ -1548,20 +1864,41 @@ def make_icon():
 
 
 class TrailParticle:
-    """A small marble-colored dot that shrinks and fades where the marble passed.
+    """A shrinking dot where the marble passed — or the fire left burning there.
 
     Rendered once onto an SRCALPHA surface at its starting size; each frame the
     surface is scaled down to the current (shrinking) radius and its overall
     alpha is lowered, so the trail shrinks and fades out together.
+
+    A dot laid while the marble-box fire was burning carries that fire instead
+    (see ``fire`` / ``velocity`` below and _draw_trail_flame): it draws as a
+    small flame, standing where the marble was and streaming back the way the
+    marble was travelling THEN. That is what keeps the marble's fire trail glued
+    to the path it actually took — a marble that bounces off a block leaves the
+    fire it has already laid behind it, still pointing the way it was laid, and
+    only the dots laid afterwards take the new direction. (A trail re-derived
+    from the marble's current heading instead swings about the instant it hits
+    anything.)
     """
 
-    def __init__(self, x, y, radius, color, life=TRAIL_LIFE):
+    def __init__(self, x, y, radius, color, life=TRAIL_LIFE, fire=0.0,
+                 velocity=None):
         self.x = float(x)
         self.y = float(y)
         self.radius = float(radius)
         self.color = color
         self.life = life
         self.age = 0.0
+        # The fire's strength when this dot was laid (0 = an ordinary dot) and
+        # the direction the marble was moving then. Both are baked in at spawn:
+        # they belong to the particle, so nothing the marble does afterwards can
+        # change how this dot burns.
+        self.fire = float(fire)
+        vx, vy = ((0.0, 0.0) if velocity is None
+                  else (float(velocity[0]), float(velocity[1])))
+        speed = math.hypot(vx, vy)
+        self.direction = ((vx / speed, vy / speed) if speed > 1e-6
+                          else (1.0, 0.0))
         size = max(2, int(radius * 2) + 2)
         self._surf = pygame.Surface((size, size), pygame.SRCALPHA)
         pygame.draw.circle(self._surf, color, (size // 2, size // 2),
@@ -1577,6 +1914,12 @@ class TrailParticle:
         t = min(self.age / self.life, 1.0)
         radius = self.radius * (1.0 - t)
         if radius < 0.5:
+            return
+        if self.fire > 0.01:
+            # A burning dot IS its flame: drawing the marble-coloured dot under
+            # it would only put a coloured rim around the fire.
+            _draw_trail_flame(screen, self.x, self.y, radius, self.direction,
+                              self.fire)
             return
         size = max(2, int(radius * 2) + 2)
         surf = pygame.transform.smoothscale(self._surf, (size, size))
@@ -2154,6 +2497,18 @@ def _draw_block_effect_icon(block, surface, alpha=255, color=None):
             pygame.draw.polygon(surface, color, [
                 _icon_point(block, sign * 13, 0), _icon_point(block, sign * 7, -4),
                 _icon_point(block, sign * 7, 4)])
+    elif block.effect == Effect.GONDOLA:
+        # A cable car: a rail, a wheel riding it, and a cabin hanging under it.
+        # The icon turns with the block's arrow, so the rail IS the direction
+        # the car travels (and the lane the cables are drawn along).
+        pygame.draw.line(surface, color, _icon_point(block, -13, -6),
+                         _icon_point(block, 13, -6), 2)
+        pygame.draw.circle(surface, color, _icon_point(block, 0, -6), 3)
+        pygame.draw.line(surface, color, _icon_point(block, 0, -3),
+                         _icon_point(block, 0, 1), 2)
+        pygame.draw.polygon(surface, color, [
+            _icon_point(block, -6, 1), _icon_point(block, 6, 1),
+            _icon_point(block, 6, 9), _icon_point(block, -6, 9)])
     else:
         pygame.draw.circle(surface, color, (cx, cy), 7.5, 3)
 
@@ -2231,10 +2586,39 @@ def draw_block_shape_only(block, surface):
 
 # --- Marble rendering --------------------------------------------------------
 
-def draw_marble(marble, screen):
-    """Draw a marble with its 3D rolling surface (type-specific look)."""
+# The fire's palette — the ONE pair of colours the board fire and a burning
+# marble's own flames are drawn with (see draw_fire and _draw_trail_flame), so
+# the two can never drift apart: an orange body with a hotter yellow core.
+FIRE_BODY_COLOR = (255, 120, 20)
+FIRE_CORE_COLOR = (255, 205, 55)
+
+# The fire's drawn size stops growing at this strength. The intensity itself
+# keeps climbing to main.FIRE_MAX_INTENSITY, so a monstrous score makes the fire
+# burn hotter (brighter, longer flames) without letting it swallow the board —
+# see draw_fire, and the flames a burning marble's trail particles carry in
+# _draw_trail_flame.
+FIRE_VISUAL_CAP = 5
+
+
+def draw_marble(marble, screen, fire=0.0):
+    """Draw a marble with its 3D rolling surface (type-specific look).
+
+    ``fire`` is the marble-box fire's current strength (main.FIRE_MAX_INTENSITY
+    is its ceiling, see Game._fire_target): while the run's score is past its
+    target the board burns, and every marble burns with it — a warm halo behind
+    the sphere and a heat wash over it. The marble's fire TRAIL is the trail of
+    burning particles it leaves behind it (see TrailParticle / main.update),
+    which is what keeps the fire lying along the path the marble really took.
+    Zero (the default) draws the plain marble, which is what the new-save
+    screen's marble previews want (see draw_marble_select).
+    """
+    burning = fire > 0.01
     pos = (int(marble.position[0]), int(marble.position[1]))
     r = int(marble.radius)
+    if burning:
+        # The halo is drawn BEHIND the sphere, so the heat reads as coming from
+        # under the marble rather than over its face.
+        _draw_marble_burn_glow(screen, pos, r, fire)
     md, sin_a, cos_a = _marble_roll(marble)
     if marble.marble_type == MarbleType.EIGHT_BALL:
         # A black sphere with a white circle + "8" painted on its face.
@@ -2255,10 +2639,93 @@ def draw_marble(marble, screen):
         _blit_marble_rolling_feature(marble, screen, pos, r, md, sin_a, cos_a,
                                      _draw_marble_speck_feature)
     _draw_marble_gloss(marble, screen, pos, r)
+    if burning:
+        # The heat wash sits ON the sphere (the marble's painted feature still
+        # reads through it); its fire trail is the particles it left behind it.
+        _draw_marble_burn_wash(screen, pos, r, fire)
     if getattr(marble, "phase_timer", 0.0) > 0:
         # A phasing marble wears a dashed halo so the player can see that it is
         # currently passing through every block.
         _draw_marble_phase_ring(screen, pos, r)
+
+
+def _draw_marble_burn_glow(screen, pos, r, fire):
+    """The warm halo drawn BEHIND a burning marble (see draw_marble).
+
+    Two stacked translucent oranges make a soft ring of heat around the sphere;
+    its size and opacity follow the fire's strength.
+    """
+    scale = min(fire, FIRE_VISUAL_CAP)
+    radius = int(r + 3 + 4 * scale)
+    if radius < 2:
+        return
+    alpha = int(45 + 35 * scale)
+    surf = pygame.Surface((radius * 2, radius * 2), pygame.SRCALPHA)
+    pygame.draw.circle(surf, FIRE_BODY_COLOR + (alpha,), (radius, radius), radius)
+    pygame.draw.circle(surf, FIRE_CORE_COLOR + (alpha,), (radius, radius),
+                       max(1, radius - 3))
+    screen.blit(surf, surf.get_rect(center=pos))
+
+
+def _draw_marble_burn_wash(screen, pos, r, fire):
+    """A translucent heat wash over the marble itself (see draw_marble).
+
+    Faint enough that the marble's painted feature still reads through it (the
+    8 ball's "8", the vanilla marble's speck, a ping-pong ball's two halves),
+    and stronger as the fire burns hotter.
+    """
+    if r < 2:
+        return
+    scale = min(fire, FIRE_VISUAL_CAP)
+    surf = pygame.Surface((r * 2, r * 2), pygame.SRCALPHA)
+    pygame.draw.circle(surf, FIRE_BODY_COLOR + (int(30 + 45 * scale),), (r, r), r)
+    screen.blit(surf, surf.get_rect(center=pos))
+
+
+def _draw_trail_flame(screen, x, y, radius, direction, fire):
+    """The flame ONE burning trail particle carries (see TrailParticle.draw).
+
+    The particle IS the flame: it stands where the marble was when the dot was
+    laid and streams fire AGAINST the direction the marble was travelling then,
+    so a chain of them lies along the path the marble took. A bounce cannot
+    swing the fire about — the particles already laid down keep their own place
+    and their own direction, and only the ones laid afterwards take the new way.
+
+    Drawn from the board fire's two colours only (FIRE_BODY_COLOR /
+    FIRE_CORE_COLOR, the pair draw_fire uses): a short orange body tapering out
+    behind the dot, with a hotter yellow core inside its first half. The flame
+    is a few times MAIN's trail spacing long, so neighbouring particles (laid
+    TRAIL_SPACING apart) overlap into one unbroken stream, and each flickers on
+    its OWN phase — taken from where it lies — so the shimmer does not run down
+    the whole trail as a single wave. Its size follows the fire's strength at
+    the moment the dot was laid and the dot's own shrinking radius, so the trail
+    tapers away and dies out behind the marble.
+    """
+    if radius < 0.5:
+        return
+    scale = min(fire, FIRE_VISUAL_CAP)
+    dx, dy = -float(direction[0]), -float(direction[1])  # against the motion
+    wx, wy = -dy, dx  # across the flame, for the flicker's wander
+    now = pygame.time.get_ticks() / 1000.0
+    phase = (x * 0.07 + y * 0.11) % (2.0 * math.pi)
+    # The orange body first, then the hotter yellow core on top of it — shorter
+    # and thinner, exactly like the core inside the board fire's flames.
+    for index, (thickness, reach, color) in enumerate(
+            ((1.0, 1.0, FIRE_BODY_COLOR), (0.6, 0.6, FIRE_CORE_COLOR))):
+        width = radius * thickness * (0.8 + 0.3 * scale)
+        span = radius * reach * (1.0 + 0.8 * scale)
+        steps = 2
+        for i in range(steps + 1):
+            t = i / steps
+            flick = (0.85 + 0.15 * math.sin(now * 7.0 + phase + i + index)) * scale
+            rad = width * (1.0 - 0.7 * t) * flick
+            if rad < 0.6:
+                continue
+            off = math.sin(now * 6.0 + phase + i) * width * 0.2
+            pygame.draw.circle(screen, color,
+                               (int(x + dx * t * span + wx * off),
+                                int(y + dy * t * span + wy * off)),
+                               max(1, round(rad)))
 
 
 def _draw_marble_phase_ring(screen, pos, r):
@@ -2427,6 +2894,54 @@ def _draw_marble_rubber_ball(marble, screen, pos, r, md, sin_a, cos_a):
 
 # --- Game screens -------------------------------------------------------------
 
+# The two cables a Gondola block rides along (see _draw_gondola_cables): a
+# muted steel that reads as a wire over any trial's panel colour.
+GONDOLA_CABLE_COLOR = (150, 155, 165)
+
+
+def _draw_gondola_cables(game):
+    """Draw the cables every cable car rides: two lines along its own lane.
+
+    Each gondola gets a pair of lines running the length of the span its car can
+    actually reach — from one of its turning points to the other, as the board
+    stands (see Game._gondola_lane) — set at the two sides of its own cell, and
+    drawn UNDER the blocks, so the car rides on top of them. Both ends of the
+    pair are turning points rather than the board's edges: a car that meets a
+    wall, a locked square's edge or another block a third of the way along its
+    row has a cable a third of a row long, and the squares it can never visit
+    have none. The cables belong to the LANE, not to the car: they stay where
+    they are while the car slides between them, which is what makes them read
+    as the track.
+    """
+    cars = [block for block in game.grid.values()
+            if block.has_effect(Effect.GONDOLA)]
+    if not cars:
+        return
+    for block in cars:
+        axis, _sign = game._gondola_axis(block)
+        # The lane as BUILT (every other car on its own cell), so the drawn
+        # track does not flicker as the other cars patrol past each other.
+        low, high = game._gondola_lane(block, static=True)
+        home = game._gondola_home_rect(block)
+        # floored exactly as the motion floors it (see Game._gondola_rect), so
+        # the cables end where the car's own rect can end.
+        near = math.floor(low)
+        far = math.floor(high)
+        # The pair sits a few pixels inside the lane's own edges: on the edges
+        # exactly, the cables landed on the board's thin grid lines and read as
+        # part of the grid rather than as the track.
+        if axis == "x":
+            for y in (home.top + 3, home.bottom - 3):
+                pygame.draw.line(game.screen, GONDOLA_CABLE_COLOR,
+                                 (home.left + near, y),
+                                 (home.right - 1 + far, y), 2)
+        else:
+            for x in (home.left + 3, home.right - 3):
+                pygame.draw.line(game.screen, GONDOLA_CABLE_COLOR,
+                                 (x, home.top + near),
+                                 (x, home.bottom - 1 + far), 2)
+
+
 def draw(game):
     """Draw the current screen: a title/menu tab, or the full game frame."""
     if game.title_screen:
@@ -2455,6 +2970,9 @@ def draw(game):
     draw_board(game, box_border)
     draw_run_dots(game)
 
+    # The cables a cable car rides (see _draw_gondola_cables) go under the
+    # blocks, so each car rides along its own lane.
+    _draw_gondola_cables(game)
     for block in game.grid.values():
         draw_block(block, game.screen)
 
@@ -2496,10 +3014,15 @@ def draw(game):
         )
         draw_block(ghost, game.screen, ghost=True)
 
-    for particle in game.trail_particles:
-        particle.draw(game.screen)
-    for marble in game.marbles:
-        draw_marble(marble, game.screen)
+    # The X-ray trial: the marble and its trail are still SIMULATED (they score
+    # and leave their dots) but nothing of them is drawn, so the player has to
+    # reason about where the marble is instead of watching it.
+    hidden = game.active_trial == Trial.X_RAY
+    if not hidden:
+        for particle in game.trail_particles:
+            particle.draw(game.screen)
+        for marble in game.marbles:
+            draw_marble(marble, game.screen, fire=game.fire_intensity)
     for particle in game.score_particles:
         particle.draw(game.screen)
     draw_score_display(game)
@@ -2529,7 +3052,8 @@ def draw_fire(game):
 
     Flames rise from the top edge of the marble box, sized by the current fire
     intensity (which grows with how much the score beat the required score and
-    dies down after the run). Each flame flickers so the fire dances.
+    dies down after the run). Each flame flickers so the fire dances, and the
+    marbles inside the box burn along with it (see draw_marble).
     """
     if game.fire_intensity <= 0.01:
         return
@@ -2537,7 +3061,7 @@ def draw_fire(game):
     x0, y0 = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1] - BORD_WIDTH
     width = MARBLE_BOX_COORDS[2]
     now = pygame.time.get_ticks() / 1000.0
-    scale = min(intensity, 1.5)
+    scale = min(intensity, FIRE_VISUAL_CAP)
     flames = 16
     for i in range(flames):
         cx = x0 + (i + 0.5) / flames * width + math.sin(now * 8 + i * 2.1) * 2
@@ -2545,10 +3069,11 @@ def draw_fire(game):
         outer_h = (5 + 30 * scale) * flick
         inner_h = outer_h * 0.55
         w = 8 + 10 * scale
-        # Outer orange flame with a smaller yellow core.
-        pygame.draw.polygon(game.screen, (255, 120, 20),
+        # Outer orange flame with a smaller yellow core (the fire's palette,
+        # shared with the marbles' own fire — see FIRE_BODY_COLOR).
+        pygame.draw.polygon(game.screen, FIRE_BODY_COLOR,
                             [(cx - w, y0), (cx + w, y0), (cx, y0 - outer_h)])
-        pygame.draw.polygon(game.screen, (255, 205, 55),
+        pygame.draw.polygon(game.screen, FIRE_CORE_COLOR,
                             [(cx - w * 0.5, y0), (cx + w * 0.5, y0), (cx, y0 - inner_h)])
 
 
@@ -2971,6 +3496,25 @@ def shop_message_layout(game, message):
     return lines, rect
 
 
+def _draw_shop_held_marker(game, rect):
+    """Mark a shop offer the Hoard whole card is holding (see _toggle_shop_lock).
+
+    A gold frame around the cell says the cell is pinned — a reroll will not
+    touch it — and a padlock in the corner says what is pinning it: the same
+    padlock the Lock shape and the locked board squares are drawn with, so
+    "held" reads in the game's own language instead of as a new icon. The
+    padlock sits in the top-left corner, clear of the item's own art (which
+    fills the middle) and of the price drawn under the cell's bottom edge.
+    """
+    pygame.draw.rect(game.screen, (255, 215, 0), rect, 2)
+    plate = pygame.Rect(rect.x + 1, rect.y + 1, 15, 15)
+    pygame.draw.rect(game.screen, (20, 20, 28), plate)
+    pygame.draw.circle(game.screen, (255, 215, 0),
+                       (plate.centerx, plate.y + 6), 4, 2)
+    pygame.draw.rect(game.screen, (255, 215, 0),
+                     (plate.x + 3, plate.y + 7, plate.width - 6, 6), 2)
+
+
 def draw_shop(game):
     """Draw the shop panel, its items, prices, refresh button, and messages."""
     shop = game.shop
@@ -3002,15 +3546,20 @@ def draw_shop(game):
         label = f"REFRESH FREE ({free})" if free > 1 else "REFRESH FREE"
         refresh_text = game.small_font.render(label, True, YELLOW)
     else:
-        # The inflation trial raises the reroll fee (both here and in the
-        # charge in _refresh_shop), so the label shows the effective cost.
-        cost = game._inflated(SHOP_REFRESH_COST)
+        # The price of a reroll: the inflation trial raises it and Brainstorm's
+        # v2 halves it (see Game.refresh_cost), so the label and the charge in
+        # _refresh_shop read the same number.
+        cost = game.refresh_cost()
         refresh_text = game.small_font.render(f"REFRESH ${cost}", True, WHITE)
     game.screen.blit(refresh_text, refresh_text.get_rect(center=refresh_btn.center))
 
     for item in shop.items:
         rect = pygame.Rect(shop.rect.x + item.col * GRID_SIZE, shop.rect.y + item.row * GRID_SIZE, GRID_SIZE, GRID_SIZE)
         draw_shop_item(game.screen, item, rect)
+        # Hoard: a held cell is framed and padlocked, so the player can see at a
+        # glance which offers a reroll will leave alone (see _toggle_shop_lock).
+        if shop.slot_key(item) in shop.locked:
+            _draw_shop_held_marker(game, rect)
         # Show the effective price (component prices rise with each purchase).
         # An already-upgraded action is sold at the normal action price but is
         # worth ACTION_UPGRADE_COST more, so its price is drawn in the gold of
@@ -3325,12 +3874,11 @@ def draw_upgrades(game):
     game.screen.blit(text, text.get_rect(center=back.center))
 def draw_collection_icon(game, kind, value, rect):
     """Draw an entry's icon (a mini card, a shape outline, an effect icon, a
-    scorer tile, or a trial's own tile) into the given rect. The final boss
-    has no icon."""
-    if kind == "trial":
-        # A trial's icon is its tile: the same square the trial display is
-        # covered in (see _build_trial_tile).
-        draw_trial_tile(game.screen, value, rect)
+    scorer tile, or a trial's or final boss's own tile) into the given rect."""
+    if kind in _TILE_SOURCES:
+        # A trial's or a final boss's icon is its tile: the same square the
+        # screen is covered in while that modifier is in play (see _build_tile).
+        draw_tile(game.screen, _TILE_SOURCES[kind], value, rect)
         pygame.draw.rect(game.screen, WHITE, rect, 1)
         return
     if kind == "card":
@@ -3386,6 +3934,16 @@ def draw_collection_icon(game, kind, value, rect):
         draw_block_shape_only(block, game.screen)
 
 
+# The collection's entry cells and the description box inside them. An entry
+# prints its description in up to COLLECTION_DESC_LINES lines of tiny text
+# (14 px a line) beside its icon, then its rarity tag under them — so the cell
+# is sized to hold all five lines plus the tag. Every description in the codex
+# is written to fit this box (see components, and the test that pins it).
+COLLECTION_CARD_W, COLLECTION_CARD_H = 212, 124
+COLLECTION_DESC_LINES = 5
+COLLECTION_DESC_WIDTH = COLLECTION_CARD_W - 62
+
+
 def draw_collection(game):
     """Draw the COLLECTION tab: every card, component, and trial the player can
     encounter. Entries are revealed only once bought (cards and components) or
@@ -3394,7 +3952,10 @@ def draw_collection(game):
     game.screen.fill(BG_COLOR)
     entries = game._collection_entries()
     cols = 5
-    card_w, card_h = 212, 92
+    # The cell is sized to its description box: COLLECTION_DESC_LINES lines of
+    # tiny text at 14 px a line (see the description loop below), then the
+    # rarity tag under them.
+    card_w, card_h = COLLECTION_CARD_W, COLLECTION_CARD_H
     gap_x, gap_y = 14, 14
     x0 = (SCREEN_WIDTH - (cols * card_w + (cols - 1) * gap_x)) // 2
     y0 = 118
@@ -3429,8 +3990,13 @@ def draw_collection(game):
         name_surf = game.small_font.render(name, True, name_color)
         game.screen.blit(name_surf, (rect.left + 54, rect.top + 10))
         desc_color = (210, 210, 210) if discovered else (110, 110, 120)
+        # Up to COLLECTION_DESC_LINES lines of description: the box holds this
+        # many, and every description in the codex is written to fit (a longer
+        # one is cut off here rather than overflowing the cell — see the
+        # descriptions in components, kept short for exactly this box).
         dy = rect.top + 34
-        for line in game._wrap_text(desc, game.tiny_font, rect.width - 62)[:3]:
+        for line in game._wrap_text(desc, game.tiny_font,
+                                    COLLECTION_DESC_WIDTH)[:COLLECTION_DESC_LINES]:
             _draw_description_line(game, line, desc_color, rect.left + 54, dy,
                                    game.tiny_font)
             dy += 14
@@ -3449,7 +4015,7 @@ def draw_collection(game):
         if rarity is not None:
             tag = game.tiny_font.render(
                 Rarity.name(rarity), True, Rarity.color(rarity))
-            game.screen.blit(tag, (rect.left + 54, rect.top + 76))
+            game.screen.blit(tag, (rect.left + 54, rect.top + 104))
     pygame.draw.rect(game.screen, BG_COLOR, (0, 0, SCREEN_WIDTH, 110))
     pygame.draw.rect(game.screen, BG_COLOR, (0, SCREEN_HEIGHT - 96, SCREEN_WIDTH, 96))
     heading = game.main_title_font.render("COLLECTION", True, (255, 215, 0))

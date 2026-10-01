@@ -149,6 +149,89 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(data["cards"][0]["value"], card.value)
         self.assertTrue(save_system._slot_has_save(1))
 
+    def _play_seconds(self, seconds):
+        """Run the game loop for the given number of seconds of play."""
+        for _ in range(int(round(seconds / main.DT))):
+            self.game.update()
+
+    def test_autosave_writes_the_slot_every_thirty_seconds(self):
+        # The game only saves on P or on quitting, so long sessions autosave:
+        # every AUTOSAVE_INTERVAL seconds of play the active slot is written,
+        # silently (no shop message), with the state as it stands.
+        self.game.save_slot = 2
+        self.game.run_active = False
+        self.game.awaiting_after_run = False
+        self.game.cash = 4321
+        self.game.shop_message = ""
+
+        self._play_seconds(main.AUTOSAVE_INTERVAL - 1.0)
+        self.assertFalse(save_system._slot_has_save(2))  # not due yet
+        self._play_seconds(2.0)
+        data = save_system._read_slot(2)
+        self.assertTrue(save_system._slot_has_save(2))
+        self.assertEqual(data["cash"], 4321)
+        self.assertEqual(self.game.shop_message, "")     # the save is silent
+        # The clock starts again, so the next save is another interval away.
+        self.assertLess(self.game.autosave_timer, main.AUTOSAVE_INTERVAL)
+        self.game.cash = 555
+        self._play_seconds(main.AUTOSAVE_INTERVAL - 1.0)
+        self.assertEqual(save_system._read_slot(2)["cash"], 4321)
+        self._play_seconds(2.0)
+        self.assertEqual(save_system._read_slot(2)["cash"], 555)
+
+    def test_autosave_never_needs_a_slot(self):
+        # The title-screen game (and a test's bare Game) has no slot chosen:
+        # nothing is written anywhere, however long it is played.
+        self.assertIsNone(self.game.save_slot)
+        self.game.title_screen = False
+        self._play_seconds(main.AUTOSAVE_INTERVAL * 2)
+        for slot in range(1, 4):
+            self.assertFalse(save_system._slot_has_save(slot), slot)
+
+    def test_autosave_waits_for_a_build_phase(self):
+        # A run in flight (or a finished run awaiting RETRY/CONTINUE) is not a
+        # state a timer may capture: saving puts the game into its build state
+        # first, which would roll the run back. The autosave holds its clock
+        # instead, and writes at the first moment the game is being built.
+        self.game.save_slot = 3
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.run_active = True
+        self.game.cash = 999
+
+        self._play_seconds(main.AUTOSAVE_INTERVAL * 2)
+        self.assertFalse(save_system._slot_has_save(3))
+        self.assertTrue(self.game.run_active)      # the run is untouched
+        self.assertGreaterEqual(self.game.autosave_timer,
+                                main.AUTOSAVE_INTERVAL)
+        # A finished run waiting on its RETRY/CONTINUE choice is held too.
+        self.game.run_active = False
+        self.game.awaiting_after_run = True
+        self._play_seconds(1.0)
+        self.assertFalse(save_system._slot_has_save(3))
+        self.assertTrue(self.game.awaiting_after_run)
+        # Back to building: the very next frame saves the held interval.
+        self.game.awaiting_after_run = False
+        self.game.update()
+        self.assertTrue(save_system._slot_has_save(3))
+        self.assertEqual(save_system._read_slot(3)["cash"], 999)
+
+    def test_autosave_writes_what_the_p_key_would(self):
+        # The autosave is the P key on a timer: the same slot, and the same
+        # data (the game is put back to its build state first, exactly as P
+        # does — see _retry_run).
+        self.game.save_slot = 4
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.cash = 1234
+        self._play_seconds(main.AUTOSAVE_INTERVAL + 1.0)
+        auto = save_system._read_slot(4)
+        self.assertTrue(save_system._slot_has_save(4))
+        self._press(main.pygame.K_p)
+        pressed = save_system._read_slot(4)
+        for key in ("cash", "run_number", "round_index", "run_in_round",
+                    "required_score", "run_results", "unlocked_cells",
+                    "cards", "toolbox", "grid", "shop", "actions"):
+            self.assertEqual(auto[key], pressed[key], key)
+
     def test_save_records_required_fields(self):
         self.game.save_slot = 2
         self.game.cash = 777
@@ -673,14 +756,12 @@ class SaveSystemTests(unittest.TestCase):
                          order + [main.Card.SHOWMAN])
 
     def test_the_trials_other_picks_ride_through_a_save(self):
-        # Card cutter's slot, Marble weight's factor and Deal breaker's group
-        # are decided once for the run as well (see
+        # Card cutter's slot, Marble weight's factor and Vertigo's gravity
+        # direction are decided once for the run as well (see
         # save_system._serialize_trial_decision), and each comes back usable by
         # _apply_trial. Every case patches the draw the trial WOULD make if its
         # decision had been dropped, so the assertion fails unless the pick came
         # out of the save.
-        group = main.match_group_for_shape(main.Shape.PIPE)
-        card = _card_item(group, main.Scorer.MULT_ADD)
 
         # Card cutter: the decided SLOT still cuts the same card.
         self.game.trial_decision = {"trial": main.Trial.CARD_CUTTER,
@@ -705,19 +786,17 @@ class SaveSystemTests(unittest.TestCase):
             fresh._apply_trial()
         self.assertEqual(fresh.trial_marble_weight, 0.9)
 
-        # Deal breaker: the decided group comes back as a TUPLE (which is what
-        # the card comparison needs), not the list JSON stored it as.
-        self.game.trial_decision = {"trial": main.Trial.DEAL_BREAKER,
-                                    "group": group}
+        # Vertigo: the decided gravity direction comes back as the index into
+        # main.VERTIGO_DIRECTIONS the save stored, so the loaded run pulls the
+        # same way (the patched draw would give index 0).
+        self.game.trial_decision = {"trial": main.Trial.VERTIGO, "gravity": 5}
         data = save_system._save_data(self.game)
-        fresh.cards = [card, main.CardItem(main.Card.COUPON, 40)]
+        self.assertEqual(data["trial_decision"]["gravity"], 5)
         fresh.trial_decision = save_system._restore_trial_decision(data, fresh)
-        fresh.current_trial = main.Trial.DEAL_BREAKER
-        with mock.patch("main.random.choice", return_value=("shape", (1,))):
+        fresh.current_trial = main.Trial.VERTIGO
+        with mock.patch("main.random.randrange", return_value=0):
             fresh._apply_trial()
-        self.assertEqual(fresh.trial_decision["group"], group)
-        self.assertIn(fresh.trial_decision["group"], main.MATCH_GROUPS)
-        self.assertEqual(fresh.deal_broken_cards, {card})
+        self.assertEqual(fresh.trial_gravity_dir, main.VERTIGO_DIRECTIONS[5])
 
         # A save from before any of this loads with no decision at all.
         del data["trial_decision"]
@@ -1830,3 +1909,44 @@ class ProfileTests(unittest.TestCase):
         self.game.profile_naming = False
         self.game.profile_renaming = False
         self.game.draw()
+
+    def test_a_hoard_hold_survives_a_save_and_load(self):
+        # The hold is saved as the CELL it was pinned in (see Shop.slot_key), so
+        # the loaded shop comes back with the same offer still held — and the
+        # hold is clipped against the cards the load restored, so it can never
+        # outlive the Hoard that pays for it.
+        self.game.save_slot = 2
+        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
+        held = self.game.shop.items[0]
+        slot = self.game.shop.slot_key(held)
+        self.game.shop.locked = [slot]
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 2)
+
+        self.assertEqual(fresh.shop.locked, [slot])
+        self.assertEqual(fresh.shop_lock_cap(), 1)
+        fresh._refresh_shop()
+        self.assertEqual(fresh.shop.locked, [slot])
+        self.assertEqual(fresh.shop.item_at(
+            (fresh.shop.rect.x + held.col * main.GRID_SIZE + 20,
+             fresh.shop.rect.y + held.row * main.GRID_SIZE + 20)).name,
+            held.name)
+
+    def test_a_saved_hold_without_its_card_is_clipped_on_load(self):
+        # A hold cannot outlive the card: loading clips the saved holds against
+        # the cards just restored, so a save whose Hoard is gone holds nothing.
+        self.game.save_slot = 4
+        self.game.shop.locked = [self.game.shop.slot_key(self.game.shop.items[0])]
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 4)
+
+        self.assertEqual(fresh.shop_lock_cap(), 0)
+        self.assertEqual(fresh.shop.locked, [])

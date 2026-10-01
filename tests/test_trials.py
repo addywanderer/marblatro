@@ -7,6 +7,192 @@ imports live in tests/game_test_case.py.
 from tests.game_test_case import *  # noqa: F401,F403
 
 
+class NewTrialTests(GameTestCase):
+    """The second batch of trials and the reworked Deal breaker.
+
+    X-ray, Phantom, Vertigo and Elephant join the fifteen original trials, the
+    Shuffled trial really turns the cards over, Marble weight is narrowed to the
+    effects that DRIVE the marble, and Deal breaker becomes a board gag.
+    """
+
+    def _run_under(self, trial, randrange=0):
+        """Start a run under ``trial`` and return its released marble.
+
+        The run is started for real (the start block sits in the marble box, so
+        reset_run releases a marble into it) with the trial's draw patched, the
+        same setup the Marble weight test uses.
+        """
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.trials_enabled = True
+        self.game.current_trial = trial
+        with mock.patch("main.random.randrange", return_value=randrange):
+            self.game._apply_trial()
+        self.game.reset_run(False)
+        return self.game.marbles[0]
+
+    def _fingerprint(self):
+        """A short fingerprint of one drawn frame (see _pixel_hash)."""
+        self.game.draw()
+        return self._pixel_hash(self.game.screen)
+
+    def test_x_ray_trial_hides_the_marble_and_its_trail(self):
+        marble = self._run_under(main.Trial.X_RAY)
+        self.game.trail_particles.append(
+            main.TrailParticle(marble.position[0], marble.position[1], 4.0,
+                               main.MARBLE_COLOR))
+        hidden = self._fingerprint()
+        # A frame of an X-ray run is IDENTICAL to a frame the marble and its
+        # trail were never in: the trial hides both and hides nothing else.
+        self.game.marbles = []
+        self.game.trail_particles = []
+        nothing = self._fingerprint()
+        self.assertEqual(hidden, nothing)
+        # With the trial switched off the very same marble IS drawn, so the
+        # hiding is the trial's doing and not something else about the frame.
+        self.game.trials_enabled = False
+        self.game.marbles = [marble]
+        self.assertNotEqual(self._fingerprint(), nothing)
+
+    def test_phantom_trial_starts_the_marble_phased_for_one_second(self):
+        marble = self._run_under(main.Trial.PHANTOM)
+        self.assertAlmostEqual(marble.phase_timer, main.PHANTOM_PHASE_SECONDS)
+        self.assertAlmostEqual(main.PHANTOM_PHASE_SECONDS, 1.0)
+        # Phasing means no collisions: the marble falls straight through a solid
+        # wall it starts right on top of.
+        wall = main.Block(5, 6, shape=main.Shape.RECT, scorer=main.Scorer.NONE)
+        marble.position = np.array([float(wall.rect.centerx),
+                                    float(wall.rect.top - main.MARBLE_RADIUS)])
+        marble.velocity = np.array([0.0, 0.0])
+        for _ in range(30):
+            marble.physics.update(marble, main.DT, [wall])
+        self.assertGreater(marble.position[1], wall.rect.bottom,
+                           "a phantom marble did not pass through the wall")
+        self.assertGreater(marble.phase_timer, 0.0)
+        # ...and once the second is up the marble is solid again: the same fall
+        # now lands on the wall instead of going through it.
+        for _ in range(40):
+            marble.physics.update(marble, main.DT, [wall])
+        self.assertEqual(marble.phase_timer, 0.0)
+        marble.position = np.array([float(wall.rect.centerx),
+                                    float(wall.rect.top - main.MARBLE_RADIUS)])
+        marble.velocity = np.array([0.0, 0.0])
+        for _ in range(30):
+            marble.physics.update(marble, main.DT, [wall])
+        self.assertLess(marble.position[1], wall.rect.bottom,
+                        "the marble was still phasing after its second was up")
+
+    def test_elephant_trial_starts_the_marble_at_double_size(self):
+        marble = self._run_under(main.Trial.ELEPHANT)
+        self.assertAlmostEqual(marble.radius, main.MARBLE_RADIUS * 2)
+        # A run with no trial is the ordinary size: it is the trial, not the
+        # marble type, that doubles it.
+        plain = self._run_under(None)
+        self.assertAlmostEqual(plain.radius, main.MARBLE_RADIUS)
+
+    def test_vertigo_trial_rolls_a_direction_that_is_never_straight_down(self):
+        # Every compass direction but down (the default gravity already pulls
+        # that way, so "randomised" would mean nothing there).
+        self.assertNotIn((0.0, 1.0), main.VERTIGO_DIRECTIONS)
+        self.assertGreater(len(main.VERTIGO_DIRECTIONS), 3)
+        marble = self._run_under(main.Trial.VERTIGO)
+        self.assertEqual(self.game.trial_gravity_dir, main.VERTIGO_DIRECTIONS[0])
+        self.assertEqual(marble.base_gravity_dir, main.VERTIGO_DIRECTIONS[0])
+        # Gravity really pulls that way: a marble left alone moves along the
+        # rolled direction, and not one pixel the other way.
+        direction = np.array(self.game.trial_gravity_dir, dtype=float)
+        start = marble.position.copy()
+        for _ in range(10):
+            marble.physics.update(marble, main.DT, [])
+        delta = marble.position - start
+        self.assertGreater(float(np.dot(delta, direction)), 0.0)
+        across = np.array([direction[1], -direction[0]])
+        self.assertAlmostEqual(float(np.dot(delta, across)), 0.0, delta=1e-3)
+
+    def test_vertigo_direction_is_decided_once_for_the_run(self):
+        self._run_under(main.Trial.VERTIGO)
+        first = self.game.trial_gravity_dir
+        # Re-applying the run's trial replays the DECIDED direction (a restart
+        # or a retry must not reroll it): the patched draw would answer
+        # differently if the direction rolled again.
+        with mock.patch("main.random.randrange", return_value=4):
+            self.game._apply_trial()
+        self.assertEqual(self.game.trial_gravity_dir, first)
+
+    def test_shuffled_trial_turns_every_card_face_over(self):
+        cards = [main.CardItem(main.Card.COUPON, 40),
+                 main.CardItem(main.Card.JOKER, 40)]
+        self.game.cards = list(cards)
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.SHUFFLED
+        self.game._apply_trial()
+        self.assertTrue(all(card.flipped for card in self.game.cards))
+        # The flip is a real one: a flipped card is drawn as its own face turned
+        # upside down (drawn to its own surface and rotated as one piece, so the
+        # art, the rarity border and the corners all turn over together)...
+        rect = pygame.Rect(0, 0, main.GRID_SIZE, main.GRID_SIZE)
+        cards[0].flipped = False
+        upright = pygame.Surface(rect.size)
+        main.draw_card(upright, cards[0], rect)
+        cards[0].flipped = True
+        flipped = pygame.Surface(rect.size)
+        main.draw_card(flipped, cards[0], rect)
+        self.assertEqual(pygame.image.tostring(flipped, "RGB"),
+                         pygame.image.tostring(
+                             pygame.transform.rotate(upright, 180), "RGB"))
+        # ...and it is visible (the Joker's glyph is not symmetric).
+        cards[1].flipped = False
+        joker_up = pygame.Surface(rect.size)
+        main.draw_card(joker_up, cards[1], rect)
+        cards[1].flipped = True
+        joker_flipped = pygame.Surface(rect.size)
+        main.draw_card(joker_flipped, cards[1], rect)
+        self.assertNotEqual(pygame.image.tostring(joker_flipped, "RGB"),
+                            pygame.image.tostring(joker_up, "RGB"))
+        # An upright card draws exactly as it always did...
+        cards[0].flipped = False
+        again = pygame.Surface(rect.size)
+        main.draw_card(again, cards[0], rect)
+        self.assertEqual(pygame.image.tostring(again, "RGB"),
+                         pygame.image.tostring(upright, "RGB"))
+        # ...and the flip is a HANDICAP only: the card still fires.
+        self.assertFalse(self.game._card_disabled(cards[0]))
+        # A new run applies the trial again and the cards are the right way up.
+        self.game.current_trial = None
+        self.game._apply_trial()
+        self.assertFalse(any(card.flipped for card in self.game.cards))
+
+    def test_deal_breaker_trial_gags_the_board_until_a_card_is_sold(self):
+        marble = self._run_under(main.Trial.DEAL_BREAKER)
+        self.assertFalse(self.game.deal_breaker_released)
+        self.assertTrue(self.game._deal_breaker_gags())
+        # Nothing the board does pays out while it is gagged, but the block's
+        # trigger is still spent (exactly like a Watch-gated block).
+        self.game.score_chips = 0
+        spent = main.Block(5, 5, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        marble.collisions_this_tick = [spent]
+        self.game._handle_block_contacts([spent])
+        self.assertEqual(self.game.score_chips, 0)
+        self.assertEqual(spent.triggers_left, 0)
+        # Selling a card releases the board for the rest of the run, and the
+        # sale says so.
+        card = main.CardItem(main.Card.COUPON, 40)
+        self.game.cards.append(card)
+        self.game.selected_toolbox_item = card
+        self.game._sell_selected_item()
+        self.assertTrue(self.game.deal_breaker_released)
+        self.assertFalse(self.game._deal_breaker_gags())
+        self.assertIn("Deal breaker", self.game.shop_message)
+        paid = main.Block(6, 5, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        marble.collisions_this_tick = [paid]
+        self.game._handle_block_contacts([paid])
+        self.assertEqual(self.game.score_chips, 10)
+        # A new run (a restart, a retry, or the next run's start) applies the
+        # trial again, so the board is gagged once more.
+        self.game._apply_trial()
+        self.assertFalse(self.game.deal_breaker_released)
+        self.assertTrue(self.game._deal_breaker_gags())
+
+
 class TrialsTests(GameTestCase):
     """Trials and final bosses: the run-wide modifiers."""
 
@@ -57,9 +243,13 @@ class TrialsTests(GameTestCase):
         self.assertEqual(main.Trial.name(main.Trial.INFLATION), "Inflation")
         self.assertEqual(main.Trial.name(main.Trial.EMPTY_POCKETS), "Empty pockets")
         self.assertEqual(main.Trial.name(main.Trial.DEAL_BREAKER), "Deal breaker")
+        self.assertEqual(main.Trial.name(main.Trial.X_RAY), "X-ray")
+        self.assertEqual(main.Trial.name(main.Trial.PHANTOM), "Phantom")
+        self.assertEqual(main.Trial.name(main.Trial.VERTIGO), "Vertigo")
+        self.assertEqual(main.Trial.name(main.Trial.ELEPHANT), "Elephant")
         for trial in main.Trial.ORDER:
             self.assertTrue(main.Trial.description(trial))
-        self.assertEqual(len(main.Trial.ORDER), 15)
+        self.assertEqual(len(main.Trial.ORDER), 19)
         self.assertIn(main.Trial.DEAD_ZONE, main.Trial.ORDER)
         self.assertIn(main.Trial.ALL_FINISHES, main.Trial.ORDER)
         self.assertIn(main.Trial.SLIM_PICKINGS, main.Trial.ORDER)
@@ -73,6 +263,13 @@ class TrialsTests(GameTestCase):
         self.assertIn(main.Trial.INFLATION, main.Trial.ORDER)
         self.assertIn(main.Trial.EMPTY_POCKETS, main.Trial.ORDER)
         self.assertIn(main.Trial.DEAL_BREAKER, main.Trial.ORDER)
+        self.assertIn(main.Trial.X_RAY, main.Trial.ORDER)
+        self.assertIn(main.Trial.PHANTOM, main.Trial.ORDER)
+        self.assertIn(main.Trial.VERTIGO, main.Trial.ORDER)
+        self.assertIn(main.Trial.ELEPHANT, main.Trial.ORDER)
+        # The reworked Deal breaker is a board gag; its description says so.
+        self.assertEqual(main.Trial.description(main.Trial.DEAL_BREAKER),
+                         "Blocks never score until you sell a card.")
 
 
     def test_every_trial_has_its_own_tile_of_shapes_and_colours(self):
@@ -80,7 +277,7 @@ class TrialsTests(GameTestCase):
         # with while it runs: a square LATTICE CELL (not one grid unit — it is
         # big enough that the screen tiles exactly) built from tessellating
         # shapes in a few shades of the trial's own colour.
-        size = main.ui.TRIAL_TILE_SIZE
+        size = main.ui.TILE_SIZE
         self.assertEqual(main.SCREEN_WIDTH % size, 0)
         self.assertEqual(main.SCREEN_HEIGHT % size, 0)
         self.assertNotEqual(size, main.GRID_SIZE)      # no longer one grid unit
@@ -89,7 +286,7 @@ class TrialsTests(GameTestCase):
         fingerprints = {}
         for trial in main.Trial.ORDER:
             with self.subTest(trial=main.Trial.name(trial)):
-                tile = main.ui._trial_tile(trial)
+                tile = main.ui._tile_art(main.Trial, trial)
                 self.assertEqual(tile.get_size(), (size, size))
                 colours = {tuple(tile.get_at((x, y)))[:3]
                            for x in range(0, size, 2)
@@ -103,11 +300,61 @@ class TrialsTests(GameTestCase):
                 palette = set(main.Trial.palette(trial).values())
                 self.assertTrue(colours & palette,
                                 "a tile is drawn in its own palette")
-                fingerprints[trial] = pygame.image.tostring(tile, "RGB")
+                fingerprints[trial] = self._pixel_hash(tile)
         # No two trials share a tile, and the art is built once.
         self.assertEqual(len(set(fingerprints.values())), len(main.Trial.ORDER))
-        self.assertIs(main.ui._trial_tile(main.Trial.DEAD_ZONE),
-                      main.ui._trial_tile(main.Trial.DEAD_ZONE))
+        self.assertIs(main.ui._tile_art(main.Trial, main.Trial.DEAD_ZONE),
+                      main.ui._tile_art(main.Trial, main.Trial.DEAD_ZONE))
+
+    def test_no_two_run_modifiers_share_a_tessellation_pattern(self):
+        # The user's rule: every trial AND both final bosses has a tessellation
+        # of its own — not the same family drawn twice in another colour.
+        modifiers = ([(main.Trial, trial) for trial in main.Trial.ORDER]
+                     + [(main.FinalBoss, boss) for boss in main.FinalBoss.ORDER])
+        styles = [source.TILE_STYLES[value] for source, value in modifiers]
+        self.assertEqual(len(set(styles)), len(modifiers),
+                         f"a pattern is used twice: {sorted(styles)}")
+        # ...and each family name belongs to its OWN drawer, so no two can ever
+        # drift into the same art.
+        drawers = [main.ui._TILE_TESSELLATIONS[style] for style in styles]
+        self.assertEqual(len(set(drawers)), len(modifiers))
+        # The rendered tiles are all different as well.
+        fingerprints = {self._pixel_hash(main.ui._tile_art(source, value))
+                        for source, value in modifiers}
+        self.assertEqual(len(fingerprints), len(modifiers))
+
+    def test_the_final_bosses_have_their_own_tiles(self):
+        # The two final bosses wear tile art like a trial: the run's screen and
+        # panels are covered in the boss's pattern while its run is played, and
+        # the collection shows the boss the same tile as its icon.
+        size = main.ui.TILE_SIZE
+        self.assertEqual(len(main.FinalBoss.COLORS), len(main.FinalBoss.ORDER))
+        self.assertEqual(set(main.FinalBoss.TILE_STYLES), set(main.FinalBoss.ORDER))
+        # The boss ids are their own 0/1, so the cache must key on the SOURCE as
+        # well as the id: the singularity must not get the hands-tied tile.
+        for boss in main.FinalBoss.ORDER:
+            with self.subTest(boss=main.FinalBoss.name(boss)):
+                tile = main.ui._tile_art(main.FinalBoss, boss)
+                self.assertEqual(tile.get_size(), (size, size))
+                colours = {tuple(tile.get_at((x, y)))[:3]
+                           for x in range(0, size, 2)
+                           for y in range(0, size, 2)}
+                self.assertGreaterEqual(len(colours), 2)
+                self.assertLessEqual(len(colours), 12)
+                self.assertTrue(colours & set(main.FinalBoss.palette(boss).values()))
+                # A boss's tile is never a trial's, whatever the ids are.
+                for trial in main.Trial.ORDER:
+                    self.assertNotEqual(
+                        self._pixel_hash(tile),
+                        self._pixel_hash(main.ui._tile_art(main.Trial, trial)),
+                        (main.FinalBoss.name(boss), main.Trial.name(trial)))
+                self.assertIsNot(main.ui._tile_art(main.FinalBoss, boss),
+                                 main.ui._tile_art(main.Trial, boss))
+                # The panels its run is tinted with stay readable.
+                tint = main.FinalBoss.panel_color(boss)
+                self.assertGreaterEqual(sum(tint) / 3, 40)
+                self.assertLessEqual(sum(tint) / 3,
+                                     main.FinalBoss.PANEL_LIGHT_LIMIT + 40)
 
     def test_tiles_are_tessellations_that_meet_across_their_seams(self):
         # The whole point of the lattice: two tiles side by side and stacked
@@ -116,10 +363,10 @@ class TrialsTests(GameTestCase):
         # left column and its right column would sit next to each other without
         # a discontinuity, which for a periodic pattern means the columns on
         # either side of the join continue an edge of the same shapes.
-        size = main.ui.TRIAL_TILE_SIZE
+        size = main.ui.TILE_SIZE
         for trial in main.Trial.ORDER:
             with self.subTest(trial=main.Trial.name(trial)):
-                tile = main.ui._trial_tile(trial)
+                tile = main.ui._tile_art(main.Trial, trial)
                 # Stitching four copies must not introduce a colour that is not
                 # already the pattern's own: no seam line, no background gap.
                 stitched = pygame.Surface((size * 2, size * 2))
@@ -145,9 +392,9 @@ class TrialsTests(GameTestCase):
         # The tile the user described: white with its top-left and bottom-right
         # quadrants black, exactly like a Finish block — now built out of
         # triangles instead of squares.
-        size = main.ui.TRIAL_TILE_SIZE
+        size = main.ui.TILE_SIZE
         cell = size // 2
-        tile = main.ui._trial_tile(main.Trial.ALL_FINISHES)
+        tile = main.ui._tile_art(main.Trial, main.Trial.ALL_FINISHES)
         dark = components.shade((245, 245, 245), -0.92)
         # Each quadrant is one square of the checkerboard, split by a diagonal
         # into two shades. Sample inside the cell's OWN triangle, which is the
@@ -174,21 +421,21 @@ class TrialsTests(GameTestCase):
             self.assertIn(expected, colours)
         self.assertEqual(len(colours), 4)
 
-    def test_a_trial_tile_is_only_drawn_in_the_background_and_the_collection(self):
-        # The user's rule: the tile may appear as the screen's background
-        # while the trial runs and as the collection's icon — nowhere else.
+    def test_a_tile_is_only_drawn_in_the_background_and_the_collection(self):
+        # The user's rule: a tile may appear as the screen's background while
+        # its modifier is in play and as the collection's icon — nowhere else.
         source = inspect.getsource(main.ui)
-        self.assertEqual(source.count("draw_trial_tile("), 3)   # def + 2 uses
-        self.assertEqual(source.count("def _build_trial_tile("), 1)
+        self.assertEqual(source.count("draw_tile("), 3)   # def + 2 uses
+        self.assertEqual(source.count("def _build_tile("), 1)
         # ...and the two uses are the screen background and the collection.
-        background = inspect.getsource(main.ui._trial_background)
-        self.assertIn("draw_trial_tile(background, trial,", background)
+        background = inspect.getsource(main.ui._tile_background)
+        self.assertIn("draw_tile(background, source, value,", background)
         self.assertIn("draw_background(game)",
                       inspect.getsource(main.ui.draw))
-        self.assertIn("draw_trial_tile(game.screen, value, rect)",
+        self.assertIn("draw_tile(game.screen, _TILE_SOURCES[kind], value, rect)",
                       inspect.getsource(main.ui.draw_collection_icon))
         # The trial display itself never carries a tile.
-        self.assertNotIn("draw_trial_tile", inspect.getsource(main.ui.draw_trial_box))
+        self.assertNotIn("draw_tile", inspect.getsource(main.ui.draw_trial_box))
 
     def test_hands_tied_trial_debuffs_a_quarter_of_blocks(self):
         # Exactly 1/4 of the marble-box blocks lose one trigger for the run.
@@ -776,7 +1023,8 @@ class TrialsTests(GameTestCase):
 
 
     def test_final_bosses_appear_in_collection_entries(self):
-        # Both bosses show up in the collection, hidden until beaten.
+        # Both bosses show up in the collection, hidden until beaten — and each
+        # one HAS an icon now: its own tile (see tile_source / FinalBoss.COLORS).
         entries = self.game._collection_entries()
         bosses = [e for e in entries if e[0] == "final_boss"]
         self.assertEqual(len(bosses), len(main.FinalBoss.ORDER))
@@ -784,7 +1032,7 @@ class TrialsTests(GameTestCase):
             self.assertIn(value, main.FinalBoss.ORDER)
             self.assertEqual(name, "???")
             self.assertEqual(desc, "???")
-            self.assertFalse(has_icon)
+            self.assertTrue(has_icon)
             self.assertFalse(discovered)
 
 

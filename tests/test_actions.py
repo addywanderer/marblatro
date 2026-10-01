@@ -61,9 +61,17 @@ class ActionsTests(GameTestCase):
         self.assertEqual(main.Action.name(main.Action.STRENGTH), "Strength")
         self.assertEqual(main.Action.name(main.Action.SPIRIT), "Spirit")
         self.assertEqual(main.Action.name(main.Action.CLEANSWEEP), "Cleansweep")
+        self.assertEqual(main.Action.name(main.Action.EXPANSION), "Expansion")
+        self.assertEqual(main.Action.name(main.Action.BRAINSTORM), "Brainstorm")
+        self.assertEqual(main.Action.name(main.Action.MASS_PRODUCTION),
+                         "Mass production")
+        self.assertEqual(main.Action.name(main.Action.GRACE), "Grace")
         self.assertEqual(main.Action.PRICES[main.Action.DEATH], 24)
         self.assertEqual(main.Action.PRICES[main.Action.RECOGNITION], 24)
         self.assertEqual(main.Action.PRICES[main.Action.DEJA_VU], 28)
+        self.assertEqual(main.Action.PRICES[main.Action.EXPANSION], 25)
+        self.assertEqual(main.Action.PRICES[main.Action.BRAINSTORM], 25)
+        self.assertEqual(main.Action.PRICES[main.Action.GRACE], 25)
         for value in main.Action.ORDER:
             self.assertGreater(main.Action.PRICES[value], 0)
             self.assertIn(value, main.Action.GLYPHS)
@@ -74,10 +82,32 @@ class ActionsTests(GameTestCase):
                          [main.Action.DEATH, main.Action.RECOGNITION,
                           main.Action.DEJA_VU, main.Action.ANOINTMENT,
                           main.Action.STRENGTH, main.Action.SPIRIT,
-                          main.Action.CLEANSWEEP])
+                          main.Action.CLEANSWEEP, main.Action.EXPANSION,
+                          main.Action.BRAINSTORM, main.Action.MASS_PRODUCTION,
+                          main.Action.GRACE])
         # Deja Vu's two versions add triggers: +1, then +100.
         self.assertIn("+1 trigger", main.Action.description(main.Action.DEJA_VU, 1))
         self.assertIn("+100 triggers", main.Action.description(main.Action.DEJA_VU, 2))
+
+    def test_the_later_actions_description_their_versions(self):
+        # Each of the four later actions says what v1 does and what the upgrade
+        # buys, in the shop's and collection's own words.
+        self.assertIn("4 locked board squares",
+                      main.Action.description(main.Action.EXPANSION, 1))
+        self.assertIn("every locked board square",
+                      main.Action.description(main.Action.EXPANSION, 2))
+        self.assertIn("2 free shop rerolls",
+                      main.Action.description(main.Action.BRAINSTORM, 1))
+        self.assertIn("Halves the price of every shop reroll",
+                      main.Action.description(main.Action.BRAINSTORM, 2))
+        self.assertIn("Triples the resource points",
+                      main.Action.description(main.Action.MASS_PRODUCTION, 1))
+        self.assertIn("Doubles every resource point",
+                      main.Action.description(main.Action.MASS_PRODUCTION, 2))
+        self.assertIn("+1 xMult",
+                      main.Action.description(main.Action.GRACE, 1))
+        self.assertIn("required score",
+                      main.Action.description(main.Action.GRACE, 2))
 
 
     def test_a_new_action_is_rolled_for_the_free_v2(self):
@@ -191,12 +221,18 @@ class ActionsTests(GameTestCase):
         # v2 does the same sweep without the cost.
         self.assertIn("without spending your cash",
                       main.Action.description(main.Action.CLEANSWEEP, 2))
-        # It acts on the player, not on a piece, so it needs no target — every
-        # other action does.
-        self.assertFalse(main.Action.needs_target(main.Action.CLEANSWEEP))
-        self.assertIn(main.Action.CLEANSWEEP, main.Action.NO_TARGET)
+        # It acts on the player, not on a piece, so it needs no target — and so
+        # do the four later actions, which act on the board, the shop, the
+        # resource banks and the run itself.
+        for action in main.Action.NO_TARGET:
+            self.assertFalse(main.Action.needs_target(action),
+                             main.Action.name(action))
+        self.assertEqual(set(main.Action.NO_TARGET),
+                         {main.Action.CLEANSWEEP, main.Action.EXPANSION,
+                          main.Action.BRAINSTORM, main.Action.MASS_PRODUCTION,
+                          main.Action.GRACE})
         for action in main.Action.ORDER:
-            if action != main.Action.CLEANSWEEP:
+            if action not in main.Action.NO_TARGET:
                 self.assertTrue(main.Action.needs_target(action),
                                 main.Action.name(action))
 
@@ -273,6 +309,145 @@ class ActionsTests(GameTestCase):
         self.assertIn("full", self.game.shop_message)
 
 
+    def _use_action(self, value, version=1):
+        """Select and fire an action the way the S key does; returns (ok, item)."""
+        item = main.ActionItem(value, main.Action.PRICES[value], version=version)
+        self.game.actions.append(item)
+        self.game.selected_action = item
+        return self.game._apply_action(), item
+
+    def test_expansion_unlocks_four_squares(self):
+        # A brand-new game's board is the centered 2x3 region; the four squares
+        # come off the frontier next to it (see _grant_locked_units).
+        self.game._reset_board_to_start()
+        before = len(self.game.unlocked_cells)
+        applied, item = self._use_action(main.Action.EXPANSION)
+        self.assertTrue(applied)
+        self.assertEqual(len(self.game.unlocked_cells),
+                         before + main.EXPANSION_SQUARES)
+        self.assertNotIn(item, self.game.actions)      # the action is spent
+        self.assertIn("Board expanded", self.game.shop_message)
+
+    def test_v2_expansion_unlocks_the_whole_board(self):
+        self.game._reset_board_to_start()
+        applied, _item = self._use_action(main.Action.EXPANSION, version=2)
+        self.assertTrue(applied)
+        self.assertEqual(len(self.game.unlocked_cells),
+                         main.GRID_WIDTH * main.GRID_HEIGHT)
+        self.assertFalse(self.game.board_locked())
+        self.assertIn("whole board", self.game.shop_message)
+
+    def test_expansion_is_refused_and_kept_on_a_full_board(self):
+        # The harness game's board starts fully unlocked: there is nothing to
+        # unlock, so the action is not spent.
+        self.assertEqual(len(self.game.unlocked_cells),
+                         main.GRID_WIDTH * main.GRID_HEIGHT)
+        applied, item = self._use_action(main.Action.EXPANSION)
+        self.assertFalse(applied)
+        self.assertIn(item, self.game.actions)
+        self.assertIn("already fully unlocked", self.game.shop_message)
+
+    def test_brainstorm_banks_free_rerolls(self):
+        self.assertEqual(self.game.free_rerolls, 0)
+        applied, _item = self._use_action(main.Action.BRAINSTORM)
+        self.assertTrue(applied)
+        self.assertEqual(self.game.free_rerolls, main.BRAINSTORM_REROLLS)
+        # They are BOUGHT, not earned by the run, so they are not in the counter
+        # a retry claws back (see free_rerolls_run_gain).
+        self.assertEqual(self.game.free_rerolls_run_gain, 0)
+        # A refresh spends a banked reroll instead of cash.
+        self.game.cash = 100
+        self.game._refresh_shop()
+        self.assertEqual(self.game.free_rerolls, main.BRAINSTORM_REROLLS - 1)
+        self.assertEqual(self.game.cash, 100)
+        self.assertIn("Free reroll", self.game.shop_message)
+
+    def test_v2_brainstorm_halves_the_reroll_price(self):
+        self.assertEqual(self.game.refresh_cost(), main.SHOP_REFRESH_COST)
+        applied, _item = self._use_action(main.Action.BRAINSTORM, version=2)
+        self.assertTrue(applied)
+        self.assertEqual(self.game.reroll_discount,
+                         main.BRAINSTORM_REROLL_FACTOR)
+        self.assertEqual(self.game.refresh_cost(), main.SHOP_REFRESH_COST // 2)
+        self.game.cash = 100
+        self.game._refresh_shop()
+        self.assertEqual(self.game.cash, 100 - main.SHOP_REFRESH_COST // 2)
+        # The inflation trial still inflates the halved price: the charge in
+        # _refresh_shop and the shop's REFRESH button both read refresh_cost.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.INFLATION
+        self.assertEqual(self.game.refresh_cost(),
+                         self.game._inflated(main.SHOP_REFRESH_COST) // 2)
+
+    def test_mass_production_triples_this_runs_resource_points(self):
+        applied, _item = self._use_action(main.Action.MASS_PRODUCTION)
+        self.assertTrue(applied)
+        self.assertEqual(self.game.resource_point_multiplier(),
+                         main.MASS_PRODUCTION_RUN_FACTOR)
+        self.game._add_resource_points(main.Scorer.SHREDS, 0.25)
+        self.assertAlmostEqual(self.game.shred_run_gain,
+                               0.25 * main.MASS_PRODUCTION_RUN_FACTOR)
+        # The points bank when the run ends, and the run's factor is spent with
+        # them (the fraction stays under the conversion threshold of 1).
+        self.game._commit_resource_points()
+        self.assertAlmostEqual(self.game.shred_points, 0.75)
+        self.assertEqual(self.game.resource_gain_mult, 1.0)
+        self.game._add_resource_points(main.Scorer.SHREDS, 0.25)
+        self.assertAlmostEqual(self.game.shred_run_gain, 0.25)
+
+    def test_v2_mass_production_doubles_every_point_for_good(self):
+        applied, _item = self._use_action(main.Action.MASS_PRODUCTION, version=2)
+        self.assertTrue(applied)
+        self.assertEqual(self.game.resource_gain_bonus,
+                         main.MASS_PRODUCTION_FOREVER_FACTOR)
+        # Three runs of fractional triggers, each below the conversion point,
+        # all banked at twice their worth. A second copy cannot compound it.
+        for _ in range(3):
+            self.game._add_resource_points(main.Scorer.RUBBLE, 0.1)
+            self.game._commit_resource_points()
+        self.assertAlmostEqual(
+            self.game.rubble_points,
+            3 * 0.1 * main.MASS_PRODUCTION_FOREVER_FACTOR)
+        self.assertEqual(self.game.resource_gain_mult, 1.0)
+        self._use_action(main.Action.MASS_PRODUCTION, version=2)
+        self.assertEqual(self.game.resource_gain_bonus,
+                         main.MASS_PRODUCTION_FOREVER_FACTOR)
+
+    def test_grace_adds_one_xmult_to_the_run(self):
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        applied, _item = self._use_action(main.Action.GRACE)
+        self.assertTrue(applied)
+        self.assertEqual(self.game.run_xmult_bonus, main.GRACE_RUN_XMULT)
+        # The run's bank carries it from its first frame — including after a
+        # restart or a re-set-up of the same run.
+        self.game.reset_run(False)
+        self.assertEqual(self.game.run_xmult_pending,
+                         1.0 + main.GRACE_RUN_XMULT)
+        # It is a whole +1 xMult on top of whatever the run banks, and it lands
+        # with the rest of the run's xMult as the run settles.
+        self.game._apply_xmult(3.0)
+        self.game.score_mult = 10
+        self.game._flush_run_xmult()
+        self.assertEqual(self.game.score_mult, 10 * 3.0 * 2.0)
+        # The bonus belonged to that run: the next one starts without it.
+        self._complete_run(1000000, required=1)
+        self.game._continue_run()
+        self.assertEqual(self.game.run_xmult_bonus, 0.0)
+        self.game.reset_run(False)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
+
+    def test_v2_grace_drops_the_runs_required_score_to_zero(self):
+        self.game.required_score = 1000
+        applied, _item = self._use_action(main.Action.GRACE, version=2)
+        self.assertTrue(applied)
+        self.assertEqual(self.game.required_score, 0)
+        # A run that scores nothing at all is still cleared (score >= 0), so
+        # the run is free but counts as met.
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self._complete_run(0, required=0)
+        self.assertTrue(self.game.run_cleared)
+        self.assertTrue(self.game.run_results[-1])
+
     def test_actions_appear_in_collection_entries(self):
         entries = self.game._collection_entries()
         actions = [e for e in entries if e[0] == "action"]
@@ -286,16 +461,18 @@ class ActionsTests(GameTestCase):
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
-    def test_explorer_fraction_is_distance_over_total_grid_units(self):
-        # Explorer's xMult is 1 + (travelled grid units / total grid cells), and
-        # it lands as the run settles (the finish path flushes the xMult bank).
+    def test_explorer_fraction_is_visited_units_over_total_grid_units(self):
+        # Explorer's xMult is 1 + (units the marble has been in / total grid
+        # units), and it lands as the run settles (the finish path flushes the
+        # xMult bank). 30 of the board's 150 units is a fifth of the board, so
+        # the multiplier goes up by +0.2: x1.2, and 10 x 1.2 = 12.
         self.game.cards.append(main.CardItem(main.Card.EXPLORER, 25))
-        marble = self._add_marble()
-        marble.distance = 1500.0
+        self.game.visited_cells = {(gx, gy) for gx in range(5)
+                                   for gy in range(6)}
         self.game.score_mult = 10
         self.game._apply_cards_on_finish()
         self.game._flush_run_xmult()
-        expected = 10 * (1 + (1500 / main.GRID_SIZE) / (main.GRID_WIDTH * main.GRID_HEIGHT))
+        expected = 10 * (1 + 30 / (main.GRID_WIDTH * main.GRID_HEIGHT))
         self.assertAlmostEqual(self.game.score_mult, expected)
 
 

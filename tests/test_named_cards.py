@@ -46,7 +46,8 @@ class NamedCardCatalogueTests(GameTestCase):
                          ["Joker", "Explorer", "Astronaut", "Plane", "Pillar",
                           "Banker", "Wrecking Ball", "Skater", "Glitch",
                           "Ripped Card", "Cozy", "Painting", "Synthesizer",
-                          "Island", "Fountain", "Intangible"])
+                          "Island", "Fountain", "Intangible",
+                          "Swashbuckler", "Stencil"])
         for value in components.NAMED_CARD_ORDER:
             with self.subTest(card=main.Card.name(value)):
                 # A whole card: in the catalogue (so the shop offers it and the
@@ -68,7 +69,7 @@ class NamedCardCatalogueTests(GameTestCase):
         ends = {name for name, phase in phases.items() if phase == "end"}
         self.assertEqual(starts, {"Joker", "Pillar", "Banker", "Glitch",
                                   "Ripped Card", "Cozy", "Painting",
-                                  "Synthesizer"})
+                                  "Synthesizer", "Swashbuckler", "Stencil"})
         self.assertEqual(ends, {"Explorer", "Astronaut", "Plane", "Skater",
                                 "Fountain", "Island", "Intangible"})
         self.assertEqual([name for name, phase in phases.items()
@@ -90,7 +91,7 @@ class NamedCardCatalogueTests(GameTestCase):
         # +0.25 xMult base is the +0.25 the card asks for.
         expected = {
             "Joker": ("start", main.Scorer.MULT_ADD, 1.0, "start"),
-            "Explorer": ("end", main.Scorer.MULT_MUL, 1.0, "distance"),
+            "Explorer": ("end", main.Scorer.MULT_MUL, 1.0, "visited_units"),
             "Astronaut": ("end", main.Scorer.MULT_ADD, 1.0, "black_hole"),
             "Plane": ("end", main.Scorer.CHIPS_ADD, 0.5, "air_time"),
             "Pillar": ("start", main.Scorer.MULT_ADD, 0.25, "fullest_column"),
@@ -106,6 +107,9 @@ class NamedCardCatalogueTests(GameTestCase):
             "Island": ("end", main.Scorer.MULT_MUL, 2.0, "island"),
             "Fountain": ("end", main.Scorer.MULT_MUL, 1.0, "pipe_streak"),
             "Intangible": ("end", main.Scorer.MULT_ADD, 0.125, "inside_time"),
+            "Swashbuckler": ("start", main.Scorer.MULT_ADD, 1.0 / 20.0,
+                             "card_sell_total"),
+            "Stencil": ("start", main.Scorer.MULT_MUL, 4.0, "stencil_slots"),
         }
         for value in components.NAMED_CARD_ORDER:
             meta = components.named_card_meta(value)
@@ -125,17 +129,27 @@ class NamedCardCatalogueTests(GameTestCase):
             elif price <= 38:
                 self.assertEqual(tier, components.Rarity.UNUSUAL,
                                  main.Card.name(value))
+            elif price <= 44:
+                self.assertEqual(tier, components.Rarity.RARE,
+                                 main.Card.name(value))
+            elif price <= 47:
+                self.assertEqual(tier, components.Rarity.EPIC,
+                                 main.Card.name(value))
             else:
-                self.assertLessEqual(tier, components.Rarity.RARE,
-                                     main.Card.name(value))
+                self.assertEqual(tier, components.Rarity.LEGENDARY,
+                                 main.Card.name(value))
         # Twelve cheap measured cards and the four dear ones ($32/$34): every
-        # one of them is a Common or an Unusual, so none is a chase card.
+        # one of the cheap ones is a Common or an Unusual. The two newest are
+        # the measured cards' first dear tiers: Swashbuckler ($42) is Rare and
+        # Stencil ($46) is Epic.
         self.assertEqual(tiers[components.Rarity.COMMON], 12)
         self.assertEqual(tiers[components.Rarity.UNUSUAL], 4)
         self.assertEqual({main.Card.rarity(v) for v in
                           (main.Card.EXPLORER, main.Card.SKATER,
                            main.Card.ISLAND, main.Card.FOUNTAIN)},
                          {components.Rarity.UNUSUAL})
+        self.assertEqual(main.Card.rarity_name(main.Card.SWASHBUCKLER), "Rare")
+        self.assertEqual(main.Card.rarity_name(main.Card.STENCIL), "Epic")
 
     def test_every_measured_card_has_icon_art(self):
         # The card face draws the named condition's own art (the jester's hat,
@@ -147,7 +161,7 @@ class NamedCardCatalogueTests(GameTestCase):
             self.assertGreater(art.get_bounding_rect().width, 0,
                                main.Card.name(value))
             drawings.add(pygame.image.tobytes(art, "RGBA"))
-        self.assertEqual(len(drawings), 16)
+        self.assertEqual(len(drawings), 18)
 
     def test_the_shop_pool_holds_the_named_cards(self):
         pool = main.card_offer_entries()
@@ -172,7 +186,7 @@ class NamedCardCatalogueTests(GameTestCase):
 
 
 class NamedCardStartTests(GameTestCase):
-    """The nine cards that fire at the start of a run."""
+    """The eleven cards that fire at the start of a run."""
 
     def _start(self, *values):
         """Own ``values`` and fire the start-of-run cards."""
@@ -371,28 +385,54 @@ class NamedCardEndTests(GameTestCase):
         self.assertAlmostEqual(self.game.score_mult, 1.0)
         self.assertEqual(len(self.game.score_particles), 0)
 
-    def test_the_explorer_multiplies_by_the_distance_travelled(self):
-        # A full board's worth of travel is 4 units, i.e. exactly x2.
-        marble = self._add_marble()
-        marble.distance = main.GRID_SIZE * main.GRID_WIDTH * main.GRID_HEIGHT
+    def test_the_explorer_multiplies_by_the_units_the_marble_has_been_in(self):
+        # The measure is the fraction of the board's units a marble has BEEN IN
+        # this run, recorded square by square as the run plays: the whole board
+        # is 4 units, i.e. exactly x2.
+        self.game.visited_cells = {
+            (gx, gy) for gx in range(main.GRID_WIDTH)
+            for gy in range(main.GRID_HEIGHT)}
         self.game.score_mult = 1
         self._finish(main.Card.EXPLORER)
         self.assertAlmostEqual(self.game.score_mult, 2.0)
-        # A quarter board is x1.25: the units are 4 x the fraction travelled.
-        marble.distance /= 4
+        # Half the board is x1.5: the payoff is +1 xMult per whole board.
+        self.game.visited_cells = {
+            (gx, gy) for gx in range(main.GRID_WIDTH // 2)
+            for gy in range(main.GRID_HEIGHT)}
         self.game.score_mult = 1
         self._finish(main.Card.EXPLORER)
-        self.assertAlmostEqual(self.game.score_mult, 1.25)
+        self.assertAlmostEqual(self.game.score_mult, 1.5)
+        # One unit of the 150 is x1.0066...: the payoff is exactly
+        # +0 xMult to +1 xMult, in proportion to the fraction covered.
+        self.game.visited_cells = {(4, 7)}
+        self.game.score_mult = 1
+        self._finish(main.Card.EXPLORER)
+        self.assertAlmostEqual(self.game.score_mult,
+                               1 + 1 / (main.GRID_WIDTH * main.GRID_HEIGHT))
+
+    def test_the_explorer_does_not_pay_for_distance_travelled(self):
+        # The measure used to be the distance the marble travelled; it is now
+        # the units it has been in, so a marble that has covered the whole
+        # board's length in pixels but has not recorded a single unit pays
+        # nothing (the recorded set — not marble.distance — is the measure).
+        marble = self._add_marble()
+        marble.distance = main.GRID_SIZE * main.GRID_WIDTH * main.GRID_HEIGHT
+        self.game.visited_cells = set()
+        self.game.score_mult = 1
+        self._finish(main.Card.EXPLORER)
+        self.assertAlmostEqual(self.game.score_mult, 1.0)
 
     def test_the_end_cards_pay_through_a_real_run_finish(self):
         # The end-of-run cards are applied by the run's own finish path (not
         # only when a test calls them by hand): a finished run multiplies the
-        # score by the Explorer's distance factor before it is finalized.
+        # score by the Explorer's visited-units factor before it is finalized.
         self.game.cards = _own(main.Card.EXPLORER)
         self.game.marbles = []
         marble = self._add_marble()
-        # A full board's worth of travel: 4 units, i.e. exactly x2.
-        marble.distance = main.GRID_SIZE * main.GRID_WIDTH * main.GRID_HEIGHT
+        # The whole board visited: 4 units, i.e. exactly x2.
+        self.game.visited_cells = {
+            (gx, gy) for gx in range(main.GRID_WIDTH)
+            for gy in range(main.GRID_HEIGHT)}
         marble.finished = True
         self.game.run_active = True
         self.game.run_complete = False
@@ -494,7 +534,7 @@ class FountainTests(GameTestCase):
         self.game._flush_run_xmult()
         # Two groups pay +0.25 each: ONE x1.5 factor, not two compounded x1.25s,
         # exactly as the other measured xMult cards pay (Island's groups, the
-        # Skater's slippery blocks, the Explorer's distance).
+        # Skater's slippery blocks, the Explorer's visited units).
         self.assertAlmostEqual(self.game.score_mult, 4 * (1 + 0.25 * 2))
 
     def test_no_streak_pays_nothing(self):
@@ -524,7 +564,7 @@ class IntangibleTests(GameTestCase):
         self.assertEqual(main.Card.rarity_name(main.Card.INTANGIBLE), "Common")
         description = main.Card.description(main.Card.INTANGIBLE)
         self.assertIn("0.5 mult", description)
-        self.assertIn("15 mult", description)
+        self.assertIn("15 a second", description)
         self.assertIn("locked board unit", description)
         self.assertIn("at the end of the run", description)
 
@@ -733,14 +773,15 @@ class NamedCardOwnershipTests(GameTestCase):
 
     def test_a_blueprint_copies_an_end_card(self):
         self.game.cards = _own(main.Card.EXPLORER, main.Card.BLUEPRINT)
-        marble = self._add_marble()
-        marble.distance = 3000.0
-        fraction = ((3000.0 / main.GRID_SIZE)
-                    / (main.GRID_WIDTH * main.GRID_HEIGHT))
+        # Half the board visited: 2 units, i.e. x1.5, paid twice (the card and
+        # the Blueprint's copy of it).
+        self.game.visited_cells = {
+            (gx, gy) for gx in range(main.GRID_WIDTH // 2)
+            for gy in range(main.GRID_HEIGHT)}
         self.game.score_mult = 1
         self.game._apply_cards_on_finish()
         self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, (1 + fraction) ** 2)
+        self.assertAlmostEqual(self.game.score_mult, 1.5 ** 2)
 
     def test_the_card_cutter_trial_takes_a_named_card_out_of_the_run(self):
         joker = main.CardItem(main.Card.JOKER, 20)
@@ -781,3 +822,149 @@ class NamedCardOwnershipTests(GameTestCase):
         self.assertEqual(main.cards.effective_card_value(self.game, 0),
                          main.Card.JOKER)
         self.assertEqual(main.cards.effective_card_amount(self.game, 0), 0)
+
+
+class SwashbucklerTests(GameTestCase):
+    """Swashbuckler: +mult equal to a fifth of the cards' total sell price."""
+
+    def _sell_total(self):
+        """The sell price of every card the player owns."""
+        return sum(self.game._sell_price(card) for card in self.game.cards)
+
+    def test_the_card_data(self):
+        self.assertEqual(main.Card.name(main.Card.SWASHBUCKLER), "Swashbuckler")
+        self.assertEqual(main.Card.PRICES[main.Card.SWASHBUCKLER], 42)
+        self.assertEqual(main.Card.rarity_name(main.Card.SWASHBUCKLER), "Rare")
+        self.assertTrue(main.Card.comment(main.Card.SWASHBUCKLER))
+        self.assertIn("1/5", main.Card.description(main.Card.SWASHBUCKLER))
+        self.assertIn("sell price", main.Card.description(main.Card.SWASHBUCKLER))
+
+    def test_it_pays_a_fifth_of_the_cards_sell_price(self):
+        # Coupon and Market are passive, so the only start-of-run payoff in the
+        # area is the Swashbuckler's own.
+        self.game.cards = _own(main.Card.SWASHBUCKLER, main.Card.COUPON,
+                               main.Card.MARKET)
+        expected = self._sell_total() / 5
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        self.assertAlmostEqual(self.game.score_mult, 1 + expected)
+        # Its own price counts, so the card is never worth nothing on its own.
+        self.game.cards = _own(main.Card.SWASHBUCKLER)
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        alone = self.game.score_mult - 1
+        self.assertGreater(alone, 0)
+        self.assertAlmostEqual(alone, self._sell_total() / 5)
+
+    def test_a_dearer_card_pays_more(self):
+        # The measure is the cards' worth, so swapping a cheap card for a dear
+        # one raises the payoff instead of leaving it alone.
+        self.game.cards = _own(main.Card.SWASHBUCKLER, main.Card.RIPPED_CARD)
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        cheap = self.game.score_mult
+        self.game.cards = _own(main.Card.SWASHBUCKLER, main.Card.INFINITY)
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        self.assertGreater(self.game.score_mult, cheap)
+
+    def test_the_measure_is_the_same_sell_price_a_sale_refunds(self):
+        # The Market card refunds 75% instead of 50%, and Swashbuckler reads the
+        # same number a sale would pay, so Market raises the card's mult too.
+        self.game.cards = _own(main.Card.SWASHBUCKLER, main.Card.COUPON)
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        plain = self.game.score_mult - 1
+        self.game.cards.append(main.CardItem(main.Card.MARKET, 26))
+        expected = self._sell_total() / 5
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        self.assertGreater(self.game.score_mult - 1, plain)
+        self.assertAlmostEqual(self.game.score_mult - 1, expected)
+
+    def test_the_particle_takes_the_blue_mult_colour(self):
+        self.game.cards = _own(main.Card.SWASHBUCKLER)
+        self.game.score_particles.clear()
+        self.game._apply_cards()
+        self.assertEqual(len(self.game.score_particles), 1)
+        self.assertEqual(self.game.score_particles[0].color, main.BLUE)
+
+
+class StencilTests(GameTestCase):
+    """Stencil: +1 xMult for each card slot no OTHER card is filling."""
+
+    def _start(self, *values):
+        """Own the cards, fire the start of the run, and settle the xMult.
+
+        An xMult a card earns is BANKED for the run and lands when the run
+        settles (see Game._apply_xmult / _flush_run_xmult), so a test reading
+        the multiplier has to settle it — the same two steps a finished run
+        takes (see NamedCardEndTests._finish).
+        """
+        self.game.cards = _own(*values)
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        self.game._flush_run_xmult()
+
+    def test_the_card_data(self):
+        self.assertEqual(main.Card.name(main.Card.STENCIL), "Stencil")
+        self.assertEqual(main.Card.PRICES[main.Card.STENCIL], 46)
+        self.assertEqual(main.Card.rarity_name(main.Card.STENCIL), "Epic")
+        self.assertTrue(main.Card.comment(main.Card.STENCIL))
+        self.assertIn("+1 xMult", main.Card.description(main.Card.STENCIL))
+        self.assertIn("empty card slot", main.Card.description(main.Card.STENCIL))
+
+    def test_stencil_alone_in_five_slots_multiplies_by_five(self):
+        # The user's example: only the Stencil, five card slots in all, so all
+        # five count (its own slot included) and the multiplier goes x5.
+        self.assertEqual(self.game.max_cards, 5)
+        self._start(main.Card.STENCIL)
+        self.assertEqual(self.game.score_mult, 5)
+
+    def test_every_other_card_costs_it_a_whole_x_mult(self):
+        self._start(main.Card.STENCIL, main.Card.COUPON)
+        self.assertEqual(self.game.score_mult, 4)     # four slots, x4
+        self._start(main.Card.STENCIL, main.Card.COUPON, main.Card.MARKET,
+                    main.Card.MINESHAFT)
+        self.assertEqual(self.game.score_mult, 2)     # one slot left, x2
+
+    def test_a_full_card_area_leaves_it_nothing_to_multiply(self):
+        # Every other slot taken: there is no headroom left, so the card pays
+        # nothing at all (its gate, exactly like Island with no groups).
+        self.game.cards = _own(main.Card.STENCIL, main.Card.COUPON,
+                               main.Card.MARKET, main.Card.MINESHAFT,
+                               main.Card.GARDEN)
+        self.assertEqual(len(self.game.cards), self.game.max_cards)
+        self.assertEqual(main.cards.stencil_units(self.game), 0)
+        self.game.score_mult = 1
+        self.game.score_particles.clear()
+        self.game._apply_cards()
+        self.game._flush_run_xmult()
+        self.assertEqual(self.game.score_mult, 1)
+        self.assertEqual(len(self.game.score_particles), 0)
+
+    def test_essence_takes_a_slot_away_from_the_count(self):
+        # Essence shrinks the card area itself (Game.max_cards), so the Stencil
+        # counts one slot fewer: with Essence beside it there are three slots
+        # that no other card is filling, so the multiplier goes x3.
+        self.game.cards = _own(main.Card.STENCIL, main.Card.ESSENCE)
+        self.assertEqual(self.game.max_cards, 4)
+        self.assertEqual(main.cards.stencil_units(self.game), 2)
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        self.game._flush_run_xmult()
+        self.assertEqual(self.game.score_mult, 3)
+
+    def test_a_second_stencil_multiplies_by_the_same_number_again(self):
+        self._start(main.Card.STENCIL, main.Card.STENCIL)
+        self.assertEqual(self.game.score_mult, 25)    # x5 then x5
+
+    def test_a_cut_stencil_does_nothing(self):
+        # The Card cutter silences the card's effect, so no xMult lands.
+        stencil = main.CardItem(main.Card.STENCIL, 46)
+        self.game.cards = [stencil]
+        self.game.disabled_card = stencil
+        self.game.score_mult = 1
+        self.game._apply_cards()
+        self.game._flush_run_xmult()
+        self.assertEqual(self.game.score_mult, 1)
