@@ -435,17 +435,17 @@ class TileArt:
 
     A "tile" is one square LATTICE CELL — big enough that the whole screen tiles
     exactly — drawn as a TESSELLATION of a few shapes in a few shades of the
-    modifier's own base colour (see Trial.TILE_STYLES and FinalBoss.TILE_STYLES
-    for which shapes, ui for the drawing). The tile is both the modifier's ICON
-    (its collection entry) and the pattern the whole screen is covered in while
-    that modifier is in play, and the panels drawn over it (the board, the
-    inventory, the shop, the info box) are filled from the same colour family one
-    step lighter, so a run reads as one palette.
+    modifier's own base colour (see Trial.TILE_STYLES for which shapes, ui for
+    the drawing). The tile is both the modifier's ICON (its collection entry)
+    and the pattern the whole screen is covered in while that modifier is in
+    play, and the panels drawn over it (the board, the inventory, the shop, the
+    info box) are filled from the same colour family one step lighter, so a run
+    reads as one palette.
 
-    The run modifiers are Trials and FinalBosses, so both inherit this: each
-    spells out its own COLORS and TILE_STYLES — as unlike each other as the
-    modifiers are, and never repeating another modifier's family — and gets the
-    derived shades (palette, panel_color, locked_color) for free.
+    The run modifiers are the TRIALS, so each trial inherits this: it spells out
+    its own colour and tile style — as unlike the other trials as it is, and
+    never repeating another trial's family — and gets the derived shades
+    (palette, panel_color, locked_color) for free.
     """
     # The base colour of each modifier's tile: the field its tessellation is
     # built from, and the hue its icon in the collection and its tinted panels
@@ -553,6 +553,13 @@ class Trial(TileArt):
     PHANTOM = 16
     VERTIGO = 17
     ELEPHANT = 18
+    # The two that used to be the 24th run's FINAL BOSSES (user request: "make
+    # the final bosses just normal bosses ... for the final boss, just use a
+    # random normal boss"): they are ordinary run modifiers now, drawn from the
+    # same pool as every other trial, with Sky High's target doubled rather than
+    # tripled and the Singularity's mass growth slowed down.
+    SKY_HIGH = 19
+    SINGULARITY = 20
 
     NAMES: ClassVar[dict[int, str]] = {
         HANDS_TIED: "Hands tied",
@@ -574,6 +581,8 @@ class Trial(TileArt):
         PHANTOM: "Phantom",
         VERTIGO: "Vertigo",
         ELEPHANT: "Elephant",
+        SKY_HIGH: "Sky High",
+        SINGULARITY: "Singularity",
     }
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
         HANDS_TIED: "A random 1/4 of your blocks can score 1 fewer time per "
@@ -602,13 +611,15 @@ class Trial(TileArt):
                  "the first second of the run.",
         VERTIGO: "Gravity pulls in a random direction.",
         ELEPHANT: "The marble starts at double its size.",
+        SKY_HIGH: "The required score is doubled.",
+        SINGULARITY: "The marble gains mass over time, falling ever faster.",
     }
     ORDER: ClassVar[list[int]] = [HANDS_TIED, CARD_CUTTER, DEAD_ZONE, ALL_FINISHES,
                                   SLIM_PICKINGS, LONG_RUN, SHUFFLED,
                                   BOUNCY_CASTLE, CRUMBLING, MARBLE_WEIGHT,
                                   SPEEDRUN, REPEATS_ONLY, INFLATION,
                                   EMPTY_POCKETS, DEAL_BREAKER, X_RAY, PHANTOM,
-                                  VERTIGO, ELEPHANT]
+                                  VERTIGO, ELEPHANT, SKY_HIGH, SINGULARITY]
     # The base colour of each trial's tile (see TileArt.COLORS).
     COLORS: ClassVar[dict[int, tuple]] = {
         HANDS_TIED: (58, 62, 76),       # chained slate
@@ -630,12 +641,17 @@ class Trial(TileArt):
         PHANTOM: (150, 205, 190),       # spectral green
         VERTIGO: (170, 60, 200),        # dizzy violet
         ELEPHANT: (140, 110, 95),       # heavy taupe
+        # The two former final bosses keep the tiles they wore as bosses: the
+        # event horizon's indigo and a very high sky's cerulean, neither of them
+        # another trial's hue.
+        SKY_HIGH: (86, 172, 220),       # sky cerulean
+        SINGULARITY: (58, 46, 84),      # event-horizon indigo
     }
     # Which tessellation each trial's tile is drawn with (see ui): the family is
     # picked to echo what the trial does (interlocked rings for chained hands,
     # circles bouncing in a castle, chevrons for speed, scales for repetition,
     # cut cells for a cutter, climbing bars for inflation ...) and NO TWO
-    # TRIALS — nor either final boss — SHARE ONE, so a pattern names its trial.
+    # TRIALS SHARE ONE, so a pattern names its trial.
     TILE_STYLES: ClassVar[dict[int, str]] = {
         HANDS_TIED: "rings",         # links of a chain
         CARD_CUTTER: "splits",       # cards cut corner to corner
@@ -656,6 +672,11 @@ class Trial(TileArt):
         PHANTOM: "crescents",       # moons fading in and out
         VERTIGO: "gyres",           # dials, each turned a quarter further
         ELEPHANT: "plates",         # heavy slabs, side by side
+        # The two former bosses' own families: unit blocks stacked into a
+        # climbing stair for the run whose target is doubled, and rings closing
+        # on a black core for the marble that grows heavier.
+        SKY_HIGH: "towers",         # blocks stacked into a stair
+        SINGULARITY: "cores",       # rings collapsing into a black core
     }
 
     @classmethod
@@ -669,61 +690,6 @@ class Trial(TileArt):
     @classmethod
     def cycle(cls, trial):
         idx = cls.ORDER.index(trial) if trial in cls.ORDER else 0
-        return cls.ORDER[(idx + 1) % len(cls.ORDER)]
-
-
-class FinalBoss(TileArt):
-    """The final run's boss modifier (the 24th run).
-
-    Exactly one boss is chosen at random when the player reaches the last run.
-    Each class constant is a boss's ID number (e.g. ``FinalBoss.SINGULARITY ==
-    0``). The boss's description explains its effect on the run.
-
-    The boss REPLACES the trial in the run's display (see ui.draw_trial_box), so
-    it wears the run's tile art as well: the screen is covered in the boss's own
-    tessellation while its run is played, the panels take the boss's colour, and
-    the boss's entry in the collection shows the same tile (see
-    main.Game.tile_source). The rolled trial's RULES still apply to a boss run —
-    only its tile is the boss's.
-    """
-    SINGULARITY = 0
-    SKY_HIGH = 1
-
-    NAMES: ClassVar[dict[int, str]] = {
-        SINGULARITY: "Singularity",
-        SKY_HIGH: "Sky High",
-    }
-    DESCRIPTIONS: ClassVar[dict[int, str]] = {
-        SINGULARITY: "The marble gains mass quickly and linearly over time, "
-                     "falling ever faster.",
-        SKY_HIGH: "The required score is tripled.",
-    }
-    ORDER: ClassVar[list[int]] = [SINGULARITY, SKY_HIGH]
-    # The bosses' tile colours (see TileArt.COLORS): the event horizon's indigo
-    # and a very high sky's cerulean, neither of them a trial's hue.
-    COLORS: ClassVar[dict[int, tuple]] = {
-        SINGULARITY: (58, 46, 84),      # event-horizon indigo
-        SKY_HIGH: (86, 172, 220),       # sky cerulean
-    }
-    # Their tessellations, each the boss's alone: rings closing on a black core
-    # for the singularity the marble falls into, and unit blocks stacked into a
-    # climbing stair for the run whose target is tripled.
-    TILE_STYLES: ClassVar[dict[int, str]] = {
-        SINGULARITY: "cores",        # rings collapsing into a black core
-        SKY_HIGH: "towers",          # blocks stacked into a stair
-    }
-
-    @classmethod
-    def name(cls, boss):
-        return cls.NAMES.get(boss, "Unknown")
-
-    @classmethod
-    def description(cls, boss):
-        return cls.DESCRIPTIONS.get(boss, "Unknown boss.")
-
-    @classmethod
-    def cycle(cls, boss):
-        idx = cls.ORDER.index(boss) if boss in cls.ORDER else 0
         return cls.ORDER[(idx + 1) % len(cls.ORDER)]
 
 
@@ -1030,6 +996,23 @@ class Card:
     # where the collision happens (Game._brain_loop_roll), so it takes the next
     # free id in the 12..77 band.
     BRAIN_LOOP = 18  # a sticky touch has a 1/3 chance of handing over an action
+    # The four newest whole cards. Claustrophobia is a measured card (it counts
+    # the plain walls on the board at the start of a run), so it joins
+    # Card.NAMED; the other three are passives read where their mechanic lives —
+    # the shop's magnitudes (Earthquake), the trial display's fees (Challenger)
+    # and the inventory's own G key (Odyssey, the second card with a VERB, after
+    # Hoard). All four take the next free ids in the 12..77 band.
+    CLAUSTROPHOBIA = 19  # +3 mult at the start of a run for each plain wall
+    EARTHQUAKE = 20      # shop effects and scorers roll 10% higher
+    CHALLENGER = 21      # changing or disabling a trial costs half as much
+    ODYSSEY = 22         # press G to bank an item for a run, for half its value
+    # The two newest whole cards, taking the next free ids in the 12..77 band.
+    # Matrix is a measured card (an end-phase one: it counts seconds inside a
+    # locked board unit, which is only final once the marbles have stopped), so
+    # it joins Card.NAMED; Gate is an event card, read where the key/lock
+    # mechanic happens (Game._gate_key_and_lock).
+    MATRIX = 23  # +45 chips an unphased second inside a locked board unit
+    GATE = 24    # +30 chips each time a marble carries its key through the lock
 
     NAMES: ClassVar[dict[int, str]] = {
         # The named cards (the classic cards).
@@ -1074,6 +1057,12 @@ class Card:
         SWASHBUCKLER: "Swashbuckler",
         STENCIL: "Stencil",
         BRAIN_LOOP: "Brain Loop",
+        CLAUSTROPHOBIA: "Claustrophobia",
+        EARTHQUAKE: "Earthquake",
+        CHALLENGER: "Challenger",
+        ODYSSEY: "Odyssey",
+        MATRIX: "Matrix",
+        GATE: "Gate",
     }
     # Short flavor lines, one per whole card. The named cards' lines are the
     # ones their named conditions carried, which are in turn the comments the
@@ -1120,6 +1109,12 @@ class Card:
         SWASHBUCKLER: "Loot and plunder.",
         STENCIL: "Less is more.",
         BRAIN_LOOP: "Ideas on impact.",
+        CLAUSTROPHOBIA: "Walls closing in.",
+        EARTHQUAKE: "Everything shakes loose.",
+        CHALLENGER: "Bring it on.",
+        ODYSSEY: "A long way from home.",
+        MATRIX: "Inside the grid.",
+        GATE: "The way is open.",
     }
     # What each whole card does. A named card's line states the payoff it pays
     # at its own magnitude (the card has no scorer half to roll, so the number
@@ -1166,6 +1161,12 @@ class Card:
         SWASHBUCKLER: "Adds mult at the start of the run equal to 1/5 of the total sell price of your cards",
         STENCIL: "Gives +1 xMult at the start of the run for each empty card slot, counting its own",
         BRAIN_LOOP: "Gives a 1/3 chance of a random action each time a marble collides with a sticky block",
+        CLAUSTROPHOBIA: "Adds 3 mult at the start of the run for each plain Rect block on your board",
+        EARTHQUAKE: "Effects and scorers offered in the shop roll 10% higher",
+        CHALLENGER: "Changing or disabling this run's trial costs half as much",
+        ODYSSEY: "Press G to put a selected item away for a run; it returns with half its sell price in cash (one per copy)",
+        MATRIX: "Adds 45 chips at the end of the run for each second a marble is inside a locked board unit, not phasing",
+        GATE: "Adds 30 chips each time a marble that collected a key passes through its opened lock",
     }
     # All whole-card prices are 20% lower (rounded down): 24->19, 42->33,
     # 60->48, 46->36, 48->38, 56->44. The nine utility cards are priced by how
@@ -1229,7 +1230,28 @@ class Card:
                                         # right blocks, where 1000-handed
                                         # ($42) hands one over after every run
                                         # whatever the board looks like.
-                                        BRAIN_LOOP: 40}
+                                        BRAIN_LOOP: 40,
+                                        # Claustrophobia is a mult engine that
+                                        # scales with the plainest thing in the
+                                        # game (a free Rect wall), so it sits
+                                        # beside Swashbuckler at the top of the
+                                        # cheap band. Earthquake is a quiet
+                                        # always-on buff to what the shop rolls,
+                                        # Challenger only pays off for a player
+                                        # who buys trials, and Odyssey is an
+                                        # income card that never spends the item
+                                        # it banks.
+                                        CLAUSTROPHOBIA: 40, EARTHQUAKE: 38,
+                                        CHALLENGER: 28, ODYSSEY: 40,
+                                        # Matrix pays a big rate for a state
+                                        # that is rare and easy to lose (a
+                                        # marble inside a locked unit with its
+                                        # phase off), so it sits beside the
+                                        # other measured end cards; Gate is an
+                                        # event card worth one standard chip
+                                        # unit a pass, so it is priced with the
+                                        # cheapest utility whole cards.
+                                        MATRIX: 30, GATE: 24}
     # Face colors and center glyphs for the mini-card look (one per card).
     COLORS: ClassVar[dict[int, tuple]] = {
         # The named cards: one identity colour each (the jester's violet, the
@@ -1277,6 +1299,12 @@ class Card:
         SWASHBUCKLER: (140, 45, 60),  # buccaneer maroon
         STENCIL: (150, 165, 120),   # stencil sage
         BRAIN_LOOP: (205, 115, 170),  # synapse pink
+        CLAUSTROPHOBIA: (115, 95, 80),  # crowding brown
+        EARTHQUAKE: (135, 105, 70),   # fault-line earth
+        CHALLENGER: (215, 120, 45),   # duel orange
+        ODYSSEY: (40, 90, 130),       # open sea
+        MATRIX: (60, 160, 95),        # terminal green
+        GATE: (105, 115, 140),        # portcullis steel
     }
     # How far a card's face has to sit from its rarity border to be worth the
     # name, and the shades that move a face which is too close (smallest first,
@@ -1305,6 +1333,9 @@ class Card:
         HOARD: "H", INFINITY: "8",
         SWASHBUCKLER: "X", STENCIL: "A",
         BRAIN_LOOP: "Q",
+        CLAUSTROPHOBIA: "C", EARTHQUAKE: "E",
+        CHALLENGER: "K", ODYSSEY: "O",
+        MATRIX: "M", GATE: "G",
     }
     # Every whole card, in id order, so the shop pool and the codex list the
     # named cards first and then the utility cards. The match-group cards are
@@ -1322,7 +1353,9 @@ class Card:
                                   THOUSAND_HANDED, PROCRASTINATION, ESSENCE,
                                   CONCERT, ISLAND, FOUNTAIN, INTANGIBLE,
                                   HOARD, INFINITY,
-                                  SWASHBUCKLER, STENCIL, BRAIN_LOOP]
+                                  SWASHBUCKLER, STENCIL, BRAIN_LOOP,
+                                  CLAUSTROPHOBIA, EARTHQUAKE, CHALLENGER,
+                                  ODYSSEY, MATRIX, GATE]
     # How rare each whole card is. A whole card's tier follows its price, the
     # codebase's usual rarity rule (see component_weight): up to $28 Common,
     # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
@@ -1358,6 +1391,17 @@ class Card:
         # Swashbuckler is Rare: the scaling mult engine (its own band), and so
         # is Brain Loop ($40), an action engine that needs sticky blocks.
         SWASHBUCKLER: Rarity.RARE, BRAIN_LOOP: Rarity.RARE,
+        # Claustrophobia ($40) is the second Rare engine: it pays for walls,
+        # and a wall is the one thing the assembler builds for free. Odyssey
+        # ($40) is Rare too: it is an income card that costs a card slot and
+        # ties up an item for a run. Earthquake ($38) and Challenger ($28) are
+        # utilities, so they sit in the tiers their prices put them in.
+        CLAUSTROPHOBIA: Rarity.RARE, ODYSSEY: Rarity.RARE,
+        EARTHQUAKE: Rarity.UNUSUAL, CHALLENGER: Rarity.COMMON,
+        # Matrix ($30) is Unusual beside the other measured end cards, and Gate
+        # ($24) is a Common, like the cheap utility whole cards it is priced
+        # with.
+        MATRIX: Rarity.UNUSUAL, GATE: Rarity.COMMON,
         # Epic: the economy cards that compound over a whole game, and Stencil
         # ($46), whose x5 wants a deliberately empty card area.
         COUPON: Rarity.EPIC, DOPPELGANGER: Rarity.EPIC,
@@ -1423,6 +1467,19 @@ class Card:
         # multiply the multiplier by 5.
         SWASHBUCKLER: ("start", Scorer.MULT_ADD, 1.0 / 20.0, "card_sell_total"),
         STENCIL: ("start", Scorer.MULT_MUL, 4.0, "stencil_slots"),
+        # Claustrophobia is the first measured card that counts the BOARD's own
+        # furniture rather than something the run did: 4 x 0.75 x walls = +3
+        # mult a plain wall, which is the ratio that makes one unit three
+        # quarters of a wheel instead of a whole one (see "plain_rects" in
+        # cards._named_card_units).
+        CLAUSTROPHOBIA: ("start", Scorer.MULT_ADD, 3.0 / 4.0, "plain_rects"),
+        # Matrix is the locked-unit clause of Intangible's measure on its own,
+        # paying chips instead of mult: the chips base is 30, so ratio 1.5 is
+        # the +45 chips a second the card asks for, and the measure counts only
+        # the seconds the marble was NOT phasing (see
+        # Game._count_locked_no_phase_time), because the phase effect is the
+        # one thing that makes being inside a locked unit trivial.
+        MATRIX: ("end", Scorer.CHIPS_ADD, 1.5, "inside_locked_no_phase"),
     }
 
     @classmethod
@@ -1696,6 +1753,11 @@ class Action:
     BRAINSTORM = 8
     MASS_PRODUCTION = 9
     GRACE = 10
+    # The two newest actions. Inaction is the joke that pays: it does nothing,
+    # but every few of them used wins a card slot (see main.INACTION_USES_PER_SLOT).
+    # Foresight is the dear one: a permanent extra action slot.
+    INACTION = 11
+    FORESIGHT = 12
 
     NAMES: ClassVar[dict[int, str]] = {
         DEATH: "Death",
@@ -1709,6 +1771,8 @@ class Action:
         BRAINSTORM: "Brainstorm",
         MASS_PRODUCTION: "Mass production",
         GRACE: "Grace",
+        INACTION: "Inaction",
+        FORESIGHT: "Foresight",
     }
     # What the v1 action does. The descriptions mention the v2 upgrade so the
     # shop and collection show both versions at a glance.
@@ -1726,6 +1790,8 @@ class Action:
         MASS_PRODUCTION: "Triples the resource points this run earns (v2: doubles them for the "
                          "rest of the game).",
         GRACE: "Adds +1 xMult to this run (v2: this run's required score drops to 0).",
+        INACTION: "...does nothing?",
+        FORESIGHT: "Permanently adds 1 action slot (v2: no limit at all).",
     }
     # What the upgraded (v2) action does.
     V2_DESCRIPTIONS: ClassVar[dict[int, str]] = {
@@ -1740,6 +1806,8 @@ class Action:
         BRAINSTORM: "Halves the price of every shop reroll, for the rest of the game.",
         MASS_PRODUCTION: "Doubles every resource point you earn, for the rest of the game.",
         GRACE: "This run's required score becomes 0: it is cleared whatever it scores.",
+        INACTION: "...does nothing, and hands over a card slot.",
+        FORESIGHT: "Removes the limit on owned actions: hold as many as you like.",
     }
     # Short flavor lines, one per action.
     COMMENTS: ClassVar[dict[int, str]] = {
@@ -1754,6 +1822,8 @@ class Action:
         BRAINSTORM: "Fresh ideas on demand.",
         MASS_PRODUCTION: "Make more of less.",
         GRACE: "This one's on the house.",
+        INACTION: "Doing nothing, deliberately.",
+        FORESIGHT: "See what is coming.",
     }
     # Actions are cheap one-use power-ups: their prices were halved (48 -> 24,
     # 56 -> 28), so a run can afford one almost any time. Deja Vu costs a little
@@ -1765,7 +1835,15 @@ class Action:
     PRICES: ClassVar[dict[int, int]] = {DEATH: 24, RECOGNITION: 24, DEJA_VU: 28,
                                         ANOINTMENT: 32, STRENGTH: 28, SPIRIT: 36,
                                         CLEANSWEEP: 70, EXPANSION: 25, BRAINSTORM: 25,
-                                        MASS_PRODUCTION: 36, GRACE: 25}
+                                        MASS_PRODUCTION: 36, GRACE: 25,
+                                        # Inaction is priced like the cheap
+                                        # actions even though five of them buy a
+                                        # card slot (five at $24 is $120 a
+                                        # slot). Foresight is the dearest
+                                        # action in the catalogue by a mile: it
+                                        # is the only one that widens the
+                                        # action area itself, for good.
+                                        INACTION: 24, FORESIGHT: 90}
     # Face colors and center glyphs for the mini-action look (one per action).
     COLORS: ClassVar[dict[int, tuple]] = {
         DEATH: (120, 45, 45),        # deathly red
@@ -1779,21 +1857,26 @@ class Action:
         BRAINSTORM: (205, 165, 45),  # idea gold
         MASS_PRODUCTION: (170, 60, 130),  # industry magenta
         GRACE: (150, 200, 225),      # halo sky
+        INACTION: (135, 140, 150),   # empty grey
+        FORESIGHT: (85, 75, 165),    # vision indigo
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         DEATH: "D", RECOGNITION: "R", DEJA_VU: "V",
         ANOINTMENT: "A", STRENGTH: "S", SPIRIT: "P",
         CLEANSWEEP: "C", EXPANSION: "E", BRAINSTORM: "B",
         MASS_PRODUCTION: "M", GRACE: "G",
+        INACTION: "?", FORESIGHT: "F",
     }
     ORDER: ClassVar[list[int]] = [DEATH, RECOGNITION, DEJA_VU, ANOINTMENT,
                                   STRENGTH, SPIRIT, CLEANSWEEP, EXPANSION,
-                                  BRAINSTORM, MASS_PRODUCTION, GRACE]
+                                  BRAINSTORM, MASS_PRODUCTION, GRACE,
+                                  INACTION, FORESIGHT]
     # Actions that act on the game itself rather than on a chosen block or card:
     # they need no subject, so selecting one and pressing S uses it straight
     # away (see Game._apply_action).
     NO_TARGET: ClassVar[tuple[int, ...]] = (CLEANSWEEP, EXPANSION, BRAINSTORM,
-                                            MASS_PRODUCTION, GRACE)
+                                            MASS_PRODUCTION, GRACE, INACTION,
+                                            FORESIGHT)
 
     @classmethod
     def name(cls, action):
@@ -1823,6 +1906,159 @@ class Action:
     def cycle(cls, action):
         idx = cls.ORDER.index(action) if action in cls.ORDER else 0
         return cls.ORDER[(idx + 1) % len(cls.ORDER)]
+
+
+# The rate a resource pack pays an option at: twice what a trigger of the
+# scorer would bank, so a Picky option at its default magnitude (0.5 of a
+# point) is worth one whole option point.
+RESOURCE_PACK_FACTOR = 2.0
+
+
+class Pack:
+    """An item pack: a bundle of offers the player buys and keeps part of.
+
+    A pack is a shelf offer like a component or a card, except that what it
+    hands over is a CHOICE: buying one opens it, the player is shown the
+    options its size deals out (see SIZE_OPTIONS), and keeps SIZE_KEEP of them.
+    A pack's TYPE says what its options are — a shape pack offers shapes, a
+    card pack offers cards, a part pack offers any component part (shape,
+    effect or scorer, the pieces a block is assembled from), and a RANDOM pack
+    offers anything any other pack might, mixed.
+
+    Two rules cut across the types:
+    * an ACTION found in an action pack is USED rather than shelved: the pack
+      hands it over to be fired at once, so it never takes an action-area slot
+      (a targeted action is armed for its target instead — see
+      main.Game._keep_pack_action). An action found in a RANDOM pack is not a
+      pack action: it goes into the action area like any other;
+    * a RESOURCE pack offers resource points rather than items, each worth
+      RESOURCE_PACK_FACTOR times what a trigger of that scorer banks, rolled at
+      that scorer's own magnitude — so a Picky option at its default magnitude
+      is worth 2 x 0.5 = 1 option point.
+    """
+    SHAPE = 0
+    EFFECT = 1
+    SCORER = 2
+    PART = 3
+    BLOCK = 4
+    CARD = 5
+    ACTION = 6
+    RESOURCE = 7
+    RANDOM = 8
+
+    NAMES: ClassVar[dict[int, str]] = {
+        SHAPE: "Shape Pack",
+        EFFECT: "Effect Pack",
+        SCORER: "Scorer Pack",
+        PART: "Part Pack",
+        BLOCK: "Block Pack",
+        CARD: "Card Pack",
+        ACTION: "Action Pack",
+        RESOURCE: "Resource Pack",
+        RANDOM: "Random Pack",
+    }
+    # What a pack of this type offers. Shown in the sidebar and in the codex.
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        SHAPE: "A choice of shapes to assemble into blocks.",
+        EFFECT: "A choice of effects, each at its own rolled strength.",
+        SCORER: "A choice of scorers, each at its own rolled amount.",
+        PART: "A choice of parts: shapes, effects and scorers mixed.",
+        BLOCK: "A choice of ready-made blocks.",
+        CARD: "A choice of cards.",
+        ACTION: "A choice of actions, used as soon as one is kept (they never "
+                "take an action slot).",
+        RESOURCE: f"A choice of resource points: each option is worth "
+                  f"{RESOURCE_PACK_FACTOR:g}x what a trigger of that scorer "
+                  f"banks.",
+        RANDOM: "A choice of anything another pack might hold, mixed.",
+    }
+    # The five sizes, as (options dealt, options kept). A bigger pack deals out
+    # more options, and mega and giga let the player keep a second one.
+    NORMAL = 0
+    BIG = 1
+    JUMBO = 2
+    MEGA = 3
+    GIGA = 4
+
+    SIZE_NAMES: ClassVar[dict[int, str]] = {
+        NORMAL: "Normal", BIG: "Big", JUMBO: "Jumbo", MEGA: "Mega", GIGA: "Giga",
+    }
+    SIZE_OPTIONS: ClassVar[dict[int, int]] = {
+        NORMAL: 3, BIG: 4, JUMBO: 5, MEGA: 5, GIGA: 6,
+    }
+    SIZE_KEEP: ClassVar[dict[int, int]] = {
+        NORMAL: 1, BIG: 1, JUMBO: 1, MEGA: 2, GIGA: 2,
+    }
+    SIZE_ORDER: ClassVar[list[int]] = [NORMAL, BIG, JUMBO, MEGA, GIGA]
+    # What a size multiplies the pack's price by (see main.pack_price). The
+    # baseline is one option's own value, and the multiplier is where the
+    # CHOICE lives: a normal pack charges for one option while handing out the
+    # best of three, and each size up charges a little more for a better pick
+    # (and, from mega on, for a second one) without ever reaching what that
+    # many loose purchases would cost.
+    SIZE_PRICE_FACTORS: ClassVar[dict[int, float]] = {
+        NORMAL: 1.0, BIG: 1.35, JUMBO: 1.7, MEGA: 2.5, GIGA: 3.1,
+    }
+    # Face colours and fallback glyphs for the pack tiles (one per type).
+    COLORS: ClassVar[dict[int, tuple]] = {
+        SHAPE: (90, 140, 200),    # blueprint blue
+        EFFECT: (160, 90, 190),   # effect violet
+        SCORER: (200, 140, 60),   # scoring amber
+        PART: (110, 170, 120),    # assembly green
+        BLOCK: (150, 110, 90),    # built-block brown
+        CARD: (190, 70, 110),     # card magenta
+        ACTION: (70, 150, 160),   # action teal
+        RESOURCE: (170, 170, 70),  # resource ochre
+        RANDOM: (120, 120, 130),  # anything grey
+    }
+    GLYPHS: ClassVar[dict[int, str]] = {
+        SHAPE: "S", EFFECT: "E", SCORER: "C", PART: "P", BLOCK: "B",
+        CARD: "D", ACTION: "A", RESOURCE: "R", RANDOM: "?",
+    }
+    ORDER: ClassVar[list[int]] = [SHAPE, EFFECT, SCORER, PART, BLOCK, CARD,
+                                  ACTION, RESOURCE, RANDOM]
+    # The types a RANDOM pack draws from, and the ones a PART pack draws from.
+    # A random pack offers anything another pack might, so it includes the
+    # resource points; the two "meta" types (part and random) are never an
+    # option's own type.
+    RANDOM_SOURCES: ClassVar[tuple] = (SHAPE, EFFECT, SCORER, BLOCK, CARD,
+                                       ACTION, RESOURCE)
+    PART_SOURCES: ClassVar[tuple] = (SHAPE, EFFECT, SCORER)
+
+    @classmethod
+    def name(cls, pack_type):
+        return cls.NAMES.get(pack_type, "Unknown Pack")
+
+    @classmethod
+    def description(cls, pack_type):
+        return cls.DESCRIPTIONS.get(pack_type, "Unknown pack.")
+
+    @classmethod
+    def size_name(cls, size):
+        return cls.SIZE_NAMES.get(size, "Normal")
+
+    @classmethod
+    def options(cls, size):
+        """How many options a pack of this size deals out."""
+        return cls.SIZE_OPTIONS.get(size, 3)
+
+    @classmethod
+    def keep(cls, size):
+        """How many of them the player keeps."""
+        return cls.SIZE_KEEP.get(size, 1)
+
+    @classmethod
+    def size_description(cls, size):
+        """The one-line rule of a size, e.g. "keep 2 of 5"."""
+        return f"keep {cls.keep(size)} of {cls.options(size)}"
+
+    @classmethod
+    def color(cls, pack_type):
+        return cls.COLORS.get(pack_type, (120, 120, 130))
+
+    @classmethod
+    def glyph(cls, pack_type):
+        return cls.GLYPHS.get(pack_type, "?")
 
 
 # --- Magnitudes -------------------------------------------------------------
@@ -2462,6 +2698,156 @@ def block_price_for(shape, effects, scorer):
              + sum(effect_component_price(e) for e in effects)
              + scorer_component_price(scorer))
     return int(total * 0.75)
+
+
+# --- Item packs: what one option is worth ------------------------------------
+# A pack's price is the average value of ONE of its options times a size
+# factor (see Pack.SIZE_PRICE_FACTORS), so the two helpers below answer "what
+# is one option of this type worth?" from the catalogue itself rather than from
+# a hand-written table: rebalancing a component, a card or an action re-prices
+# every pack that deals it, and no pack can drift out of step with the shop it
+# sits in.
+#
+# "Worth" means what a DRAW of that pool is worth, not the plain average: the
+# shop weights an offer by 1/price (see main.component_weight — dearer items
+# are rarer), so an expensive outlier takes up far less of the pool than it
+# would by count. The expected price of a drawn item is therefore the HARMONIC
+# mean of the pool's prices, which is what keeps one $124 Splitter from pricing
+# every effect pack at Splitter money.
+def _drawn_average(prices):
+    """The average price of an item drawn the way the shop draws it (see above)."""
+    prices = [price for price in prices if price > 0]
+    if not prices:
+        return 0.0
+    return len(prices) / sum(1.0 / price for price in prices)
+
+
+def _flat_average(prices):
+    """The plain average price of a pool drawn evenly (actions, cards a tier)."""
+    prices = [price for price in prices if price > 0]
+    return sum(prices) / len(prices) if prices else 0.0
+
+
+# The average number of effects a randomly built block carries, from
+# main.random_effect_count: no effect 1/4 of the time, and a geometric count
+# after that (1 for 1/2, 2 for 1/4, ...), which averages 1.5.
+AVERAGE_BLOCK_EFFECTS = 1.5
+
+
+def shape_pool_prices():
+    """Every shape the shop sells, as a price (Rect is never sold loose)."""
+    return [COMPONENT_PRICES.get((Component.SHAPE, shape), 0)
+            for shape in Shape.ORDER if shape != Shape.RECT]
+
+
+def effect_pool_prices():
+    """Every effect the shop sells, as a price."""
+    return [effect_component_price(effect) for effect in Effect.REAL_ORDER]
+
+
+def scorer_pool_prices():
+    """Every scorer the shop sells, as a price (None is never sold)."""
+    return [scorer_component_price(scorer) for scorer in Scorer.SHOP_ORDER
+            if scorer != Scorer.NONE]
+
+
+def card_pool_prices():
+    """(price, rarity) for every card the shop can offer.
+
+    The whole cards carry their own tier and price; every match-group card is
+    Common (see Rarity) and priced by its group (see match_group_price), so one
+    entry per group stands for all the group's cards — the shop draws the group
+    and rolls the scorer's magnitude, which never changes the price.
+    """
+    entries = [(Card.PRICES.get(value, 20), Card.rarity(value))
+               for value in Card.ORDER]
+    entries += [(match_group_price(group), Rarity.COMMON)
+                for group in MATCH_GROUPS]
+    return entries
+
+
+def average_card_price():
+    """What one shop card offer is worth, tier odds and all.
+
+    The shop draws the TIER first, by Rarity.WEIGHTS, and the card flat inside
+    the drawn tier (see main.random_card_option_value), so the expected price is
+    the tier-weighted average of each tier's own average — NOT the plain average
+    over every card, which would count the 26 Common match groups 26 times over.
+    """
+    entries = card_pool_prices()
+    if not entries:
+        return 0.0
+    # The tier weights are RELATIVE to each other, so the divisor is the sum of
+    # the TIERS' weights — one term each, however many cards carry the tier.
+    total_weight = sum(Rarity.weight(tier) for tier in Rarity.ORDER) or 1.0
+    total = 0.0
+    for tier in Rarity.ORDER:
+        prices = [price for price, rarity in entries if rarity == tier]
+        total += Rarity.weight(tier) * _flat_average(prices)
+    return total / total_weight
+
+
+def pack_base_price(pack_type):
+    """The average value of ONE option of a pack of this type.
+
+    * a shape/effect/scorer pack deals that pool, drawn as the shop draws it;
+    * a PART pack draws its kind evenly, so it is worth the mean of the three;
+    * a BLOCK pack deals ready-made blocks, whose price is 75% of the sum of
+      their parts (see block_price_for): one shape, one scorer and the average
+      1.5 effects a random block rolls (see main.random_effect_count);
+    * a CARD pack deals shop card offers (see average_card_price);
+    * an ACTION pack deals actions, drawn evenly from the catalogue;
+    * a RESOURCE pack deals resource points, each worth RESOURCE_PACK_FACTOR
+      times what a trigger banks: the average option is worth that many points
+      times the price of ONE conversion (a card, a block or an action — the
+      three things a point buys; a permanent shop slot is a fourth reward and
+      is left out of this average, so the points are priced a little shy of
+      what they can be worth);
+    * a RANDOM pack deals any of the above evenly.
+    """
+    if pack_type == Pack.SHAPE:
+        return _drawn_average(shape_pool_prices())
+    if pack_type == Pack.EFFECT:
+        return _drawn_average(effect_pool_prices())
+    if pack_type == Pack.SCORER:
+        return _drawn_average(scorer_pool_prices())
+    if pack_type == Pack.PART:
+        return _flat_average([pack_base_price(kind)
+                              for kind in Pack.PART_SOURCES])
+    if pack_type == Pack.BLOCK:
+        return 0.75 * (_drawn_average(shape_pool_prices())
+                       + _flat_average(effect_pool_prices()) * AVERAGE_BLOCK_EFFECTS
+                       + _drawn_average(scorer_pool_prices()))
+    if pack_type == Pack.CARD:
+        return average_card_price()
+    if pack_type == Pack.ACTION:
+        return _flat_average(list(Action.PRICES.values()))
+    if pack_type == Pack.RESOURCE:
+        scorers = list(Scorer.RESOURCE_RATE)
+        points = _flat_average([RESOURCE_PACK_FACTOR
+                                * resource_points_for(scorer,
+                                                      Scorer.DEFAULT_AMOUNT.get(scorer, 0))
+                                for scorer in scorers])
+        conversion = _flat_average([pack_base_price(Pack.CARD),
+                                    pack_base_price(Pack.BLOCK),
+                                    pack_base_price(Pack.ACTION)])
+        return points * conversion
+    if pack_type == Pack.RANDOM:
+        return _flat_average([pack_base_price(kind)
+                              for kind in Pack.RANDOM_SOURCES])
+    return 0.0
+
+
+def pack_price(pack_type, size):
+    """A pack's price: one option's value x the size's multiplier (see Pack).
+
+    Rounded down to a whole dollar and never free, and blind to the options the
+    pack actually rolled: two jumbo shape packs cost the same however well or
+    badly their five shapes landed, exactly as a component's own roll never
+    changes its price (see scorer_component_price).
+    """
+    base = pack_base_price(pack_type) * Pack.SIZE_PRICE_FACTORS.get(size, 1.0)
+    return max(1, int(base))
 
 
 # --- Whole cards ---

@@ -1950,3 +1950,80 @@ class ProfileTests(unittest.TestCase):
 
         self.assertEqual(fresh.shop_lock_cap(), 0)
         self.assertEqual(fresh.shop.locked, [])
+
+    def test_the_gained_slots_survive_a_save_and_load(self):
+        # Inaction's banked uses and handed-over slots and Foresight's action
+        # slots are permanent for the game, so the loaded game keeps the wider
+        # card tray and action row — and an unlimited action area stays
+        # unlimited through a save.
+        self.game.save_slot = 3
+        self.game.inaction_used = 2 * main.INACTION_USES_PER_SLOT
+        self.game.card_slots_won = 1
+        self.game.action_slots_won = 1
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 3)
+
+        self.assertEqual(fresh.inaction_used, 2 * main.INACTION_USES_PER_SLOT)
+        self.assertEqual(fresh.card_slots_won, 1)
+        self.assertEqual(fresh.action_slots_won, 1)
+        self.assertEqual(fresh.max_cards, main.MAX_CARDS + 3)
+        self.assertEqual(fresh.max_actions, main.MAX_ACTIONS + 1)
+        # An old save with none of the keys reads as an untouched game.
+        self.assertEqual(main.Game().inaction_used, 0)
+        self.assertEqual(main.Game().card_slots_won, 0)
+        self.assertEqual(main.Game().action_slots_won, 0)
+        self.assertFalse(main.Game().action_slots_unlimited)
+
+    def test_an_unlimited_action_area_survives_a_save_and_load(self):
+        self.game.save_slot = 6
+        self.game.action_slots_unlimited = True
+        self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
+                             for _ in range(main.SLOT_ROW_SLOTS + 3)]
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 6)
+
+        self.assertTrue(fresh.action_slots_unlimited)
+        self.assertEqual(fresh.max_actions, main.ACTION_SLOTS_UNLIMITED)
+        self.assertEqual(len(fresh.actions), main.SLOT_ROW_SLOTS + 3)
+        self.assertEqual(fresh.action_area_page, 0)      # a view state, reset
+        # The paged row can still reach every loaded action.
+        self.assertTrue(fresh.action_row_window()[2])
+        self.assertTrue(fresh._grant_random_action())    # room for one more
+
+    def test_a_banked_odyssey_item_survives_a_save_and_load(self):
+        # The item is out of the inventory while the run it waits out is being
+        # built, so a save has to keep it (and keep paying for it when the run
+        # is finally continued).
+        self.game.save_slot = 5
+        self.game.cards.append(main.CardItem(main.Card.ODYSSEY, 40))
+        wall = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                              main.Scorer.NONE, 0, 40, "Wall")
+        self.game.toolbox.add(wall)
+        self.game.selected_toolbox_item = wall
+        self.game.selected_toolbox_index = 0
+        self.assertTrue(self.game._bank_selected_item())
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 5)
+
+        self.assertEqual(len(fresh.inaccessible), 1)
+        banked = fresh.inaccessible[0]
+        self.assertEqual(banked.name, "Wall")
+        self.assertEqual(banked.price, 40)
+        self.assertEqual(fresh.inaccessible_cap(), 1)
+        self.assertNotIn(banked.name,
+                         [i.name for i in fresh.toolbox.items])
+        self.assertEqual(fresh._return_inaccessible(), 10)
+        self.assertIn(banked, fresh.toolbox.items)
+

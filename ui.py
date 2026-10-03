@@ -46,6 +46,7 @@ GREEN = _ui_source.GREEN
 GRID_HEIGHT = _ui_source.GRID_HEIGHT
 GRID_SIZE = _ui_source.GRID_SIZE
 GRID_WIDTH = _ui_source.GRID_WIDTH
+INACCESSIBLE_COORDS = _ui_source.INACCESSIBLE_COORDS
 MARBLE_BOX_COLOR = _ui_source.MARBLE_BOX_COLOR
 MARBLE_BOX_COORDS = _ui_source.MARBLE_BOX_COORDS
 MARBLE_RADIUS = _ui_source.MARBLE_RADIUS
@@ -53,6 +54,7 @@ MAX_ACTIONS = _ui_source.MAX_ACTIONS
 ORANGE = _ui_source.ORANGE
 PEG_RADIUS = _ui_source.PEG_RADIUS
 points_text = _ui_source.points_text
+resource_point_label = _ui_source.resource_point_label
 RED = _ui_source.RED
 ROUND_COUNT = _ui_source.ROUND_COUNT
 RUN_DOT_DX = _ui_source.RUN_DOT_DX
@@ -147,7 +149,7 @@ from components import (
     Card,
     Component,
     Effect,
-    FinalBoss,
+    Pack,
     Rarity,
     Scorer,
     Shape,
@@ -293,8 +295,7 @@ def draw_board(game, border_color=(30, 30, 30)):
     """Draw the dynamic marble box (the board), same look as draw_marble_box.
 
     Unlocked squares get the normal board fill; LOCKED squares are painted
-    locked_fill(game) — a darker shade of the same colour while a trial (or the
-    final boss) runs, so
+    locked_fill(game) — a darker shade of the same colour while a trial runs, so
     they stay in the run's palette, and the red void when there is no trial, so
     the board reads as floating. While the Explorer card is owned, every board
     unit a marble has BEEN IN this run (game.visited_cells) is repainted in
@@ -392,6 +393,172 @@ def draw_shop_item(screen, item, rect):
         draw_card(screen, item, rect)
     elif getattr(item, "kind", None) == "action":
         draw_action(screen, item, rect)
+    elif getattr(item, "kind", None) == "resource":
+        draw_resource_option(screen, item, rect)
+    elif getattr(item, "kind", None) == "pack":
+        draw_pack(screen, item, rect)
+
+
+def draw_resource_option(screen, option, rect):
+    """Draw a resource pack option: a resource tile in its scorer's colour.
+
+    A resource option is not a component — it is POINTS — so it wears the
+    scorer's own colour (the same colour the scorer component and its blocks
+    wear, see Scorer.color) with the points written on it, which is what the
+    choice is actually about: how many points, and of which resource.
+    """
+    pygame.draw.rect(screen, Scorer.color(option.scorer), rect)
+    pygame.draw.rect(screen, WHITE, rect, 2)
+    text = font("tiny").render(points_text(option.points), True, BLACK)
+    screen.blit(text, text.get_rect(center=(rect.centerx, rect.centery + 4)))
+    label = font("tiny").render(resource_point_label(option.scorer)[:4], True, BLACK)
+    screen.blit(label, label.get_rect(center=(rect.centerx, rect.top + 9)))
+
+
+def draw_pack(screen, pack, rect):
+    """Draw a pack: a sealed bundle in its type's colour, in the cell's box.
+
+    A pack is DRAWN as a box rather than as its contents (the contents are a
+    surprise until it is opened): a dark bundle with a band across it in the
+    type's colour, the size pip, and the type's glyph. A pack being kept from
+    (mid-choice) draws the same bundle, so the shop slot still reads as the
+    pack it holds.
+    """
+    colour = Pack.color(pack.pack_type)
+    screen.fill((38, 38, 44), rect)
+    pygame.draw.rect(screen, colour, rect, 3)
+    # The band across the bundle, with the size's pip on it.
+    band = pygame.Rect(rect.x + 2, rect.centery - 3, rect.width - 4, 7)
+    screen.fill(colour, band)
+    keep_big = pack.keep > 1
+    pips = pack.keep
+    for index in range(pips):
+        cx = rect.centerx + (index - (pips - 1) / 2) * 9
+        pygame.draw.circle(screen, (30, 30, 34), (int(cx), band.centery), 2)
+    glyph = font("tile").render(Pack.glyph(pack.pack_type), True, WHITE)
+    screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.top + 11)))
+    size = font("tiny").render(
+        f"{Pack.options(pack.size)}", True, (235, 235, 235) if not keep_big
+        else (255, 215, 0))
+    screen.blit(size, size.get_rect(midbottom=(rect.centerx, rect.bottom - 3)))
+
+
+# The open pack's overlay: a panel over the middle of the play screen with one
+# cell per option (see Game._click_pack). The option cells are laid out in a
+# grid of at most PACK_OPTION_COLS per row, so a giga pack's six options read as
+# two rows of three, and each cell carries the option's own art plus its name.
+PACK_OPTION_COLS = 3
+PACK_OPTION_CELL = 132
+PACK_OPTION_GAP = 12
+PACK_OPTION_HEADER = 44
+PACK_OPTION_FOOTER = 40
+
+
+def pack_panel_rect(game):
+    """The panel the open pack's options are drawn in."""
+    pack = game.open_pack
+    options = max(1, len(pack.options))
+    cols = min(PACK_OPTION_COLS, options)
+    rows = (options + cols - 1) // cols
+    width = cols * PACK_OPTION_CELL + (cols - 1) * PACK_OPTION_GAP + 40
+    height = (rows * PACK_OPTION_CELL + (rows - 1) * PACK_OPTION_GAP
+              + PACK_OPTION_HEADER + PACK_OPTION_FOOTER)
+    return pygame.Rect((SCREEN_WIDTH - width) // 2,
+                       (SCREEN_HEIGHT - height) // 2, width, height)
+
+
+def pack_option_rects(game):
+    """One rect per option of the open pack, in the order they are drawn.
+
+    The order is the pack's own (``pack.options``), so a click can be mapped
+    straight back to the option it landed on: index i of this list is index i of
+    the pack's options (see Game.pack_option_at).
+    """
+    if game.open_pack is None:
+        return []
+    panel = pack_panel_rect(game)
+    rects = []
+    for index in range(len(game.open_pack.options)):
+        col = index % PACK_OPTION_COLS
+        row = index // PACK_OPTION_COLS
+        rects.append(pygame.Rect(
+            panel.x + 20 + col * (PACK_OPTION_CELL + PACK_OPTION_GAP),
+            panel.y + PACK_OPTION_HEADER + row * (PACK_OPTION_CELL + PACK_OPTION_GAP),
+            PACK_OPTION_CELL, PACK_OPTION_CELL))
+    return rects
+
+
+def pack_skip_rect(game):
+    """The open pack's SKIP button: leave the options that are still on the table."""
+    panel = pack_panel_rect(game)
+    return pygame.Rect(panel.centerx - 52, panel.bottom - PACK_OPTION_FOOTER + 8,
+                       104, 24)
+
+
+def draw_pack_overlay(game):
+    """Draw the open pack: its options, its rule and its SKIP button.
+
+    The overlay is what the player is choosing from, so it goes over the whole
+    play screen (a dimmed backdrop included) and holds the clicks until the
+    pack's picks are made (see Game._click_pack). The header says what the pack
+    is and how many picks are left, each cell carries the option's own art with
+    its name under it, and an option that cannot be taken right now (a full
+    inventory, say) is drawn dimmed with a refusal note instead of being hidden,
+    so the choice the player pays for is always the choice they see.
+    """
+    pack = game.open_pack
+    if pack is None:
+        return
+    backdrop = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    backdrop.fill((0, 0, 0, 150))
+    game.screen.blit(backdrop, (0, 0))
+    panel = pack_panel_rect(game)
+    pygame.draw.rect(game.screen, (28, 28, 34), panel, border_radius=10)
+    pygame.draw.rect(game.screen, Pack.color(pack.pack_type), panel, 3,
+                     border_radius=10)
+    title = font("small").render(pack.name, True,
+                                 Pack.color(pack.pack_type))
+    game.screen.blit(title, title.get_rect(midtop=(panel.centerx, panel.y + 8)))
+    rule = (f"{Pack.options(pack.size)} options, {Pack.size_description(pack.size)}"
+            f" — {pack.remaining} left to keep")
+    rule_surf = font("tiny").render(rule, True, (215, 215, 215))
+    game.screen.blit(rule_surf,
+                     rule_surf.get_rect(midtop=(panel.centerx, panel.y + 26)))
+    mouse = pygame.mouse.get_pos()
+    for index, (option, rect) in enumerate(zip(pack.options,
+                                               pack_option_rects(game))):
+        hovered = rect.collidepoint(mouse)
+        pygame.draw.rect(game.screen, (46, 46, 54), rect, border_radius=6)
+        pygame.draw.rect(game.screen, WHITE if hovered else (90, 90, 100),
+                         rect, 2, border_radius=6)
+        inner = pygame.Rect(rect.x + 46, rect.y + 10, GRID_SIZE, GRID_SIZE)
+        draw_shop_item(game.screen, option, inner)
+        # The option's name, wrapped into the cell's two lines under its art.
+        lines = game._wrap_text(game._item_name(option), font("tiny"),
+                                rect.width - 10)[:2]
+        y = rect.y + 58
+        for line in lines:
+            text = font("tiny").render(line, True, (235, 235, 235))
+            game.screen.blit(text, text.get_rect(midtop=(rect.centerx, y)))
+            y += text.get_height() + 1
+        rows = game._describe_item(option)
+        if rows:
+            # The option's own line, WRAPPED into the cell rather than cut at a
+            # fixed number of characters: a hard cut runs past the cell's edge
+            # (and over its neighbours) and reads as a different item.
+            for line in game._wrap_text(rows[-1][1], font("tiny"),
+                                        rect.width - 10)[:2]:
+                text = font("tiny").render(line, True, (170, 170, 180))
+                game.screen.blit(text,
+                                 text.get_rect(midtop=(rect.centerx, y + 1)))
+                y += text.get_height() + 1
+    skip = pack_skip_rect(game)
+    hovered = skip.collidepoint(mouse)
+    pygame.draw.rect(game.screen, (70, 70, 80) if not hovered else (96, 96, 108),
+                     skip, border_radius=6)
+    pygame.draw.rect(game.screen, WHITE, skip, 2, border_radius=6)
+    label = font("tiny").render("SKIP THE REST", True, (255, 255, 255))
+    game.screen.blit(label, label.get_rect(center=skip.center))
 
 
 def _draw_condition_mini(screen, shape, effect, center, size):
@@ -582,9 +749,8 @@ def _build_action_art(action):
     letter.
     """
     art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-    # This builder strokes nothing (the action icons are filled shapes), so the
-    # line drawer is unpacked unused.
-    c, r, rr, _l, p, arc = _icon_art_drawers(art, WHITE)
+    # The line drawer is used by the eyelashes and the knuckle cuts below.
+    c, r, rr, l, p, arc = _icon_art_drawers(art, WHITE)
 
     # Punching a fully transparent mark CUTS a hole in what has been drawn, so
     # an icon can be a solid silhouette with holes (a skull's sockets, a
@@ -661,6 +827,27 @@ def _build_action_art(action):
         p([(10, 0), (10, 9), (17, 4.5)])
     elif action == Action.GRACE:              # a pass: this one is on the house
         p([(11, 22), (19, 30), (33, 10), (28, 7), (18, 23), (14, 18)])
+    elif action == Action.INACTION:           # an empty slot: a hollow frame
+        # The action does nothing, so the icon is the nothing it does: the
+        # outline of a cell drawn in dashes, with the middle left empty.
+        for x in (4, 15, 26):           # the top and bottom edges, dashed
+            r(x, 5, 9, 3)
+            r(x, 32, 9, 3)
+        for y in (14, 25):              # the side edges, dashed
+            r(5, y, 3, 9)
+            r(32, y, 3, 9)
+    elif action == Action.FORESIGHT:          # an eye, looking ahead
+        # A pointed almond (two crescents meeting at the corners), an iris that
+        # touches both lids, and three lashes. Rounded arcs read as a ring or a
+        # flying saucer on the 4x sheet; the POINTS are what make it an eye.
+        p([(2, 20), (11, 10), (20, 7), (29, 10), (38, 20),
+           (29, 13), (20, 11), (11, 13)])          # the upper lid
+        p([(2, 20), (11, 30), (20, 33), (29, 30), (38, 20),
+           (29, 27), (20, 29), (11, 27)])          # the lower lid
+        c(20, 20, 5)                    # the iris
+        l(9, 9, 6, 3, 2)                # lashes
+        l(20, 4, 20, 1, 2)
+        l(31, 9, 34, 3, 2)
     return art
 
 
@@ -669,7 +856,7 @@ def _build_action_art(action):
 # one or a few shapes — rows of triangles, interlocked rings, packed circles,
 # chevron bands, fish scales, diamonds, octagons, split cells — in the few
 # shades of the modifier's own colour (see components.TileArt.palette). Trials
-# and final bosses both wear one (components.Trial / components.FinalBoss), and
+# wear one (components.Trial), and
 # NO TWO OF THEM SHARE A FAMILY, so a pattern names what is in play. Two rules
 # shape them:
 #
@@ -1138,7 +1325,7 @@ _TILE_TESSELLATIONS = {
     # Each family draws one tile; the arrow-style ones tilt their shapes so the
     # pattern reads as movement even before the colours are taken in. Every
     # name belongs to its own drawer, so two modifiers can never share a
-    # pattern (see components.Trial.TILE_STYLES / FinalBoss.TILE_STYLES).
+    # pattern (see components.Trial.TILE_STYLES).
     "rings": _tess_rings,
     "triangles": _tess_triangles,
     "chevrons": _tess_chevrons,
@@ -1165,13 +1352,13 @@ _TILE_TESSELLATIONS = {
 
 # The classes that own tile art, by the kind name the collection uses for their
 # entries (see Game._collection_entries and draw_collection_icon).
-_TILE_SOURCES = {"trial": Trial, "final_boss": FinalBoss}
+_TILE_SOURCES = {"trial": Trial}
 
 
 def _build_tile(source, value):
     """Draw one run modifier's tile: a seamless tessellation in its colours.
 
-    ``source`` is the class the art belongs to — Trial or FinalBoss — and the
+    ``source`` is the class the art belongs to (components.Trial) and the
     tile is BOTH that modifier's icon and the pattern the whole screen is
     covered in while it is in play (see draw_tile, draw_background and
     draw_collection_icon). Its family comes from the source's TILE_STYLES and
@@ -1190,9 +1377,8 @@ def _build_tile(source, value):
 def _tile_art(source, value):
     """The cached tile for one modifier (see _build_tile).
 
-    The cache key carries the SOURCE as well as the id: a trial and a final
-    boss number their ids from 0 separately, so keying on the id alone would
-    hand the singularity the hands-tied tile.
+    The cache key carries the SOURCE as well as the id, so the cache stays
+    correct if another class with its own tile art is ever added.
     """
     art = _ICON_ART_CACHE.get((source, value))
     if art is None:
@@ -1266,12 +1452,12 @@ def locked_fill(game):
 def draw_background(game):
     """Paint the screen behind everything the game draws onto it.
 
-    While a run modifier is in play (a trial, or the final boss of the 24th run
-    — see Game.tile_source) the WHOLE screen is tiled with that modifier's
-    tessellation, so what the player sees around the board is the run's
-    modifier; with none (and on the title, collection and other full-screen
-    tabs, which fill their own background) it is the plain background colour.
-    This is one of the two places a tile is ever drawn — see draw_tile.
+    While a run modifier is in play (a trial — see Game.tile_source) the WHOLE
+    screen is tiled with that modifier's tessellation, so what the player sees
+    around the board is the run's modifier; with none (and on the title,
+    collection and other full-screen tabs, which fill their own background) it
+    is the plain background colour. This is one of the two places a tile is ever
+    drawn — see draw_tile.
     """
     source, value = game.tile_source
     if source is None:
@@ -1594,6 +1780,66 @@ def _build_whole_card_art(card):
         # rather than as a face (the padlock/action-eye trick again).
         pygame.draw.line(art, (0, 0, 0, 0), (20, 12), (20, 26), 2)
         pygame.draw.line(art, (0, 0, 0, 0), (11, 20), (17, 20), 2)
+    elif card == Card.CLAUSTROPHOBIA:         # walls with a sliver of room left
+        # A massively thick-walled box with the smallest of rooms cut out of it
+        # and no space in there for the marble: the room is PUNCHED through the
+        # walls (the stencil's letter trick) and the marble is drawn after it.
+        rr(2, 2, 36, 36, 3)             # walls on every side
+        pygame.draw.rect(art, (0, 0, 0, 0), (13, 13, 14, 14))   # the space left
+        c(20, 20, 5)                    # ...barely fit for the marble
+    elif card == Card.EARTHQUAKE:             # the ground split in two
+        p([(1, 24), (16, 24), (14, 39), (1, 39)])     # the ground, this side
+        p([(39, 24), (24, 24), (26, 39), (39, 39)])   # ...and the far side
+        # A block shaken off the top of it, falling into the fault.
+        p([(12, 4), (26, 4), (28, 19), (14, 19)])
+        l(2, 12, 9, 15, 2)              # its motion, trailing behind it
+        l(3, 20, 10, 22, 2)
+    elif card == Card.CHALLENGER:             # a raised fist
+        rr(12, 14, 17, 16, 4)           # the hand
+        for x in (15, 20, 25):          # the fingers, cut into its back
+            pygame.draw.line(art, (0, 0, 0, 0), (x, 15), (x, 20), 2)
+        c(14, 12, 3)                    # the knuckles
+        c(19, 12, 3)
+        c(24, 12, 3)
+        c(28, 12, 3)
+        rr(6, 19, 7, 9, 3)              # the thumb across the front
+        p([(14, 30), (28, 30), (26, 38), (16, 38)])   # the forearm
+    elif card == Card.ODYSSEY:                # a boat sailing away
+        p([(20, 4), (20, 24), (33, 24)])     # the sail
+        l(20, 4, 20, 26, 2)             # the mast
+        p([(6, 26), (34, 26), (28, 33), (12, 33)])   # the hull
+        l(3, 35, 13, 35, 2)             # the waves it rides
+        l(20, 35, 30, 35, 2)
+        l(29, 35, 37, 35, 2)
+    elif card == Card.MATRIX:                 # a marble inside the falling code
+        # The card is about a marble buried in a locked square, and the film
+        # image of "inside the grid" is columns of falling code, so the art is
+        # three columns of dashes with the marble landing among them — the
+        # dashes that would have crossed it are left out, so the marble reads
+        # as INSIDE the code rather than in front of it.
+        for col_x, lengths in ((7, (4, 6, 3)), (20, (6, 4, 7)), (33, (3, 5, 4))):
+            y = 4
+            for length in lengths:
+                r(col_x - 2, y, 4, length)
+                y += length + 4
+        # The marble, with the column it sits in cut around it.
+        pygame.draw.rect(art, (0, 0, 0, 0), (14, 12, 12, 12))
+        c(20, 18, 6)
+    elif card == Card.GATE:                   # a key passing under an arch
+        # An archway (two posts and a lintel) with an open passage through it,
+        # a key hanging off the left post and the marble mid-passage under the
+        # lintel with a motion tick behind it: the card's whole rule is "a
+        # marble carrying its key goes through the lock".
+        r(4, 10, 4, 24)                 # post (left)
+        r(32, 10, 4, 24)                # post (right)
+        r(4, 6, 32, 4)                  # lintel
+        # The key, hanging on the left post: a bow, a shaft and one tooth.
+        c(11, 15, 4, 3)
+        l(14, 15, 20, 15, 3)
+        l(18, 16, 18, 20, 2)
+        # The marble, passing through, with the tick of its motion behind it.
+        c(27, 25, 6)
+        l(19, 31, 25, 31, 2)
     return art
 
 
@@ -2907,11 +3153,13 @@ def _draw_gondola_cables(game):
     stands (see Game._gondola_lane) — set at the two sides of its own cell, and
     drawn UNDER the blocks, so the car rides on top of them. Both ends of the
     pair are turning points rather than the board's edges: a car that meets a
-    wall, a locked square's edge or another block a third of the way along its
-    row has a cable a third of a row long, and the squares it can never visit
-    have none. The cables belong to the LANE, not to the car: they stay where
-    they are while the car slides between them, which is what makes them read
-    as the track.
+    wall or a locked square's edge a third of the way along its row has a cable
+    a third of a row long, and the squares it can never visit have none. The
+    cables belong to the LANE, not to the car: they stay where they are while
+    the car slides between them, which is what makes them read as the track —
+    and another cable car is not one of the ends, so two cars sharing a lane
+    have one pair of cables stretching the whole way down it (see
+    Game._gondola_solids).
     """
     cars = [block for block in game.grid.values()
             if block.has_effect(Effect.GONDOLA)]
@@ -2919,9 +3167,7 @@ def _draw_gondola_cables(game):
         return
     for block in cars:
         axis, _sign = game._gondola_axis(block)
-        # The lane as BUILT (every other car on its own cell), so the drawn
-        # track does not flicker as the other cars patrol past each other.
-        low, high = game._gondola_lane(block, static=True)
+        low, high = game._gondola_lane(block)
         home = game._gondola_home_rect(block)
         # floored exactly as the motion floors it (see Game._gondola_rect), so
         # the cables end where the car's own rect can end.
@@ -3031,9 +3277,14 @@ def draw(game):
     draw_cards(game)
     draw_action_area(game)
     draw_tokens(game)
+    draw_inaccessible(game)
     draw_sell_overlay(game)
     draw_upgrade_overlay(game)
     draw_shop(game)
+    # An OPEN PACK's overlay goes over the play screen but UNDER the sidebar:
+    # the sidebar is the info box that follows the mouse, so hovering an option
+    # in the overlay reads out what that option is (see draw_pack_overlay).
+    draw_pack_overlay(game)
     draw_sidebar(game)
     # The bottom-left MAIN MENU button: clicking it returns to the title screen.
     btn = RETURN_TO_MENU_BUTTON_RECT
@@ -3078,12 +3329,9 @@ def draw_fire(game):
 
 
 def draw_trial_box(game):
-    """Draw the current run's trial (or the final boss on the 24th run) above
-    the round/run display, with its buy options while the mouse hovers it."""
-    if game.final_boss is not None:
-        title = "FINAL BOSS"
-        desc = f"{FinalBoss.name(game.final_boss)}: {FinalBoss.description(game.final_boss)}"
-    elif game.current_trial is None:
+    """Draw the current run's trial above the round/run display, with its buy
+    options while the mouse hovers it."""
+    if game.current_trial is None:
         # No trial: only worth a display when the player could buy one back.
         if not game.trials_enabled:
             return
@@ -3115,17 +3363,19 @@ def draw_trial_box(game):
 def draw_trial_options(game, box):
     """Overlay the trial display's two buy options (drawn while hovering it).
 
-    The left half buys a DIFFERENT random trial for TRIAL_CHANGE_COST and the
-    right half buys no trial at all for TRIAL_DISABLE_COST. An affordable,
-    meaningful option is blue like the trigger-limit upgrade overlay; an
-    unaffordable one (or the right half while there is no trial to remove) is
-    grey. Returns the two rects it drew, (left, right).
+    The left half buys a DIFFERENT random trial for game.trial_change_cost() and
+    the right half buys no trial at all for game.trial_disable_cost() — the fees
+    the game will actually charge, so the Challenger card's half-price trials
+    show as half price (see Card.CHALLENGER). An affordable, meaningful option is
+    blue like the trigger-limit upgrade overlay; an unaffordable one (or the
+    right half while there is no trial to remove) is grey. Returns the two rects
+    it drew, (left, right).
     """
     half = box.width // 2
     rects = (pygame.Rect(box.x, box.y, half, box.height),
              pygame.Rect(box.x + half, box.y, box.width - half, box.height))
-    options = ((rects[0], "CHANGE", TRIAL_CHANGE_COST, True),
-               (rects[1], "DISABLE", TRIAL_DISABLE_COST,
+    options = ((rects[0], "CHANGE", game.trial_change_cost(), True),
+               (rects[1], "DISABLE", game.trial_disable_cost(),
                 game.current_trial is not None))
     for rect, label, cost, meaningful in options:
         usable = meaningful and game.cash >= cost
@@ -3200,10 +3450,11 @@ def draw_run_dots(game):
     """Draw the 8x3 grid of run indicators above the actions display.
 
     Rounds go across (8 columns), each round's 3 runs go down (3 rows), and the
-    24th (final boss) run therefore sits at the bottom right. A dot is gray
-    when its run hasn't been played, green when the score target was met, and
-    red when it wasn't. The final-boss run stands out: black instead of gray,
-    gold when beaten, and a deeper red when lost.
+    24th (last) run therefore sits at the bottom right. A dot is gray when its
+    run hasn't been played, green when the score target was met, and red when it
+    wasn't. Every run reads alike now: the 24th used to be a boss run and stood
+    out (black, gold or a deeper red), but it is an ordinary run since the
+    bosses became trials.
     """
     x0, y0 = RUN_DOT_GRID
     for run_index in range(TOTAL_RUNS):
@@ -3212,14 +3463,10 @@ def draw_run_dots(game):
         row = run_index % RUNS_PER_ROUND
         cx = x0 + col * RUN_DOT_DX
         cy = y0 + row * RUN_DOT_DY
-        boss = run_index == TOTAL_RUNS - 1  # the 24th run is the final boss
         if run_index < len(game.run_results):
-            if boss:
-                color = (255, 215, 0) if game.run_results[run_index] else (140, 0, 0)
-            else:
-                color = GREEN if game.run_results[run_index] else RED
+            color = GREEN if game.run_results[run_index] else RED
         else:
-            color = BLACK if boss else GRAY
+            color = GRAY
         pygame.draw.circle(game.screen, color, (cx, cy), RUN_DOT_RADIUS)
         pygame.draw.circle(game.screen, WHITE, (cx, cy), RUN_DOT_RADIUS, 1)
 
@@ -3372,24 +3619,68 @@ def draw_tokens(game):
     game.screen.blit(label, (x, y + len(game.tokens) * GRID_SIZE + 4))
 
 
+def draw_inaccessible(game):
+    """Draw the items the Odyssey card has put away, right of the tokens.
+
+    One slot per banked item, in the order they were put away, each drawn the
+    way it was drawn in the inventory (draw_shop_item) so a banked block looks
+    like the block it is. The column is the same panel the tokens use, one
+    column further right (see Game.inaccessible_rect), and nothing is drawn
+    while the player has banked nothing.
+    """
+    if not game.inaccessible:
+        return
+    x, y = INACCESSIBLE_COORDS[0], INACCESSIBLE_COORDS[1]
+    draw_marble_box(game.screen, x, y, 1, len(game.inaccessible))
+    for i, item in enumerate(game.inaccessible):
+        draw_shop_item(game.screen, item, game.inaccessible_rect(i))
+    label = game.small_font.render("AWAY", True, WHITE)
+    game.screen.blit(label, (x, y + len(game.inaccessible) * GRID_SIZE + 4))
+
+
 def draw_action_area(game):
-    """Draw the owned actions above the toolbox (max MAX_ACTIONS).
+    """Draw the owned actions above the toolbox (max game.max_actions).
 
     Owned actions render as mini cards with a v1/v2 tag (a gold frame and a
     gold plate for the upgraded ones — see draw_action); empty slots show the
     same slot back the card tray uses (see draw_card_back). The selected action
     gets a green outline, and its upgrade button appears beside the area
     (v1 -> v2 for ACTION_UPGRADE_COST).
+
+    The row is RIGHT-aligned with the shop panel's edge and grows leftwards as
+    the Foresight action widens it (see Game.action_area_x), so the upgrade
+    button beside it never has to move and the space it takes is space the
+    card tray is not using. When the player holds more actions than the band can
+    show, the last slot is a PAGER instead of an action, which keeps an
+    unlimited action area usable (see Game.action_row_window).
     """
-    x, y = ACTION_AREA_COORDS[0], ACTION_AREA_COORDS[1]
-    draw_marble_box(game.screen, x, y, MAX_ACTIONS, 1)
+    x, y = game.action_area_x(), ACTION_AREA_COORDS[1]
+    slots = game.action_slots_shown()
+    start, count, paging = game.action_row_window()
+    draw_marble_box(game.screen, x, y, slots, 1)
     title = game.small_font.render("ACTIONS", True, WHITE)
     game.screen.blit(title, (x + 8, y - 14))
-    for i in range(MAX_ACTIONS):
-        rect = pygame.Rect(x + i * GRID_SIZE, y, GRID_SIZE, GRID_SIZE)
-        if i < len(game.actions):
-            draw_action(game.screen, game.actions[i], rect,
-                        selected=game.selected_action is game.actions[i])
+    for i in range(slots):
+        rect = game.action_slot_rect(i)
+        if i < count:
+            action = game.actions[start + i]
+            draw_action(game.screen, action, rect,
+                        selected=game.selected_action is action)
+        elif paging and i == slots - 1:
+            # The pager, on the same slot back the empty slots use: a forward
+            # arrow and which page of how many is on show. Clicking it turns
+            # the row (see Game.action_area_pager_at / _page_action_row).
+            draw_card_back(game.screen, rect)
+            mid = rect.center
+            pygame.draw.polygon(game.screen, YELLOW,
+                                [(mid[0] - 4, mid[1] - 7),
+                                 (mid[0] + 6, mid[1] - 1),
+                                 (mid[0] - 4, mid[1] + 5)])
+            pages = -(-len(game.actions) // max(1, slots - 1))
+            label = game.tiny_font.render(f"{game.action_area_page % pages + 1}/{pages}",
+                                          True, YELLOW)
+            game.screen.blit(label, (rect.right - label.get_width() - 1,
+                                     rect.bottom - label.get_height() - 1))
         else:
             draw_card_back(game.screen, rect)
     # The upgrade button shows while an action is selected.
@@ -4021,7 +4312,7 @@ def draw_collection(game):
     heading = game.main_title_font.render("COLLECTION", True, (255, 215, 0))
     game.screen.blit(heading, heading.get_rect(center=(SCREEN_WIDTH // 2, 46)))
     hint = game.tiny_font.render(
-        "Buy a card/action/component or beat a run with a trial or the final boss to reveal it  •  scroll to browse",
+        "Buy a card/action/component or beat a run with a trial to reveal it  •  scroll to browse",
         True, (180, 180, 180))
     game.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 92)))
     back = COLLECTION_BACK_BUTTON_RECT

@@ -1,198 +1,39 @@
 {
   "version": 1,
-  "cash": 60,
+  "cash": 7,
   "run_number": 0,
   "round_index": 0,
   "run_in_round": 0,
   "required_score": 100,
+  "target_forced": false,
   "required_scores": [
     100
   ],
   "run_results": [],
   "runs_cleared": 0,
   "failed_runs": 0,
-  "current_trial": 16,
-  "trial_decision": {
-    "trial": 16
-  },
+  "current_trial": 18,
+  "trial_decision": null,
   "difficulty": 4,
-  "final_boss": null,
-  "cards": [],
-  "actions": [],
-  "toolbox": [],
-  "grid": [
+  "cards": [
     {
-      "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 6,
-      "shape": 0,
-      "effects": [],
-      "effect_amounts": {},
-      "scorer": 4,
-      "scorer_amount": 0.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 109,
-      "random_rolls": null
-    },
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 7,
-      "shape": 0,
-      "effects": [],
-      "effect_amounts": {},
-      "scorer": 5,
-      "scorer_amount": 0.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 53,
+      "kind": "card",
+      "value": 14,
+      "price": 36,
+      "amount": 0,
+      "col": 0,
+      "row": 0,
+      "name": "Hoard",
       "random_rolls": null
     }
   ],
-  "shop": [
-    {
-      "kind": "shape",
-      "value": 4,
-      "amount": 0,
-      "price": 8,
-      "name": "Circle",
-      "col": 1,
-      "row": 1
-    },
-    {
-      "kind": "shape",
-      "value": 11,
-      "amount": 0,
-      "price": 12,
-      "name": "Curved Slope Line",
-      "col": 2,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 2,
-      "amount": 18989.0,
-      "price": 25,
-      "name": "Accelerator",
-      "col": 3,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 14,
-      "amount": 227.8,
-      "price": 20,
-      "name": "Conveyor",
-      "col": 4,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 13,
-      "amount": 0,
-      "price": 20,
-      "name": "Random",
-      "col": 5,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 30,
-      "amount": 0,
-      "price": 30,
-      "name": "Bomb",
-      "col": 6,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 32,
-      "amount": 0.1011,
-      "price": 26,
-      "name": "Colossus",
-      "col": 7,
-      "row": 1
-    },
-    {
-      "kind": "card",
-      "value": 85,
-      "price": 46,
-      "amount": 0,
-      "col": 1,
-      "row": 3,
-      "name": "Doppelganger",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 83,
-      "price": 44,
-      "amount": 0,
-      "col": 2,
-      "row": 3,
-      "name": "Pedestal",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 84,
-      "price": 50,
-      "amount": 0,
-      "col": 3,
-      "row": 3,
-      "name": "Inferno",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 78,
-      "price": 48,
-      "amount": 0,
-      "col": 4,
-      "row": 3,
-      "name": "Showman",
-      "random_rolls": null
-    },
-    {
-      "kind": "action",
-      "value": 7,
-      "price": 25,
-      "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Expansion"
-    },
-    {
-      "kind": "action",
-      "value": 1,
-      "price": 24,
-      "version": 1,
-      "col": 6,
-      "row": 3,
-      "name": "Recognition"
-    },
+  "actions": [],
+  "toolbox": [
     {
       "kind": "block",
       "placed": false,
-      "col": 7,
-      "row": 3,
+      "col": 0,
+      "row": 0,
       "shape": 0,
       "effects": [],
       "effect_amounts": {},
@@ -211,19 +52,15 @@
     {
       "kind": "block",
       "placed": false,
-      "col": 8,
-      "row": 3,
+      "col": 0,
+      "row": 1,
       "shape": 0,
-      "effects": [
-        12
-      ],
-      "effect_amounts": {
-        "12": 0.4011
-      },
-      "scorer": 1,
-      "scorer_amount": 35.78,
-      "price": 30,
-      "name": "Rect +Chips",
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "price": 53,
+      "name": "Finish Block",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -232,6 +69,175 @@
       "triggers_left": null,
       "random_rolls": null
     }
+  ],
+  "grid": [],
+  "shop": [
+    {
+      "kind": "shape",
+      "value": 1,
+      "amount": 0,
+      "price": 11,
+      "name": "Slope",
+      "col": 1,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 11,
+      "amount": 0,
+      "price": 12,
+      "name": "Curved Slope Line",
+      "col": 2,
+      "row": 1
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 3,
+      "row": 1,
+      "shape": 16,
+      "effects": [
+        5
+      ],
+      "effect_amounts": {
+        "5": 679.0
+      },
+      "scorer": 9,
+      "scorer_amount": 0.461,
+      "price": 30,
+      "name": "Peg Parts",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "effect",
+      "value": 5,
+      "amount": 2774.0,
+      "price": 23,
+      "name": "Black Hole",
+      "col": 4,
+      "row": 1
+    },
+    {
+      "kind": "effect",
+      "value": 11,
+      "amount": 0,
+      "price": 24,
+      "name": "Shrinking",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "pack",
+      "pack_type": 1,
+      "size": 3,
+      "keep": 2,
+      "kept": 0,
+      "price": 59,
+      "col": 2,
+      "row": 3,
+      "name": "Mega Effect Pack",
+      "options": [
+        {
+          "kind": "effect",
+          "value": 18,
+          "amount": 61.09,
+          "price": 46,
+          "name": "Gondola",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 3,
+          "amount": 1365.0,
+          "price": 36,
+          "name": "Piston",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 17,
+          "amount": 0,
+          "price": 124,
+          "name": "Splitter",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 6,
+          "amount": 0,
+          "price": 31,
+          "name": "Portal",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 16,
+          "amount": 1.359,
+          "price": 26,
+          "name": "Phase",
+          "col": 0,
+          "row": 0
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 6,
+      "size": 0,
+      "keep": 1,
+      "kept": 0,
+      "price": 35,
+      "col": 3,
+      "row": 3,
+      "name": "Normal Action Pack",
+      "options": [
+        {
+          "kind": "action",
+          "value": 5,
+          "price": 36,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "name": "Spirit"
+        },
+        {
+          "kind": "action",
+          "value": 11,
+          "price": 24,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "name": "Inaction"
+        },
+        {
+          "kind": "action",
+          "value": 0,
+          "price": 24,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "name": "Death"
+        }
+      ]
+    }
+  ],
+  "open_pack": null,
+  "pending_pack_action": null,
+  "shop_locked": [
+    [
+      1,
+      1
+    ]
   ],
   "component_purchases": [],
   "wrecking_bonus": [
@@ -256,6 +262,11 @@
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
+  "inaction_used": 0,
+  "card_slots_won": 0,
+  "action_slots_won": 0,
+  "action_slots_unlimited": false,
+  "inaccessible": [],
   "resource_gain_mult": 1.0,
   "resource_gain_bonus": 1.0,
   "reroll_discount": 1.0,

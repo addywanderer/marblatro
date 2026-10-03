@@ -1,10 +1,11 @@
 {
   "version": 1,
-  "cash": 6203,
+  "cash": 5797,
   "run_number": 33,
   "round_index": 11,
   "run_in_round": 0,
   "required_score": 858993459200,
+  "target_forced": false,
   "required_scores": [
     100,
     200,
@@ -79,11 +80,67 @@
   "runs_cleared": 1,
   "failed_runs": 32,
   "current_trial": 2,
-  "trial_decision": null,
+  "trial_decision": {
+    "trial": 2
+  },
   "difficulty": 4,
-  "final_boss": null,
   "cards": [],
-  "actions": [],
+  "actions": [
+    {
+      "kind": "action",
+      "value": 6,
+      "price": 70,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Cleansweep"
+    },
+    {
+      "kind": "action",
+      "value": 8,
+      "price": 25,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Brainstorm"
+    },
+    {
+      "kind": "action",
+      "value": 5,
+      "price": 36,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Spirit"
+    },
+    {
+      "kind": "action",
+      "value": 9,
+      "price": 36,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Mass production"
+    },
+    {
+      "kind": "action",
+      "value": 0,
+      "price": 24,
+      "version": 1,
+      "col": 6,
+      "row": 3,
+      "name": "Death"
+    },
+    {
+      "kind": "action",
+      "value": 7,
+      "price": 25,
+      "version": 1,
+      "col": 5,
+      "row": 3,
+      "name": "Expansion"
+    }
+  ],
   "toolbox": [
     {
       "kind": "block",
@@ -301,129 +358,130 @@
   "shop": [
     {
       "kind": "shape",
-      "value": 16,
+      "value": 20,
       "amount": 0,
-      "price": 7,
-      "name": "Peg",
+      "price": 8,
+      "name": "Key",
       "col": 1,
       "row": 1
     },
     {
       "kind": "shape",
-      "value": 10,
+      "value": 17,
       "amount": 0,
-      "price": 12,
-      "name": "Flat Line",
+      "price": 11,
+      "name": "Sawtooth",
       "col": 2,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 8,
-      "amount": 0,
-      "price": 12,
-      "name": "Slippery",
+      "value": 7,
+      "amount": 1581.1,
+      "price": 16,
+      "name": "Rotate",
       "col": 3,
       "row": 1
     },
     {
       "kind": "effect",
-      "value": 15,
+      "value": 6,
       "amount": 0,
-      "price": 22,
-      "name": "Zipper",
+      "price": 31,
+      "name": "Portal",
       "col": 4,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 1,
-      "amount": 45.45,
-      "price": 12,
-      "name": "+Chips",
-      "col": 5,
       "row": 1
     },
     {
       "kind": "scorer",
       "value": 9,
-      "amount": 1.232,
+      "amount": 0.863,
       "price": 11,
       "name": "Parts",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "scorer",
+      "value": 22,
+      "amount": 2.342,
+      "price": 24,
+      "name": "Drill",
       "col": 6,
       "row": 1
     },
     {
       "kind": "scorer",
-      "value": 16,
-      "amount": 1.217,
-      "price": 17,
-      "name": "Picky",
+      "value": 25,
+      "amount": 0.835,
+      "price": 24,
+      "name": "Rally",
       "col": 7,
       "row": 1
     },
     {
       "kind": "card",
-      "value": 3242,
-      "price": 38,
-      "amount": 3.224,
+      "value": 92,
+      "price": 21,
+      "amount": 0,
+      "col": 1,
+      "row": 3,
+      "name": "Painting",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 79,
+      "price": 23,
+      "amount": 0,
       "col": 2,
       "row": 3,
-      "name": "No Shape card (Seed)",
+      "name": "Cozy",
       "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 3158,
-      "price": 46,
-      "amount": 16.4,
+      "value": 90,
+      "price": 26,
+      "amount": 0,
       "col": 3,
       "row": 3,
-      "name": "Curved Slope/Convex Slope card (Undertaker)",
+      "name": "Market",
       "random_rolls": null
     },
     {
       "kind": "card",
-      "value": 80,
-      "price": 36,
+      "value": 17,
+      "price": 46,
       "amount": 0,
       "col": 4,
       "row": 3,
-      "name": "Garden",
+      "name": "Stencil",
       "random_rolls": null
     },
     {
       "kind": "action",
-      "value": 3,
-      "price": 32,
-      "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Anointment"
-    },
-    {
-      "kind": "action",
-      "value": 5,
-      "price": 36,
+      "value": 2,
+      "price": 28,
       "version": 1,
       "col": 6,
       "row": 3,
-      "name": "Spirit"
+      "name": "Deja Vu"
     },
     {
       "kind": "block",
       "placed": false,
       "col": 7,
       "row": 3,
-      "shape": 2,
+      "shape": 9,
       "effects": [
-        9
+        4
       ],
       "effect_amounts": {},
-      "scorer": 6,
+      "scorer": 0,
       "scorer_amount": 0.0,
-      "price": 36,
-      "name": "Line Quick",
+      "price": 25,
+      "name": "Convex Slope None",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -437,17 +495,15 @@
       "placed": false,
       "col": 8,
       "row": 3,
-      "shape": 8,
+      "shape": 0,
       "effects": [
-        5
+        6
       ],
-      "effect_amounts": {
-        "5": 3743.0
-      },
-      "scorer": 22,
-      "scorer_amount": 2.715,
-      "price": 44,
-      "name": "Pipe Bend Drill",
+      "effect_amounts": {},
+      "scorer": 0,
+      "scorer_amount": 0.0,
+      "price": 32,
+      "name": "Rect None",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -606,11 +662,16 @@
     }
   ],
   "shred_points": 0,
-  "rubble_points": 0.7484999999999998,
+  "rubble_points": 0,
   "idea_points": 0,
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
+  "inaction_used": 0,
+  "card_slots_won": 0,
+  "action_slots_won": 0,
+  "action_slots_unlimited": true,
+  "inaccessible": [],
   "resource_gain_mult": 1.0,
   "resource_gain_bonus": 1.0,
   "reroll_discount": 1.0,
@@ -623,16 +684,8 @@
   "continue_past_game_over": true,
   "score_chips": 63.41,
   "score_mult": 4,
-  "last_run_cash_gained": 609,
-  "last_run_cash_breakdown": {
-    "base": 20,
-    "interest": 549,
-    "score": 0,
-    "cards": 0,
-    "scorers": 40,
-    "essence": 0,
-    "debt": false
-  },
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       5,

@@ -1,4 +1,4 @@
-"""Trials and final bosses: the run-wide modifiers.
+"""Trials: the run-wide modifiers.
 
 Split out of the old tests/test_run_scoring.py; the shared Game, helpers and
 imports live in tests/game_test_case.py.
@@ -247,9 +247,13 @@ class TrialsTests(GameTestCase):
         self.assertEqual(main.Trial.name(main.Trial.PHANTOM), "Phantom")
         self.assertEqual(main.Trial.name(main.Trial.VERTIGO), "Vertigo")
         self.assertEqual(main.Trial.name(main.Trial.ELEPHANT), "Elephant")
+        # The two that used to be the 24th run's final bosses are ordinary
+        # trials now.
+        self.assertEqual(main.Trial.name(main.Trial.SKY_HIGH), "Sky High")
+        self.assertEqual(main.Trial.name(main.Trial.SINGULARITY), "Singularity")
         for trial in main.Trial.ORDER:
             self.assertTrue(main.Trial.description(trial))
-        self.assertEqual(len(main.Trial.ORDER), 19)
+        self.assertEqual(len(main.Trial.ORDER), 21)
         self.assertIn(main.Trial.DEAD_ZONE, main.Trial.ORDER)
         self.assertIn(main.Trial.ALL_FINISHES, main.Trial.ORDER)
         self.assertIn(main.Trial.SLIM_PICKINGS, main.Trial.ORDER)
@@ -267,6 +271,8 @@ class TrialsTests(GameTestCase):
         self.assertIn(main.Trial.PHANTOM, main.Trial.ORDER)
         self.assertIn(main.Trial.VERTIGO, main.Trial.ORDER)
         self.assertIn(main.Trial.ELEPHANT, main.Trial.ORDER)
+        self.assertIn(main.Trial.SKY_HIGH, main.Trial.ORDER)
+        self.assertIn(main.Trial.SINGULARITY, main.Trial.ORDER)
         # The reworked Deal breaker is a board gag; its description says so.
         self.assertEqual(main.Trial.description(main.Trial.DEAL_BREAKER),
                          "Blocks never score until you sell a card.")
@@ -306,11 +312,11 @@ class TrialsTests(GameTestCase):
         self.assertIs(main.ui._tile_art(main.Trial, main.Trial.DEAD_ZONE),
                       main.ui._tile_art(main.Trial, main.Trial.DEAD_ZONE))
 
-    def test_no_two_run_modifiers_share_a_tessellation_pattern(self):
-        # The user's rule: every trial AND both final bosses has a tessellation
-        # of its own — not the same family drawn twice in another colour.
-        modifiers = ([(main.Trial, trial) for trial in main.Trial.ORDER]
-                     + [(main.FinalBoss, boss) for boss in main.FinalBoss.ORDER])
+    def test_no_two_trials_share_a_tessellation_pattern(self):
+        # The user's rule: every trial has a tessellation of its own — not the
+        # same family drawn twice in another colour (which now includes Sky
+        # High and Singularity, the two former final bosses).
+        modifiers = [(main.Trial, trial) for trial in main.Trial.ORDER]
         styles = [source.TILE_STYLES[value] for source, value in modifiers]
         self.assertEqual(len(set(styles)), len(modifiers),
                          f"a pattern is used twice: {sorted(styles)}")
@@ -322,39 +328,6 @@ class TrialsTests(GameTestCase):
         fingerprints = {self._pixel_hash(main.ui._tile_art(source, value))
                         for source, value in modifiers}
         self.assertEqual(len(fingerprints), len(modifiers))
-
-    def test_the_final_bosses_have_their_own_tiles(self):
-        # The two final bosses wear tile art like a trial: the run's screen and
-        # panels are covered in the boss's pattern while its run is played, and
-        # the collection shows the boss the same tile as its icon.
-        size = main.ui.TILE_SIZE
-        self.assertEqual(len(main.FinalBoss.COLORS), len(main.FinalBoss.ORDER))
-        self.assertEqual(set(main.FinalBoss.TILE_STYLES), set(main.FinalBoss.ORDER))
-        # The boss ids are their own 0/1, so the cache must key on the SOURCE as
-        # well as the id: the singularity must not get the hands-tied tile.
-        for boss in main.FinalBoss.ORDER:
-            with self.subTest(boss=main.FinalBoss.name(boss)):
-                tile = main.ui._tile_art(main.FinalBoss, boss)
-                self.assertEqual(tile.get_size(), (size, size))
-                colours = {tuple(tile.get_at((x, y)))[:3]
-                           for x in range(0, size, 2)
-                           for y in range(0, size, 2)}
-                self.assertGreaterEqual(len(colours), 2)
-                self.assertLessEqual(len(colours), 12)
-                self.assertTrue(colours & set(main.FinalBoss.palette(boss).values()))
-                # A boss's tile is never a trial's, whatever the ids are.
-                for trial in main.Trial.ORDER:
-                    self.assertNotEqual(
-                        self._pixel_hash(tile),
-                        self._pixel_hash(main.ui._tile_art(main.Trial, trial)),
-                        (main.FinalBoss.name(boss), main.Trial.name(trial)))
-                self.assertIsNot(main.ui._tile_art(main.FinalBoss, boss),
-                                 main.ui._tile_art(main.Trial, boss))
-                # The panels its run is tinted with stay readable.
-                tint = main.FinalBoss.panel_color(boss)
-                self.assertGreaterEqual(sum(tint) / 3, 40)
-                self.assertLessEqual(sum(tint) / 3,
-                                     main.FinalBoss.PANEL_LIGHT_LIMIT + 40)
 
     def test_tiles_are_tessellations_that_meet_across_their_seams(self):
         # The whole point of the lattice: two tiles side by side and stacked
@@ -821,7 +794,7 @@ class TrialsTests(GameTestCase):
         self.assertEqual(self.game.current_trial, main.Trial.LONG_RUN)
         self.assertEqual(self.game.cash, 1000)
         self.assertIn("while building", self.game.shop_message)
-        # The post-run RETRY/CONTINUE state and the final boss run are out too.
+        # The post-run RETRY/CONTINUE state is out too.
         self.game.run_active = False
         self.game.run_complete = True
         self.game.awaiting_after_run = True
@@ -829,10 +802,6 @@ class TrialsTests(GameTestCase):
         self.assertEqual(self.game.cash, 1000)
         self.game.awaiting_after_run = False
         self.game.run_complete = False
-        self.game.final_boss = main.FinalBoss.SKY_HIGH
-        self.assertFalse(self.game._click_trial_display(left))
-        self.assertEqual(self.game.current_trial, main.Trial.LONG_RUN)
-        self.assertEqual(self.game.cash, 1000)
 
 
     def test_all_finishes_trial_marks_marbles_finish_on_border(self):
@@ -857,10 +826,11 @@ class TrialsTests(GameTestCase):
         self.assertFalse(any(m.finish_on_border for m in self.game.marbles))
 
 
-    def test_failing_boss_run_ends_in_defeat(self):
-        # The 24th run is a boss run: it must be CLEARED to win. With only one
-        # prior loss, failing it ends the game in defeat (not a win) and
-        # awards defeat dice like any other loss.
+    def test_failing_the_last_run_ends_in_defeat(self):
+        # The 24th run must be CLEARED to win. With only one prior loss,
+        # failing it ends the game in defeat (not a win) and awards defeat dice
+        # like any other loss. It is an ordinary run now — it used to be the
+        # boss run — so nothing about it is special except that it is last.
         for run in range(main.TOTAL_RUNS - 1):
             if run == 5:
                 self._complete_run(100, required=1000)  # 1 prior loss
@@ -869,7 +839,7 @@ class TrialsTests(GameTestCase):
             self.game._continue_run()
         self.assertFalse(self.game.game_over)
 
-        self._complete_run(100, required=1000)  # fail the 24th (boss) run
+        self._complete_run(100, required=1000)  # fail the 24th (last) run
         self.game._continue_run()
 
         self.assertTrue(self.game.game_over)
@@ -879,66 +849,128 @@ class TrialsTests(GameTestCase):
         self.assertEqual(metagame.dice(), (main.TOTAL_RUNS - 3) ** 2)
 
 
-    def test_final_boss_data_is_defined(self):
-        self.assertEqual(main.FinalBoss.name(main.FinalBoss.SINGULARITY), "Singularity")
-        self.assertEqual(main.FinalBoss.name(main.FinalBoss.SKY_HIGH), "Sky High")
-        for boss in main.FinalBoss.ORDER:
-            self.assertTrue(main.FinalBoss.description(boss))
-        self.assertEqual(len(main.FinalBoss.ORDER), 2)
-        self.assertIn(main.FinalBoss.SINGULARITY, main.FinalBoss.ORDER)
-        self.assertIn(main.FinalBoss.SKY_HIGH, main.FinalBoss.ORDER)
+    def test_the_two_former_bosses_are_ordinary_trials(self):
+        # The user's request: "make the final bosses just normal bosses ... for
+        # the final boss, just use a random normal boss". Sky High and
+        # Singularity are trials like the rest — same tables, same pool — and
+        # there is no FinalBoss class left holding them.
+        self.assertFalse(hasattr(main, "FinalBoss"))
+        self.assertFalse(hasattr(components, "FinalBoss"))
+        for trial in (main.Trial.SKY_HIGH, main.Trial.SINGULARITY):
+            with self.subTest(trial=main.Trial.name(trial)):
+                self.assertIn(trial, main.Trial.ORDER)
+                self.assertTrue(main.Trial.description(trial))
+                self.assertIn(trial, main.Trial.COLORS)
+                self.assertIn(trial, main.Trial.TILE_STYLES)
+        self.assertEqual(main.Trial.description(main.Trial.SKY_HIGH),
+                         "The required score is doubled.")
+        # Both are drawable like any other trial: the pool the shop-side draw
+        # reads (Trial.ORDER) is all there is.
+        self.assertIn(main.Trial.SKY_HIGH, main.Trial.ORDER)
+        self.assertIn(main.Trial.SINGULARITY, main.Trial.ORDER)
 
 
-    def test_final_boss_is_chosen_on_the_24th_run(self):
-        # Reaching the last run picks a final boss (randomly) for run 24.
-        for _ in range(main.TOTAL_RUNS - 1):
-            self._complete_run(1000000, required=1)
-            self.game._continue_run()
-        self.assertEqual(self.game.run_number, main.TOTAL_RUNS - 1)
-        self.assertIn(self.game.final_boss, main.FinalBoss.ORDER)
+    def test_the_24th_run_plays_a_normal_trial(self):
+        # Reaching the last run draws a trial from the ordinary pool, exactly
+        # as every other run does (the draw is pinned here so it is checkable),
+        # and that run's trial display is live like any other run's.
+        def fake_choice(sequence):
+            return (main.Trial.SKY_HIGH if sequence == main.Trial.ORDER
+                    else sequence[0])
 
-
-    def test_boss_run_has_no_trial(self):
-        # The 24th run has a final boss instead of a trial.
-        for _ in range(main.TOTAL_RUNS - 1):
-            self._complete_run(1000000, required=1)
-            self.game._continue_run()
-        self.assertEqual(self.game.run_number, main.TOTAL_RUNS - 1)
-        self.assertIsNone(self.game.current_trial)
-
-
-    def test_sky_high_triples_required_score_on_boss_run(self):
-        # Forcing the Sky High boss triples the 24th run's required score.
-        def fake_choice(seq):
-            return main.FinalBoss.SKY_HIGH if seq == main.FinalBoss.ORDER else seq[0]
         with mock.patch("main.random.choice", side_effect=fake_choice):
             for _ in range(main.TOTAL_RUNS - 1):
                 self._complete_run(1000000, required=1)
                 self.game._continue_run()
-        self.assertEqual(self.game.final_boss, main.FinalBoss.SKY_HIGH)
-        base = main.get_next_required_score(main.TOTAL_RUNS - 1)
-        self.assertEqual(self.game.required_score, base * 3)
-
-
-    def test_endless_play_drops_the_boss_and_hands_the_run_back_to_a_trial(self):
-        # Past the boss run the game keeps going, and the boss must not linger:
-        # it would keep applying and lock the trial display forever.
-        def fake_choice(seq):
-            return main.FinalBoss.SINGULARITY if seq == main.FinalBoss.ORDER \
-                else seq[0]
-        with mock.patch("main.random.choice", side_effect=fake_choice):
-            for _ in range(main.TOTAL_RUNS - 1):
-                self._complete_run(1000000, required=1)
-                self.game._continue_run()
-        self.assertEqual(self.game.final_boss, main.FinalBoss.SINGULARITY)
+        self.assertEqual(self.game.run_number, main.TOTAL_RUNS - 1)
+        self.assertEqual(self.game.current_trial, main.Trial.SKY_HIGH)
+        # The 24th run used to show a FINAL BOSS and lock the display; it is
+        # bought from like any other run now.
         self.game.trials_enabled = True
-        self.game.continue_past_game_over = True  # the player keeps playing
+        self.assertTrue(self.game.trial_options_available())
+        self.assertIsNotNone(self.game.tile_source[0])
 
-        self._complete_run(1000000, required=1)
-        self.game._continue_run()  # advance into the first endless run
+
+    def test_sky_high_doubles_the_required_score(self):
+        # The user's request: "make sky high give 2x required score". The trial
+        # puts the factor on the RUN's target wherever the run's trial changes,
+        # so buying Sky High on doubles it and buying it away puts the run's
+        # own scheduled target back.
+        self.assertEqual(main.SKY_HIGH_SCORE_FACTOR, 2.0)
+        self.game.trials_enabled = True
+        self.game.run_number = main.TOTAL_RUNS - 1
+        base = main.get_next_required_score(self.game.run_number,
+                                            self.game.score_growth)
+        self.game.required_score = base
+
+        self.game.current_trial = main.Trial.SKY_HIGH
+        self.game._apply_trial()
+        self.assertEqual(self.game.required_score, base * 2)
+        self.assertEqual(self.game._trial_score_factor(), 2.0)
+
+        # Any other trial is 1x, and so is no trial at all.
+        for trial in (main.Trial.DEAD_ZONE, main.Trial.SINGULARITY, None):
+            with self.subTest(trial=trial):
+                self.game.current_trial = trial
+                self.game._apply_trial()
+                self.assertEqual(self.game.required_score, base)
+                self.assertEqual(self.game._trial_score_factor(), 1.0)
+        # And the same holds through the display's own purchase: a Sky High run
+        # bought away drops back to the scheduled target.
+        self.game.current_trial = main.Trial.SKY_HIGH
+        self.game._apply_trial()
+        self.assertEqual(self.game.required_score, base * 2)
+        self.game.cash = 1000
+        right = (main.TRIAL_BOX_RECT.right - 5, main.TRIAL_BOX_RECT.centery)
+        self.assertTrue(self.game._click_trial_display(right))
+        self.assertIsNone(self.game.current_trial)
+        self.assertEqual(self.game.required_score, base)
+
+    def test_a_forced_target_survives_a_trial_change(self):
+        # Grace v2 makes this run unfailable by taking its target over (0).
+        # Re-deriving the target when the run's trial changes must leave such a
+        # run alone, or buying a trial would quietly make it failable again.
+        self.game.trials_enabled = True
+        self.game.run_number = 5
+        self.game.required_score = main.get_next_required_score(
+            5, self.game.score_growth)
+        self.game.current_trial = main.Trial.DEAD_ZONE
+        self.game._apply_trial()
+        self.assertFalse(self.game.target_forced)
+
+        self.assertTrue(self.game._action_grace(
+            main.ActionItem(main.Action.GRACE, 1, version=2)))
+        self.assertEqual(self.game.required_score, 0)
+        self.assertTrue(self.game.target_forced)
+
+        # A trial buy and a trial apply both leave the 0 alone.
+        self.game.current_trial = main.Trial.SKY_HIGH
+        self.game._apply_trial()
+        self.assertEqual(self.game.required_score, 0)
+        self.game.cash = 1000
+        left = (main.TRIAL_BOX_RECT.left + 5, main.TRIAL_BOX_RECT.centery)
+        self.assertTrue(self.game._click_trial_display(left))
+        self.assertEqual(self.game.required_score, 0)
+
+        # Advancing to the next run hands the target back to the schedule: the
+        # forced target belonged to the run it was used on.
+        self._complete_run(1, required=0)
+        self.game._continue_run()
+        self.assertFalse(self.game.target_forced)
+        self.assertGreater(self.game.required_score, 0)
+
+
+    def test_endless_play_hands_every_run_a_trial(self):
+        # Past the last run the game keeps going, and the endless runs play
+        # trials exactly like the runs before them (there is no boss run to
+        # leave anything behind any more).
+        self.game.trials_enabled = True
+        for _ in range(main.TOTAL_RUNS):
+            self._complete_run(1000000, required=1)
+            self.game.continue_past_game_over = True  # the player keeps playing
+            self.game._continue_run()
 
         self.assertEqual(self.game.run_number, main.TOTAL_RUNS)
-        self.assertIsNone(self.game.final_boss)
         self.assertIn(self.game.current_trial, main.Trial.ORDER)
         self.assertTrue(self.game.trial_options_available())
 
@@ -973,89 +1005,199 @@ class TrialsTests(GameTestCase):
 
 
     def test_endless_singularity_stops_growing_the_marble(self):
-        # A boss cleared before endless play no longer applies.
-        for _ in range(main.TOTAL_RUNS - 1):
-            self._complete_run(1000000, required=1)
-            self.game._continue_run()
-        self.game.final_boss = main.FinalBoss.SINGULARITY
-        self.game.continue_past_game_over = True
-        self._complete_run(1000000, required=1)
-        self.game._continue_run()
-        self.assertIsNone(self.game.final_boss)
-
+        # The Singularity trial's mass growth belongs to the run that plays it:
+        # once that run is over the marble is back to its own mass.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.SINGULARITY
         marble = self._add_marble()
         self.game.run_active = True
         before = marble.mass
+        for _ in range(60):  # one second at DT
+            self.game.update()
+        self.assertGreater(marble.mass, before)
+        self.assertAlmostEqual(marble.mass,
+                               before + main.SINGULARITY_MASS_GROWTH, places=2)
+
+        # The next run plays a different trial, so nothing grows any more.
+        self._complete_run(1000000, required=1)
+        self.game._continue_run()
+        self.game.current_trial = main.Trial.DEAD_ZONE
+        self.game._apply_trial()
+        marble = self._add_marble()
+        self.game.run_active = True
+        settled = marble.mass
         for _ in range(60):
             self.game.update()
-        self.assertEqual(marble.mass, before)
+        self.assertEqual(marble.mass, settled)
 
 
-    def test_a_loaded_endless_save_drops_a_stale_boss(self):
-        # An old endless save that still carried a boss loads without it, while
-        # a save made during the boss run keeps its boss.
-        data = {"run_number": main.TOTAL_RUNS,
-                "final_boss": int(main.FinalBoss.SINGULARITY)}
-        fresh = main.Game()
-        save_system._load_save_data(fresh, data, 1)
-        self.assertIsNone(fresh.final_boss)
+    def test_a_loaded_save_keeps_a_forced_target(self):
+        # Grace v2's taken-over target rides through a save, so reloading a run
+        # it was used on does not quietly make that run failable again.
+        data = {"run_number": 5, "required_score": 0, "target_forced": True}
+        forced = main.Game()
+        save_system._load_save_data(forced, data, 1)
+        self.assertEqual(forced.required_score, 0)
+        self.assertTrue(forced.target_forced)
 
-        boss_data = {"run_number": main.TOTAL_RUNS - 1,
-                     "final_boss": int(main.FinalBoss.SKY_HIGH)}
-        boss_save = main.Game()
-        save_system._load_save_data(boss_save, boss_data, 1)
-        self.assertEqual(boss_save.final_boss, main.FinalBoss.SKY_HIGH)
-
-
-    def test_beating_final_boss_discovers_it_in_collection(self):
-        # Clearing the 24th run reveals its final boss in the collection.
-        self.game.final_boss = main.FinalBoss.SINGULARITY
-        self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
-        self.assertTrue(self.game.reset_run())
-        self.game.marbles[0].finished = True
-        self.game.required_score = 1
-        self.game.score_chips = 1
-        self.game.score_mult = 1
-        self.game._handle_block_contacts([])
-        self.assertTrue(self.game.run_cleared)
-        self.assertTrue(collection.is_final_boss_discovered(main.FinalBoss.SINGULARITY))
-        self.assertTrue(any(p.title == "Final boss beaten" for p in self.game.popups))
+        # An ordinary save (and an older one with no such key at all) is not
+        # forced, and re-derives its target when its trial changes.
+        plain_data = {"run_number": 5, "required_score": 500}
+        plain = main.Game()
+        save_system._load_save_data(plain, plain_data, 1)
+        self.assertEqual(plain.required_score, 500)
+        self.assertFalse(plain.target_forced)
+        plain.trials_enabled = True
+        plain.current_trial = main.Trial.SKY_HIGH
+        plain._apply_trial()
+        scheduled = main.get_next_required_score(5, plain.score_growth)
+        self.assertEqual(plain.required_score, scheduled * 2)
 
 
-    def test_final_bosses_appear_in_collection_entries(self):
-        # Both bosses show up in the collection, hidden until beaten — and each
-        # one HAS an icon now: its own tile (see tile_source / FinalBoss.COLORS).
+    def test_beating_a_run_under_a_former_boss_discovers_it(self):
+        # Clearing a run played under Sky High (or Singularity) reveals that
+        # TRIAL in the collection, exactly as any other trial's run does.
+        for trial in (main.Trial.SKY_HIGH, main.Trial.SINGULARITY):
+            with self.subTest(trial=main.Trial.name(trial)):
+                self.game.trials_enabled = True
+                self.game.current_trial = trial
+                self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
+                self.assertTrue(self.game.reset_run())
+                self.game.marbles[0].finished = True
+                self.game.required_score = 1
+                self.game.score_chips = 1
+                self.game.score_mult = 1
+                self.game._handle_block_contacts([])
+                self.assertTrue(self.game.run_cleared)
+                self.assertTrue(collection.is_trial_discovered(trial))
+                # Commit the run, so the next trial starts from a clean
+                # post-run state (reset_run refuses while RETRY/CONTINUE is up).
+                self.game._continue_run()
+        # ...and both show up in the collection's TRIAL entries, not a category
+        # of their own.
         entries = self.game._collection_entries()
-        bosses = [e for e in entries if e[0] == "final_boss"]
-        self.assertEqual(len(bosses), len(main.FinalBoss.ORDER))
-        for kind, value, name, desc, has_icon, discovered in bosses:
-            self.assertIn(value, main.FinalBoss.ORDER)
-            self.assertEqual(name, "???")
-            self.assertEqual(desc, "???")
-            self.assertTrue(has_icon)
-            self.assertFalse(discovered)
+        kinds = {kind for kind, *_ in entries}
+        self.assertNotIn("final_boss", kinds)
+        by_value = {e[1]: e for e in entries if e[0] == "trial"}
+        for trial in (main.Trial.SKY_HIGH, main.Trial.SINGULARITY):
+            with self.subTest(trial=main.Trial.name(trial)):
+                entry = by_value[trial]
+                self.assertEqual(entry[2], main.Trial.name(trial))
+                self.assertTrue(entry[4], "a trial needs an icon in the collection")
 
 
-    def test_boss_run_dot_is_black_until_played(self):
-        # The 24th run's dot is black instead of gray until it is played.
+    def test_the_24th_run_dot_reads_like_every_other(self):
+        # The 24th run used to stand out (a black dot, gold when beaten, deep
+        # red when lost); it is an ordinary run now, so its dot is gray until
+        # played and green/red afterwards, exactly like run 1's.
+        last = main.TOTAL_RUNS - 1
         self.game.run_results = []
         main.ui.draw_run_dots(self.game)
-        cx, cy = self._run_dot_pixel(main.TOTAL_RUNS - 1)
-        self.assertEqual(self.game.screen.get_at((cx, cy))[:3], main.BLACK)
+        cx, cy = self._run_dot_pixel(last)
+        self.assertEqual(self.game.screen.get_at((cx, cy))[:3], main.GRAY)
         nx, ny = self._run_dot_pixel(0)
         self.assertEqual(self.game.screen.get_at((nx, ny))[:3], main.GRAY)
 
-
-    def test_boss_run_dot_is_gold_when_cleared_and_deep_red_when_lost(self):
-        # Clearing the 24th run turns its dot gold; losing turns it deep red.
         self.game.run_results = [True] * main.TOTAL_RUNS
         main.ui.draw_run_dots(self.game)
-        cx, cy = self._run_dot_pixel(main.TOTAL_RUNS - 1)
-        self.assertEqual(self.game.screen.get_at((cx, cy))[:3], (255, 215, 0))
-        nx, ny = self._run_dot_pixel(0)
+        self.assertEqual(self.game.screen.get_at((cx, cy))[:3], main.GREEN)
         self.assertEqual(self.game.screen.get_at((nx, ny))[:3], main.GREEN)
 
         self.game.run_results = [False] + [True] * (main.TOTAL_RUNS - 2) + [False]
         main.ui.draw_run_dots(self.game)
-        self.assertEqual(self.game.screen.get_at((cx, cy))[:3], (140, 0, 0))  # boss lost: deep red
-        self.assertEqual(self.game.screen.get_at((nx, ny))[:3], main.RED)     # normal lost: red
+        self.assertEqual(self.game.screen.get_at((cx, cy))[:3], main.RED)
+        self.assertEqual(self.game.screen.get_at((nx, ny))[:3], main.RED)
+
+
+class ChallengerTests(GameTestCase):
+    """Challenger: buying the trial display's two options costs half as much."""
+
+    def _own_challenger(self):
+        self.game.cards.append(main.CardItem(main.Card.CHALLENGER, 28))
+
+    def _trial_half(self, side):
+        """A point inside the trial display's left/right half.
+
+        The display's two halves are bought by clicking them, and the trial
+        system has to be ON for the display to be live at all (see
+        trial_options_available), so every test here enables it first.
+        """
+        self.game.trials_enabled = True
+        return ((main.TRIAL_BOX_RECT.left + 5, main.TRIAL_BOX_RECT.centery)
+                if side == "left" else
+                (main.TRIAL_BOX_RECT.right - 5, main.TRIAL_BOX_RECT.centery))
+
+    def test_challenger_card_data(self):
+        self.assertIn(main.Card.CHALLENGER, main.Card.ORDER)
+        self.assertEqual(main.Card.name(main.Card.CHALLENGER), "Challenger")
+        self.assertEqual(main.Card.PRICES[main.Card.CHALLENGER], 28)
+        self.assertEqual(main.Card.rarity_name(main.Card.CHALLENGER), "Common")
+        self.assertTrue(main.Card.comment(main.Card.CHALLENGER))
+        self.assertIn("half", main.Card.description(main.Card.CHALLENGER))
+        self.assertIn(main.Card.CHALLENGER, main.Card.COLORS)
+        self.assertIn(main.Card.CHALLENGER, main.Card.GLYPHS)
+        self.assertEqual(main.CHALLENGER_COST_FACTOR, 0.5)
+        # A passive utility card: the trial display owns the fees and reads it.
+        self.assertIsNone(components.match_group_card_meta(main.Card.CHALLENGER))
+        self.assertIsNone(components.card_scorer(main.Card.CHALLENGER))
+        self.assertNotIn(main.Card.CHALLENGER, components.NAMED_CARD_ORDER)
+
+    def test_the_two_fees_are_halved(self):
+        self.assertEqual(self.game.trial_change_cost(), main.TRIAL_CHANGE_COST)
+        self.assertEqual(self.game.trial_disable_cost(), main.TRIAL_DISABLE_COST)
+
+        self._own_challenger()
+
+        self.assertEqual(self.game.trial_change_cost(),
+                         main.TRIAL_CHANGE_COST // 2)
+        self.assertEqual(self.game.trial_disable_cost(),
+                         main.TRIAL_DISABLE_COST // 2)
+        # The Card cutter silences it like every other card effect.
+        self.game.disabled_card = self.game.cards[-1]
+        self.assertEqual(self.game.trial_change_cost(), main.TRIAL_CHANGE_COST)
+
+    def test_changing_a_trial_charges_the_halved_fee(self):
+        self._own_challenger()
+        self.game.cash = 1000
+        before = self.game.current_trial
+
+        self.assertTrue(self.game._click_trial_display(self._trial_half("left")))
+
+        self.assertEqual(self.game.cash, 1000 - main.TRIAL_CHANGE_COST // 2)
+        self.assertNotEqual(self.game.current_trial, before)
+        self.assertIn(f"(${main.TRIAL_CHANGE_COST // 2})",
+                      self.game.shop_message)
+
+    def test_disabling_a_trial_charges_the_halved_fee(self):
+        self._own_challenger()
+        self.game.cash = 1000
+
+        self.assertTrue(self.game._click_trial_display(self._trial_half("right")))
+
+        self.assertEqual(self.game.cash, 1000 - main.TRIAL_DISABLE_COST // 2)
+        self.assertIsNone(self.game.current_trial)
+        self.assertIn(f"(${main.TRIAL_DISABLE_COST // 2})",
+                      self.game.shop_message)
+
+    def test_the_halved_fee_is_what_the_display_shows(self):
+        # The overlay reads the game's own fees, so the price on the button is
+        # the price charged.
+        self._own_challenger()
+        self._trial_half("left")          # turns the trial system on
+        self.game.screen.fill(main.BLACK)
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(0, 0)):
+            rects = main.ui.draw_trial_options(self.game, main.TRIAL_BOX_RECT)
+        self.assertEqual(len(rects), 2)
+        # The halved fee is affordable at $30, which the full price is not.
+        self.game.cash = 30
+        self.assertGreaterEqual(30, self.game.trial_change_cost())
+        self.assertLess(30, main.TRIAL_CHANGE_COST)
+
+    def test_a_player_without_the_card_pays_in_full(self):
+        self.game.cash = 1000
+        half = self._trial_half("left")
+
+        self.assertTrue(self.game._click_trial_display(half))
+
+        self.assertEqual(self.game.cash, 1000 - main.TRIAL_CHANGE_COST)
+

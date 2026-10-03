@@ -146,29 +146,33 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.board_units, 2)
         self.assertEqual(g.cash, 52)
 
-    def test_shop_layout_three_scorers_blocks_bottom_board_unit_top(self):
+    def test_shop_layout_items_top_packs_and_board_unit_bottom(self):
         g = self._start_locked_game()
         g.shop.refresh()
-        # The top row's scorer slots (cols 5-7) are filled by scorer pieces —
-        # or, when the draw is a run role, by that role's ready-made block.
-        slots = [i for i in g.shop.items if i.row == 1 and i.col in (5, 6, 7)]
-        self.assertEqual(sorted(i.col for i in slots), [5, 6, 7])
-        self.assertTrue(all(getattr(i, "kind", None) in (main.Component.SCORER, "block")
-                           for i in slots))
-        # The two pre-made blocks sit at the END of the bottom row (cols 7-8,
-        # just right of the two action slots).
-        blocks = [i for i in g.shop.items if i.kind == "block" and i.row == 3]
-        self.assertEqual(len(blocks), 2)
-        self.assertEqual([i.col for i in blocks], [7, 8])
+        # The top row is the shelf's "any item" slots: five of them, from the
+        # second column, each one offer of a uniformly chosen kind.
+        items = [i for i in g.shop.items if i.row == main.SHOP_ITEM_ROW]
+        self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
+        self.assertTrue(all(
+            getattr(i, "kind", None) in (main.Component.SHAPE,
+                                          main.Component.EFFECT,
+                                          main.Component.SCORER,
+                                          "block", "card", "action")
+            for i in items))
+        # The three packs sit on the lower row, left of the Board Unit.
+        packs = [i for i in g.shop.items if i.row == main.SHOP_PACK_ROW]
+        self.assertEqual([i.col for i in packs], [1, 2, 3])
+        self.assertTrue(all(i.kind == "pack" for i in packs))
         # The middle row stays empty.
         self.assertEqual([i for i in g.shop.items if i.row == 2], [])
-        # The Board Unit is on the top row and its cell holds no shop item.
+        # The Board Unit is on that lower row, and its cell holds no shop item.
         tile = g._board_unit_tile()
         self.assertEqual((tile.x - g.shop.rect.x) // main.GRID_SIZE,
                          main.BOARD_UNIT_COL)
         self.assertEqual((tile.y - g.shop.rect.y) // main.GRID_SIZE,
                          main.BOARD_UNIT_ROW)
-        self.assertEqual(main.BOARD_UNIT_ROW, 1)
+        self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
+        self.assertEqual(main.BOARD_UNIT_COL, main.SHOP_PACK_SLOTS + 1)
         self.assertIsNone(g.shop.item_at((tile.centerx, tile.centery)))
 
     def test_clicking_locked_square_spends_a_board_unit(self):

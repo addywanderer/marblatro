@@ -47,6 +47,7 @@ ORANGE = _card_source.ORANGE
 QUICK_SCALE = _card_source.QUICK_SCALE
 RED = _card_source.RED
 Scorer = _card_source.Scorer
+Shape = _card_source.Shape
 YELLOW = _card_source.YELLOW
 del _card_source
 
@@ -166,6 +167,15 @@ def _named_card_units(game, measure):
     * stencil_slots = the card slots no OTHER card is filling, less the 1 the
       multiplier already has (see stencil_units), so Stencil alone in a
       five-slot area reads 4 and multiplies the multiplier by 5 (ratio 4.0).
+    * plain_rects = the plain walls on the board (see plain_rect_count): a Rect
+      block with no effect at all and no scorer — the block the assembler
+      builds when every part is left out. Claustrophobia pays ratio 0.75 of it,
+      which is +3 mult a wall.
+    * inside_locked_no_phase = the seconds the marbles spent inside a LOCKED
+      board unit while NOT phasing (see Game._count_locked_no_phase_time): the
+      same "any point of the marble inside the unit" test as inside_time's
+      locked clause, minus every frame the marble was phasing. Matrix pays
+      ratio 1.5 of it, which is +45 chips a second.
     """
     if measure == "start":
         return 1.0
@@ -213,6 +223,12 @@ def _named_card_units(game, measure):
         return card_sell_total(game)
     if measure == "stencil_slots":
         return stencil_units(game)
+    if measure == "plain_rects":
+        return plain_rect_count(game)
+    if measure == "inside_locked_no_phase":
+        # Counted as the run plays, per marble, like every other second-based
+        # measure: a save or a rewind never re-derives it from positions.
+        return getattr(game, "inside_locked_no_phase_time", 0.0)
     return 0.0
 
 
@@ -383,6 +399,25 @@ def card_sell_total(game):
     worth: cutting a card stops its effect, never its resale value.
     """
     return sum(max(0, game._sell_price(card)) for card in game.cards)
+
+
+def plain_rect_count(game):
+    """Claustrophobia's measure: how many plain walls the board holds.
+
+    A "plain rect" is the cheapest thing in the game to field and the one thing
+    the assembler builds out of nothing: a RECT-shaped block with no effect at
+    all and no scorer (press S with nothing assigned and this is what lands).
+    Only blocks ON the board count — the card is about a cramped marble box, so
+    a wall waiting in the inventory is not crowding anything — and the locked
+    squares' own walls do not count either: the game generates those around the
+    locked region rather than the player placing them, and they never sit in
+    Game.grid at all (see Game._board_wall_blocks). A block with nothing but a
+    scorer, or nothing but an effect, is not plain and pays nothing here.
+    """
+    return sum(1 for block in game.grid.values()
+               if block.shape == Shape.RECT
+               and block.scorer == Scorer.NONE
+               and all(effect == Effect.NONE for effect in block.effects))
 
 
 def stencil_units(game):

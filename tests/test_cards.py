@@ -851,7 +851,11 @@ class CardsTests(GameTestCase):
 
 
     def test_granted_cards_roll_a_magnitude(self):
-        random.seed(7)
+        # The seed has to land at least one COMPOSED card in the first five
+        # grants (the card area fills at MAX_CARDS); the two new whole cards
+        # shifted the seeded draw, so 7 (which landed none) became 25, which
+        # lands four.
+        random.seed(25)
         self.game.cards.clear()
         for _ in range(20):
             self.game._grant_random_card()

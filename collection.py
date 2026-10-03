@@ -27,7 +27,7 @@ ALWAYS_DISCOVERED_COMPONENTS = frozenset({
     (components.Component.SCORER, components.Scorer.FINISH),
 })
 
-_DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "match_groups": set, "trials": set, "final_bosses": set}
+_DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "match_groups": set, "trials": set}
 
 
 def _load():
@@ -36,7 +36,7 @@ def _load():
     if _DATA is not None:
         return
     _DATA = {"cards": set(), "actions": set(), "components": set(),
-             "match_groups": set(), "trials": set(), "final_bosses": set()}
+             "match_groups": set(), "trials": set()}
     try:
         with open(FILE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -45,7 +45,6 @@ def _load():
         _DATA["components"] = {(k, v) for k, v in data.get("components", [])}
         _DATA["match_groups"] = set(data.get("match_groups", []))
         _DATA["trials"] = set(data.get("trials", []))
-        _DATA["final_bosses"] = set(data.get("final_bosses", []))
     except (OSError, ValueError):
         pass
 
@@ -60,7 +59,6 @@ def _save():
             "components": sorted([list(c) for c in _DATA["components"]]),
             "match_groups": sorted(_DATA["match_groups"]),
             "trials": sorted(_DATA["trials"]),
-            "final_bosses": sorted(_DATA["final_bosses"]),
         }, f)
 
 
@@ -138,16 +136,6 @@ def discover_trial(value):
     return True
 
 
-def discover_final_boss(value):
-    """Record a final boss beaten on the 24th run; returns True if new."""
-    _load()
-    if value in _DATA["final_bosses"]:
-        return False
-    _DATA["final_bosses"].add(value)
-    _save()
-    return True
-
-
 def is_card_discovered(value):
     _load()
     return value in _DATA["cards"]
@@ -179,8 +167,3 @@ def is_match_group_discovered(index):
 def is_trial_discovered(value):
     _load()
     return value in _DATA["trials"]
-
-
-def is_final_boss_discovered(value):
-    _load()
-    return value in _DATA["final_bosses"]

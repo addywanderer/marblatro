@@ -205,7 +205,7 @@ class ShopTests(GameTestCase):
         self.game.shop.refresh()
         standard = [i for i in self.game.shop.items if i.row < 5]
         bonus = [i for i in self.game.shop.items if i.row >= 5]
-        self.assertEqual(len(standard), 15)
+        self.assertEqual(len(standard), main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
         self.assertEqual(len(bonus), 3)
         allowed = {"shape", "effect", "scorer", "block", "card", "action"}
         for item in bonus:
@@ -1017,24 +1017,24 @@ class ShopTests(GameTestCase):
                              main.block_price_for(main.Shape.RECT, [], role.scorer))
 
 
-    def test_shop_scorer_slots_offer_role_blocks(self):
-        def fake_sample(options, weights, k):
-            # The scorer slot's pool is the only one holding the role scorers.
-            if main.Scorer.START in options:
-                return [main.Scorer.START, main.Scorer.FINISH]
-            return options[:k]
-
-        with mock.patch("main.weighted_sample_without_replacement", side_effect=fake_sample):
-            self.game.shop.refresh()
-
-        roles = [item for item in self.game.shop.items
-                 if getattr(item, "scorer", None) in (main.Scorer.START, main.Scorer.FINISH)]
-        self.assertEqual([role.scorer for role in roles],
-                         [main.Scorer.START, main.Scorer.FINISH])
-        for role in roles:
-            self.assertEqual(role.shape, main.Shape.RECT)
-            self.assertEqual(role.effects, [])
-            self.assertNotIn(role.kind, (main.Component.SCORER, "card", "action"))
+    def test_a_role_scorer_offer_is_a_ready_made_block(self):
+        # A scorer offer that rolls a run ROLE (Start/Finish) is dealt as a
+        # ready-made Rect block rather than a loose scorer piece — a role is a
+        # run's spine, never a part assembled onto someone else's physics. The
+        # shelf and a scorer pack share this one roller (see _scorer_offer).
+        for scorer in (main.Scorer.START, main.Scorer.FINISH):
+            with self.subTest(scorer=main.Scorer.name(scorer)):
+                role = self.game.shop._scorer_offer(scorer, 0, 0)
+                self.assertEqual(getattr(role, "kind", None), "block")
+                self.assertEqual(role.scorer, scorer)
+                self.assertEqual(role.shape, main.Shape.RECT)
+                self.assertEqual(role.effects, [])
+                self.assertEqual(role.price,
+                                 main.block_price_for(main.Shape.RECT, [], scorer))
+        # ...while an ordinary scorer is dealt as a loose component.
+        piece = self.game.shop._scorer_offer(main.Scorer.CHIPS_ADD, 0, 0)
+        self.assertEqual(piece.kind, main.Component.SCORER)
+        self.assertEqual(piece.value, main.Scorer.CHIPS_ADD)
 
 
     def test_gilded_scorer_is_defined_and_shop_available(self):
@@ -1267,7 +1267,12 @@ class ShopTests(GameTestCase):
 
     def test_left_clicking_shop_item_buys_it(self):
         self.game.toolbox.items.clear()
-        item = self.game.shop.items[0]
+        # The shelf's slots are mixed now, and a pack can cost more than the
+        # starting purse, so this puts a cheap offer in the first cell by hand
+        # (a shape piece is the cheapest kind) and makes sure it is affordable.
+        item = self.game.shop._offer_of(main.Pack.SHAPE, 1, main.SHOP_ITEM_ROW)
+        self.game.shop.items = [item]
+        self.game.cash = max(self.game.cash, self.game._buy_price(item) + 50)
         cash_before = self.game.cash
         pos = (self.game.shop.rect.x + item.col * main.GRID_SIZE + main.GRID_SIZE // 2,
                self.game.shop.rect.y + item.row * main.GRID_SIZE + main.GRID_SIZE // 2)
@@ -1569,7 +1574,10 @@ class ShopTests(GameTestCase):
 
 
     def test_buying_component_adds_to_toolbox_and_deducts_cash(self):
-        component = next(item for item in self.game.shop.items if item.kind != "block")
+        component = self.game.shop._offer_of(main.Pack.EFFECT, 1,
+                                             main.SHOP_ITEM_ROW)
+        self.assertEqual(component.kind, main.Component.EFFECT)
+        self.game.shop.items = [component]
         self.game.cash = 1000
 
         self.game._buy_shop_item(component)
@@ -1643,41 +1651,54 @@ class ShopTests(GameTestCase):
         self.assertIsNone(self.game.shop.item_at((self.game.shop.rect.x - 10, self.game.shop.rect.y - 10)))
 
 
-    def test_shop_sells_individual_components(self):
-        kinds = {item.kind for item in self.game.shop.items}
-
+    def test_shop_sells_individual_components_and_blocks(self):
+        # The shelf's five slots each deal ONE offer of a uniformly chosen kind,
+        # so a single refresh may hold no block (or no component) at all: over
+        # a run of refreshes every kind turns up, and a block offer is a whole
+        # block — shape, effect and scorer all set.
+        kinds = set()
+        for _ in range(120):
+            self.game.shop.refresh()
+            kinds |= {item.kind for item in self.game.shop.items}
         self.assertIn(main.Component.SHAPE, kinds)
         self.assertIn(main.Component.EFFECT, kinds)
         self.assertIn(main.Component.SCORER, kinds)
+        self.assertIn("block", kinds)
+        block = self.game.shop._random_block_offer(0, 0)
+        self.assertIsNotNone(block.shape)
+        self.assertIsNotNone(block.effect)
+        self.assertIsNotNone(block.scorer)
 
 
-    def test_shop_sells_blocks(self):
-        blocks = [item for item in self.game.shop.items if item.kind == "block"]
-
-        self.assertGreater(len(blocks), 0)
-        self.assertTrue(all(item.shape is not None and item.effect is not None and item.scorer is not None
-                            for item in blocks))
-
-
-    def test_shop_has_two_blocks_two_of_each_component_and_four_cards(self):
-        kinds = [item.kind for item in self.game.shop.items]
-
-        self.assertEqual(len(self.game.shop.items), 15)
-        # Four card slots: each offer is a match-group (or whole) card with its
-        # scorer already attached, so no condition components are sold any more
-        # (see Shop.refresh).
-        self.assertEqual(kinds.count("card"), 4)
-        # One shop slot per offered action (the catalogue is bigger than the
-        # room, so a refresh shows SHOP_ACTION_SLOTS of them).
-        self.assertEqual(kinds.count("action"), main.SHOP_ACTION_SLOTS)
-        self.assertEqual(kinds.count(main.Component.SHAPE), 2)
-        self.assertEqual(kinds.count(main.Component.EFFECT), 2)
-        # The two block slots and the three scorer slots are five items between
-        # them: a scorer slot that rolls a run ROLE (Start/Finish) is sold as a
-        # ready-made block instead of a loose scorer piece (see _scorer_offer),
-        # so how those five split between the two kinds depends on the roll.
-        self.assertEqual(kinds.count(main.Component.SCORER) + kinds.count("block"),
-                         5)
+    def test_shop_shelf_is_five_item_slots_and_three_packs(self):
+        items = [i for i in self.game.shop.items if i.row == main.SHOP_ITEM_ROW]
+        packs = [i for i in self.game.shop.items if i.row == main.SHOP_PACK_ROW]
+        self.assertEqual(len(self.game.shop.items),
+                         main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
+        # Five "any item" slots along the top row, one offer each of a
+        # uniformly chosen kind.
+        self.assertEqual(len(items), main.SHOP_ITEM_SLOTS)
+        self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
+        allowed = {main.Component.SHAPE, main.Component.EFFECT,
+                   main.Component.SCORER, "block", "card", "action"}
+        for item in items:
+            self.assertIn(item.kind, allowed)
+        # ...and no two of them sell the same thing (see _random_offer).
+        keys = [main.offer_key(i) for i in items]
+        self.assertNotIn(None, keys)
+        self.assertEqual(len(set(keys)), len(keys))
+        # Three packs on the lower row, beside the fixed Board Unit tile.
+        self.assertEqual(len(packs), main.SHOP_PACK_SLOTS)
+        self.assertEqual([p.col for p in packs], [1, 2, 3])
+        for pack in packs:
+            with self.subTest(pack=pack.name):
+                self.assertEqual(pack.kind, "pack")
+                self.assertIn(pack.pack_type, main.Pack.ORDER)
+                self.assertIn(pack.size, main.Pack.SIZE_ORDER)
+                self.assertEqual(len(pack.options), main.Pack.options(pack.size))
+                self.assertEqual(pack.keep, main.Pack.keep(pack.size))
+                self.assertEqual(pack.price,
+                                 components.pack_price(pack.pack_type, pack.size))
         self.assertFalse(hasattr(main.Component, "CONDITION"))
 
 
@@ -1696,27 +1717,33 @@ class ShopTests(GameTestCase):
                     self.assertNotEqual(item.value, main.Scorer.NONE)
 
 
-    def test_shop_always_offers_four_cards(self):
-        cards = [item for item in self.game.shop.items if item.kind == "card"]
-        self.assertEqual(len(cards), 4)
-        # Four distinct cards are chosen at random from the pre-built pool (the
-        # whole Card.ORDER cards plus the (match group x scorer) cards).
-        self.assertEqual(len({item.value for item in cards}), 4)
-        self.assertTrue(all(item.value in main.Card.NAMES for item in cards))
-        # The four cards open the shop's bottom item row, to the left of the
-        # actions and pre-built blocks.
-        self.assertEqual({item.col for item in cards}, {1, 2, 3, 4})
-        self.assertTrue(all(item.row == 3 for item in cards))
+    def test_a_card_offer_is_a_real_card_and_never_repeats_on_a_shelf(self):
+        # Card offers come from the shelf's mixed slots now, so one refresh may
+        # hold none at all: over a run of refreshes they turn up, always as a
+        # real card value, and never twice on the same shelf.
+        seen = set()
+        for _ in range(60):
+            self.game.shop.refresh()
+            offered = [i for i in self.game.shop.items if i.kind == "card"]
+            self.assertEqual(len({i.value for i in offered}), len(offered))
+            for item in offered:
+                self.assertEqual(main.Card.name(item.value),
+                                 main.Card.name(item.value))
+                self.assertGreaterEqual(item.value, 0)
+                seen.add(item.value)
+        self.assertTrue(seen)
+        # Whole cards and match-group cards both turn up.
+        self.assertTrue(seen & set(main.Card.ORDER))
 
 
-    def test_shop_cards_are_four_random_distinct_every_refresh(self):
-        # Every reroll yields exactly four DIFFERENT cards from the pre-built pool.
+    def test_shop_card_offers_are_distinct_within_a_refresh(self):
+        # The shelf's slots share one dedupe set, so a card is never offered
+        # twice across the five slots (see _random_offer / OFFER_DUPLICATE_TRIES).
         for _ in range(40):
             self.game.shop.refresh()
-            cards = [item for item in self.game.shop.items if item.kind == "card"]
-            self.assertEqual(len(cards), 4)
-            self.assertEqual(len({item.value for item in cards}), 4)
-            self.assertTrue(all(item.value in main.Card.NAMES for item in cards))
+            cards = [item.value for item in self.game.shop.items
+                     if item.kind == "card"]
+            self.assertEqual(len(set(cards)), len(cards))
 
 
     def test_new_shapes_have_names_descriptions_and_prices(self):
@@ -1954,9 +1981,10 @@ class ShopTests(GameTestCase):
         self.game.toolbox.items.clear()
         self.game.cash = 1000
         # The ERR 404 card converts to a random card when bought, so it isn't
-        # the same object — skip it and buy a normal card instead.
-        card = next(item for item in self.game.shop.items
-                    if item.kind == "card" and item.value != main.Card.ERR_404)
+        # the same object — take an ordinary card instead.
+        card = main.make_card_item(main.Card.GARDEN, col=1,
+                                   row=main.SHOP_ITEM_ROW)
+        self.game.shop.items = [card]
         before_cash = self.game.cash
         self.game._buy_shop_item(card)
         self.assertIn(card, self.game.cards)
@@ -1993,16 +2021,18 @@ class ShopTests(GameTestCase):
 
     def test_the_shop_skips_cards_the_player_already_owns(self):
         # An offer the player cannot buy is a wasted slot, and a card they own
-        # should not come back around refresh after refresh: the card slots skip
-        # the cards the player already owns.
+        # should not come back around refresh after refresh: every card offer
+        # skips the cards the player already owns (see Shop.owned_cards).
         self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
         self.assertEqual(self.game.shop.owned_cards(), {main.Card.GARDEN})
+        saw_card = False
         for _ in range(200):
             self.game.shop.refresh()
             offered = [item for item in self.game.shop.items
                        if item.kind == "card"]
-            self.assertEqual(len(offered), 4)  # all four slots still fill
+            saw_card = saw_card or bool(offered)
             self.assertNotIn(main.Card.GARDEN, {item.value for item in offered})
+        self.assertTrue(saw_card)  # the shelf does still deal cards
 
 
     def test_showman_lets_owned_cards_back_into_the_shop(self):
@@ -2027,19 +2057,18 @@ class ShopTests(GameTestCase):
 
 
     def test_the_shop_skips_actions_the_player_is_holding(self):
-        # The rule the card slots follow, for the actions in hand: an action
-        # the player is already holding is not offered again (both slots still
-        # fill — the catalogue is far bigger than the two slots).
+        # The rule the card offers follow, for the actions in hand: an action
+        # the player is already holding is not offered again.
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)]
         self.assertEqual(self.game.shop.owned_actions(), {main.Action.DEATH})
+        saw_action = False
         for _ in range(200):
             self.game.shop.refresh()
             offered = [item for item in self.game.shop.items
                        if item.kind == "action"]
-            self.assertEqual(len(offered), main.SHOP_ACTION_SLOTS)
-            self.assertEqual(len({i.value for i in offered}),
-                             main.SHOP_ACTION_SLOTS)
+            saw_action = saw_action or bool(offered)
             self.assertNotIn(main.Action.DEATH, {i.value for i in offered})
+        self.assertTrue(saw_action)
         self.game.actions.append(main.ActionItem(main.Action.GRACE, 25))
         self.assertEqual(self.game.shop.owned_actions(),
                          {main.Action.DEATH, main.Action.GRACE})
@@ -2053,8 +2082,12 @@ class ShopTests(GameTestCase):
         # the refresh (like a Slim pickings removal) instead of showing the
         # same purchase twice.
         self.game.cash = 1000
-        card = next(i for i in self.game.shop.items if i.kind == "card")
-        action = next(i for i in self.game.shop.items if i.kind == "action")
+        card = main.CardItem(main.Card.GARDEN, 36, col=1, row=main.SHOP_ITEM_ROW)
+        action = main.ActionItem(main.Action.DEATH, 24, col=2,
+                                 row=main.SHOP_ITEM_ROW)
+        component = main.Component.shape_component(main.Shape.PIPE, col=3,
+                                                   row=main.SHOP_ITEM_ROW)
+        self.game.shop.items = [card, action, component]
         before = len(self.game.shop.items)
         self.game._buy_shop_item(card)
         self.assertNotIn(card, self.game.shop.items)
@@ -2065,10 +2098,6 @@ class ShopTests(GameTestCase):
         self.assertEqual(len(self.game.shop.items), before - 2)
         # A component stays on the shelf on purpose: it is a repeatable buy
         # whose price rises with every purchase (see _buy_price).
-        component = next(i for i in self.game.shop.items
-                         if i.kind in (main.Component.SHAPE,
-                                       main.Component.EFFECT,
-                                       main.Component.SCORER))
         self.game._buy_shop_item(component)
         self.assertIn(component, self.game.shop.items)
 
@@ -2110,28 +2139,23 @@ class ShopTests(GameTestCase):
                                 main.Card.CONQUISTADOR})
 
 
-    def test_shop_always_offers_some_actions(self):
-        actions = [item for item in self.game.shop.items if item.kind == "action"]
-        cards = [item for item in self.game.shop.items if item.kind == "card"]
-        # The catalogue is bigger than the room left in the shop's bottom row,
-        # so each refresh shows a random SHOP_ACTION_SLOTS of them, all
-        # different.
-        self.assertEqual(len(actions), main.SHOP_ACTION_SLOTS)
-        self.assertEqual(len({a.value for a in actions}), main.SHOP_ACTION_SLOTS)
-        self.assertTrue(all(a.value in main.Action.ORDER for a in actions))
-        # Two slots, two DISTINCT actions, on every single refresh.
-        for _ in range(40):
+    def test_the_shelf_deals_actions_over_refreshes(self):
+        # The catalogue is far bigger than a shelf slot, so an action turns up
+        # now and then — always a real action, priced by the catalogue, in the
+        # item row, and rolled for its version (a v1 normally, a free v2 now
+        # and then).
+        seen = set()
+        for _ in range(120):
             self.game.shop.refresh()
-            offered = [i for i in self.game.shop.items if i.kind == "action"]
-            self.assertEqual(len(offered), 2)
-            self.assertEqual(len({a.value for a in offered}), 2)
-        # Actions sit in row 3 to the right of the four card slots.
-        self.assertTrue(all(a.row == 3 for a in actions))
-        self.assertEqual({a.col for a in actions}, {5, 6})
-        self.assertTrue(max(c.col for c in cards) < min(a.col for a in actions))
-        self.assertTrue(all(a.price == main.Action.PRICES[a.value] for a in actions))
-        # An action arrives as v1 normally, but now and then it is a free v2.
-        self.assertTrue(all(a.version in (1, 2) for a in actions))
+            for item in self.game.shop.items:
+                if item.kind != "action":
+                    continue
+                self.assertIn(item.value, main.Action.ORDER)
+                self.assertEqual(item.price, main.Action.PRICES[item.value])
+                self.assertIn(item.version, (1, 2))
+                self.assertEqual(item.row, main.SHOP_ITEM_ROW)
+                seen.add(item.value)
+        self.assertTrue(seen)
 
 
     def test_action_prices_are_halved_and_the_upgrade_costs_200(self):
@@ -2159,30 +2183,25 @@ class ShopTests(GameTestCase):
         self.game.shop_message = ""
 
         def price_gold(version):
-            with mock.patch("main.random_action_version", return_value=version):
-                self.game.shop.refresh()
+            # The shelf deals an action only now and then, so this puts one
+            # there by hand: the price drawing is what is under test.
+            action = main.ActionItem(main.Action.DEATH,
+                                     main.Action.PRICES[main.Action.DEATH],
+                                     version=version, col=1,
+                                     row=main.SHOP_ITEM_ROW)
+            self.game.shop.items = [action]
             self.game.screen.fill(main.BLACK)
             main.ui.draw_shop(self.game)
-            cells = []
-            for item in self.game.shop.items:
-                if getattr(item, "kind", None) != "action":
-                    continue
-                cx = (self.game.shop.rect.x + item.col * main.GRID_SIZE
-                      + main.GRID_SIZE // 2)
-                cy = (self.game.shop.rect.y + (item.row + 1) * main.GRID_SIZE
-                      + main.GRID_SIZE // 2)
-                cells.append(sum(
-                    self.game.screen.get_at((x, y))[:3] == gold
-                    for x in range(cx - 18, cx + 18)
-                    for y in range(cy - 8, cy + 9)))
-            return cells
+            cx = (self.game.shop.rect.x + action.col * main.GRID_SIZE
+                  + main.GRID_SIZE // 2)
+            cy = (self.game.shop.rect.y + (action.row + 1) * main.GRID_SIZE
+                  + main.GRID_SIZE // 2)
+            return sum(self.game.screen.get_at((x, y))[:3] == gold
+                       for x in range(cx - 18, cx + 18)
+                       for y in range(cy - 8, cy + 9))
 
-        plain = price_gold(1)
-        self.assertTrue(plain)
-        self.assertEqual(plain, [0] * len(plain))  # a plain shelf prices white
-        upgraded = price_gold(2)
-        self.assertEqual(len(upgraded), len(plain))
-        self.assertTrue(all(count > 0 for count in upgraded), upgraded)
+        self.assertEqual(price_gold(1), 0)  # a plain shelf prices white
+        self.assertGreater(price_gold(2), 0)
 
 
     def test_a_reroll_that_shelves_an_upgraded_action_says_so(self):
@@ -2192,7 +2211,14 @@ class ShopTests(GameTestCase):
         self.game.free_rerolls = 0
         self.game.trials_enabled = False
 
-        with mock.patch("main.random_action_version", return_value=2):
+        # The shelf deals an action only now and then, so the offer kinds are
+        # pinned to actions here: the message is what is under test.
+        def actions_only(shop, col, row):
+            return shop._offer_of(main.Pack.ACTION, col, row)
+
+        with mock.patch("main.random_action_version", return_value=2), \
+                mock.patch.object(main.Shop, "_roll_random_offer",
+                                  actions_only):
             self.game._refresh_shop()
         self.assertIn("Refreshed shop", self.game.shop_message)
         self.assertIn("already upgraded", self.game.shop_message)
@@ -2201,7 +2227,9 @@ class ShopTests(GameTestCase):
                 self.assertIn(f"{item.name} v2", self.game.shop_message)
 
         # A shelf of plain v1 actions gets the ordinary message back.
-        with mock.patch("main.random_action_version", return_value=1):
+        with mock.patch("main.random_action_version", return_value=1), \
+                mock.patch.object(main.Shop, "_roll_random_offer",
+                                  actions_only):
             self.game._refresh_shop()
         self.assertNotIn("already upgraded", self.game.shop_message)
 
@@ -2468,7 +2496,8 @@ class ShopTests(GameTestCase):
         self.game.shop.refresh()
         refreshed = [item.name for item in self.game.shop.items]
 
-        self.assertEqual(len(refreshed), 15)
+        self.assertEqual(len(refreshed),
+                         main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
         self.assertNotEqual(original, refreshed)
 
 
@@ -2502,7 +2531,7 @@ class ShopTests(GameTestCase):
     def test_block_price_is_75_percent_of_component_sum(self):
         # Every part is priced at its CATALOG price, so the block's price never
         # follows the magnitudes its parts rolled on the shelf.
-        block = next(item for item in self.game.shop.items if item.kind == "block")
+        block = self.game.shop._random_block_offer(0, 0)
         total = (main.COMPONENT_PRICES[(main.Component.SHAPE, block.shape)]
                  + sum(main.effect_component_price(e) for e in block.effects)
                  + main.scorer_component_price(block.scorer))
@@ -2659,7 +2688,9 @@ class ShopTests(GameTestCase):
     def test_buying_same_shop_item_twice_is_allowed(self):
         self.game.toolbox.items.clear()
         self.game.cash = 1000
-        item = next(i for i in self.game.shop.items if i.kind == main.Component.EFFECT)
+        item = self.game.shop._offer_of(main.Pack.EFFECT, 1, main.SHOP_ITEM_ROW)
+        self.assertEqual(item.kind, main.Component.EFFECT)
+        self.game.shop.items = [item]
 
         first = self.game._buy_price(item)
         self.game._buy_shop_item(item)
@@ -2713,8 +2744,9 @@ class ShopTests(GameTestCase):
         # component prices rise even though they weren't bought directly.
         self.game.toolbox.items.clear()
         self.game.cash = 1000
-        block = next(i for i in self.game.shop.items if getattr(i, "kind", None) == "block")
+        block = self.game.shop._random_block_offer(1, main.SHOP_ITEM_ROW)
         self.assertIsNotNone(block)
+        self.game.shop.items = [block]
         self.game._buy_shop_item(block)
         self.assertGreaterEqual(
             self.game.component_purchases.get((main.Component.SHAPE, block.shape), 0), 1)
@@ -2746,7 +2778,9 @@ class ShopTests(GameTestCase):
 
 
     def test_duplicate_pricing_does_not_affect_rarity(self):
-        item = next(i for i in self.game.shop.items if i.kind == main.Component.EFFECT)
+        item = self.game.shop._offer_of(main.Pack.EFFECT, 1, main.SHOP_ITEM_ROW)
+        self.assertEqual(item.kind, main.Component.EFFECT)
+        self.game.shop.items = [item]
         before = main.component_weight(item.kind, item.value)
         self.game.cash = 1000
         self.game._buy_shop_item(item)
@@ -3394,3 +3428,152 @@ class ShopTests(GameTestCase):
         self.assertFalse(self.game.has_selected)  # one block per assembly
         # The assembled block was consumed from the toolbox when placed.
         self.assertEqual(len([i for i in self.game.toolbox.items if i.kind == "block"]), 0)
+
+
+class EarthquakeTests(GameTestCase):
+    """Earthquake: every magnitude the SHOP rolls comes out 10% higher."""
+
+    def _own_earthquake(self):
+        self.game.cards.append(main.CardItem(main.Card.EARTHQUAKE, 38))
+
+    def _offers(self):
+        """The magnitudes of the shop's COMPONENT offers, by cell.
+
+        Only the component rows can be compared seed for seed: they are drawn
+        before the card row in Shop.refresh, and the card row's own draws depend
+        on what the player owns (an owned card is left out of the pool), so
+        everything after it — the block offers included — shifts when the
+        Earthquake card is owned. The blocks are checked directly instead (see
+        test_the_block_rolls_are_raised_too).
+        """
+        out = {}
+        for item in self.game.shop.items:
+            kind = getattr(item, "kind", None)
+            if kind == main.Component.SCORER:
+                out[(item.col, item.row)] = ("scorer", item.value, item.amount)
+            elif kind == main.Component.EFFECT:
+                out[(item.col, item.row)] = ("effect", item.value, item.amount)
+        return out
+
+    def _expected(self, offered):
+        """What one offer's magnitude should read, raised and re-rounded."""
+        kind, value, magnitude = offered
+        average = (main.Scorer.DEFAULT_AMOUNT.get(value, 0)
+                   if kind == "scorer" else main.Effect.MAGNITUDE.get(value, 0))
+        return round(magnitude * main.EARTHQUAKE_MAGNITUDE_FACTOR,
+                     main.magnitude_precision(average))
+
+    def test_earthquake_card_data(self):
+        self.assertIn(main.Card.EARTHQUAKE, main.Card.ORDER)
+        self.assertEqual(main.Card.name(main.Card.EARTHQUAKE), "Earthquake")
+        self.assertEqual(main.Card.PRICES[main.Card.EARTHQUAKE], 38)
+        self.assertEqual(main.Card.rarity_name(main.Card.EARTHQUAKE), "Unusual")
+        self.assertTrue(main.Card.comment(main.Card.EARTHQUAKE))
+        self.assertIn("10%", main.Card.description(main.Card.EARTHQUAKE))
+        self.assertIn(main.Card.EARTHQUAKE, main.Card.COLORS)
+        self.assertIn(main.Card.EARTHQUAKE, main.Card.GLYPHS)
+        # A passive utility card like Coupon's: the shop owns the mechanic and
+        # reads the card, so it is neither grouped nor measured.
+        self.assertIsNone(components.match_group_card_meta(main.Card.EARTHQUAKE))
+        self.assertIsNone(components.card_scorer(main.Card.EARTHQUAKE))
+        self.assertNotIn(main.Card.EARTHQUAKE, components.NAMED_CARD_ORDER)
+        self.assertEqual(main.EARTHQUAKE_MAGNITUDE_FACTOR, 1.1)
+
+    def test_the_quake_factor_is_the_card(self):
+        self.assertEqual(self.game.shop._quake_factor(), 1.0)
+        # Without the card a magnitude is handed back untouched.
+        self.assertEqual(self.game.shop._quake(30, 30), 30)
+        self.assertEqual(self.game.shop._quake(4.4, 4), 4.4)
+
+        self._own_earthquake()
+
+        self.assertEqual(self.game.shop._quake_factor(), 1.1)
+        self.assertEqual(self.game.shop._quake(30, 30), 33)
+        # A reroll keeps the precision a magnitude of its size means.
+        self.assertEqual(self.game.shop._quake(4.4, 4), 4.84)
+        # The Card cutter silences it like every other card effect.
+        self.game.disabled_card = self.game.cards[-1]
+        self.assertEqual(self.game.shop._quake_factor(), 1.0)
+
+    def test_every_component_the_shop_rolls_is_a_tenth_higher(self):
+        # The raise is applied to the ROLL (see Shop._quake), so a slot's
+        # component offer is the quake of what the same roller would have dealt
+        # unraised. The shelf's slots share one random stream and a card offer
+        # consumes a variable number of draws (it re-picks away from the cards
+        # the player owns, and owning the quake card changes that pool), so the
+        # kinds are pinned to effects and scorers here: that is the comparison
+        # the old fixed component rows made possible.
+        only_components = (main.Pack.EFFECT, main.Pack.SCORER)
+        with mock.patch.object(main, "SHELF_OFFER_TYPES", only_components):
+            random.seed(11)
+            self.game.shop.refresh()
+            plain = self._offers()
+
+            self._own_earthquake()
+            random.seed(11)
+            self.game.shop.refresh()
+            raised = self._offers()
+
+        compared = 0
+        for slot, offered in plain.items():
+            # The same seed rolls the same OFFER (kind and value); only the
+            # magnitude differs. A scorer with no magnitude to roll (Lucky,
+            # Start, Finish) stays 0 either way — there is nothing to raise.
+            self.assertEqual(offered[:2], raised[slot][:2], slot)
+            self.assertAlmostEqual(raised[slot][2], self._expected(offered),
+                                   msg=f"{offered[0]} offer in cell {slot}")
+            compared += 1
+        # Every shelf slot dealt an effect or a scorer here.
+        self.assertEqual(compared, main.SHOP_ITEM_SLOTS)
+
+    def test_the_block_rolls_are_raised_too(self):
+        # A pre-built block rolls its own scorer amount and effect strengths;
+        # both are the shop's rolls, so both are quaked (and the same seed
+        # gives the same underlying roll to compare against).
+        scorer = main.Scorer.MULT_ADD
+        effects = [main.Effect.PISTON]
+        random.seed(31)
+        plain_amount = main.roll_scorer_amount(scorer)
+        plain_amounts = main.roll_effect_amounts(effects)
+
+        self._own_earthquake()
+        random.seed(31)
+        raised_amount = self.game.shop._quake_scorer(scorer)
+        raised_amounts = self.game.shop._quake_effect_amounts(effects)
+
+        self.assertAlmostEqual(raised_amount, self._expected(
+            ("scorer", scorer, plain_amount)))
+        for effect, magnitude in plain_amounts.items():
+            self.assertAlmostEqual(
+                raised_amounts[effect],
+                round(magnitude * main.EARTHQUAKE_MAGNITUDE_FACTOR,
+                      main.magnitude_precision(
+                          main.Effect.MAGNITUDE.get(effect, 0))))
+
+    def test_a_bought_piece_keeps_the_raised_magnitude(self):
+        # The quake is applied to the ROLL, so what the player buys carries the
+        # raise for good — selling the card afterwards does not shrink it.
+        self._own_earthquake()
+        offer = self.game.shop._scorer_offer(main.Scorer.CHIPS_ADD, 1,
+                                            main.SHOP_ITEM_ROW)
+        raised = offer.amount
+        self.game.shop.items = [offer]
+
+        self.game.cash = 10_000
+        self.assertGreater(raised, 0)
+        self.game._buy_shop_item(offer)
+
+        bought = [i for i in self.game.toolbox.items
+                  if i.kind == main.Component.SCORER][0]
+        self.assertEqual(bought.amount, raised)
+        self.game.cards = []
+        self.assertEqual(bought.amount, raised)
+
+    def test_a_shop_without_a_game_rolls_the_plain_average(self):
+        # A Shop built on its own (in a test) has no game to ask for cards, so
+        # nothing is raised (see Shop._quake_factor).
+        self.assertEqual(self.game.shop.game, self.game)  # the real one has one
+        self.assertEqual(self.game.shop._quake_factor(),
+                         1.0 if not self.game._has_card(main.Card.EARTHQUAKE)
+                         else main.EARTHQUAKE_MAGNITUDE_FACTOR)
+

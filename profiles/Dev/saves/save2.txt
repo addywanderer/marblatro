@@ -345,6 +345,7 @@
       "random_rolls": null
     }
   ],
+  "shop_locked": [],
   "component_purchases": [
     [
       "scorer",
@@ -389,6 +390,10 @@
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
+  "resource_gain_mult": 1.0,
+  "resource_gain_bonus": 1.0,
+  "reroll_discount": 1.0,
+  "run_xmult_bonus": 0.0,
   "marble_type": 2,
   "upgrades_enabled": true,
   "game_over": false,

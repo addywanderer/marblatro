@@ -17,14 +17,15 @@ from components import (
     MAGNITUDE_STEP_DIVISOR,
     MATCH_GROUPS,
     PIPE_GROUP_SHAPES,
+    RESOURCE_PACK_FACTOR,
     RESOURCE_THRESHOLD,
     Action,
     Card,
     Component,
     Difficulty,
     Effect,
-    FinalBoss,
     MarbleType,
+    Pack,
     Rarity,
     Scorer,
     Shape,
@@ -42,6 +43,7 @@ from components import (
     match_group_card_meta,
     match_group_label,
     match_group_trigger,
+    pack_price,
     paired_shape,
     points_text,
     resource_points_for,
@@ -158,8 +160,27 @@ MAX_CARDS = 5  # Maximum owned cards the card area can hold at once
 CARD_AREA_COORDS = (620, 142, MAX_CARDS * GRID_SIZE, GRID_SIZE)
 CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and card area
 MAX_ACTIONS = 2  # Maximum owned actions the action area can hold at once
-# How many of the action catalogue the shop offers at once (two distinct
-# actions, drawn at random each refresh).
+# The shop's shelf: SHOP_ITEM_SLOTS rows of "any item" offers — one random
+# component, block, card or action each (see Shop._random_offer) — plus
+# SHOP_PACK_SLOTS item packs, plus the fixed Board Unit tile. The five item
+# offers sit on the shelf's top row and the three packs beside the board unit
+# on the lower one (see SHOP_ITEM_ROW / SHOP_PACK_ROW): the row under each is
+# where its prices are drawn (see ui.draw_shop).
+SHOP_ITEM_SLOTS = 5
+SHOP_PACK_SLOTS = 3
+SHOP_ITEM_ROW = 1
+SHOP_PACK_ROW = 3
+# How many times a shelf slot or a pack option re-rolls to avoid repeating
+# something already on the shelf (or already in the pack) before accepting the
+# duplicate: enough to keep a full shelf varied, few enough that a pool which
+# cannot fill every slot (a player who owns most of the cards) still fills them.
+OFFER_DUPLICATE_TRIES = 8
+# The kinds a shelf slot (and a Picky bonus slot) may offer, as components.Pack
+# types: the goods an "any item" slot deals. Resource points are NOT here — a
+# shelf slot sells items, and points are only ever dealt inside a pack (see
+# Shop._offer_of).
+SHELF_OFFER_TYPES = (Pack.SHAPE, Pack.EFFECT, Pack.SCORER, Pack.BLOCK,
+                     Pack.CARD, Pack.ACTION)
 SHOP_ACTION_SLOTS = 2
 # Spirit tokens (see Action.SPIRIT): a token keeps the whole block a Spirit
 # destroyed and is drawn as that block, in a column to the right of the
@@ -265,6 +286,41 @@ MARBLE_UPGRADES_TOGGLE_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 180, 668, 360, 44)
 # action row's vertical center, to its right.
 ACTION_UPGRADE_RECT = pygame.Rect(ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2] + 12,
                                   ACTION_AREA_COORDS[1], 150, GRID_SIZE)
+# --- Slots that cards and actions can win (Inaction, Foresight) ----------------
+# The owned-card tray and the owned-action row sit in ONE band above the
+# inventory: the tray grows rightwards from CARD_AREA_COORDS, the action row
+# leftwards from the shop panel's right edge (see Game.action_area_x), and the
+# action-upgrade button sits just outside the band. SLOT_ROW_SLOTS is therefore
+# the hard ceiling on how many slots the two of them can show together, derived
+# from that geometry rather than typed in.
+SLOT_ROW_SLOTS = ((ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2]
+                   - CARD_AREA_COORDS[0]) // GRID_SIZE)
+# Inaction does nothing, five times over: every INACTION_USES_PER_SLOT uses win
+# the card area one more slot, and a v2 Inaction hands one over outright (see
+# Game._action_inaction).
+INACTION_USES_PER_SLOT = 5
+# Foresight's permanent gift: one action slot, or — as a v2 — no limit on owned
+# actions at all, which is what ACTION_SLOTS_UNLIMITED stands in for. The row
+# PAGES when more actions are held than the band can show (see
+# Game.action_row_window), so "unlimited" is honest: every action stays
+# reachable whatever the count.
+FORESIGHT_ACTION_SLOTS = 1
+ACTION_SLOTS_UNLIMITED = 999
+# The action row keeps at least this many slots of the band, whatever the card
+# tray wants: one to hold an action and one to page with.
+ACTION_ROW_MIN_SLOTS = 2
+# The Earthquake whole card: the factor the magnitudes the SHOP rolls are raised
+# by (see Shop._quake).
+EARTHQUAKE_MAGNITUDE_FACTOR = 1.1
+# The Challenger whole card: the factor the trial display's two fees are
+# charged at (see Game.trial_change_cost / trial_disable_cost).
+CHALLENGER_COST_FACTOR = 0.5
+# The Odyssey whole card: the fraction of an item's SELL price the banked item
+# pays when it comes back after a run, and the column its banked items are
+# shown in — one column to the right of the Spirit tokens (see TOKEN_COORDS).
+ODYSSEY_CASH_FRACTION = 0.5
+INACCESSIBLE_COORDS = (TOKEN_COORDS[0] + GRID_SIZE + 10, TOKEN_COORDS[1],
+                       GRID_SIZE, GRID_SIZE * MAX_TOKENS)
 # The bottom-left MAIN MENU button on the play screen: leaving the current game
 # and returning to the title screen (same action as the game-over screen's
 # MAIN MENU button). Sized to stay left of the re-centered board.
@@ -307,6 +363,10 @@ WATCH_BLOCK_LIMIT = 8
 # The Brain Loop whole card's chance of handing over a random action on a fresh
 # touch of a Sticky block (see Game._brain_loop_roll).
 BRAIN_LOOP_ACTION_CHANCE = 1 / 3
+# The Gate whole card's reward for one trip through a lock: one standard chips
+# unit (+30 chips), paid by Game._gate_key_and_lock every time a marble that
+# collected the lock's Key passes through it.
+GATE_PASS_CHIPS = 30
 # The Fountain whole card pays +0.25 xMult for every this-many PIPE-GROUP blocks
 # (Pipe, Drain, Pipe Bend — see components.PIPE_GROUP_SHAPES) a marble touches in
 # a row without touching anything else; the run's sightings are counted in
@@ -325,8 +385,8 @@ DOPPELGANGER_START_VX = 1.0
 # it is sold (see Game._card_sold_message / _grant_permanent_tokens).
 ESSENCE_RUN_CASH = 10
 ESSENCE_TOKENS = 2
-BOARD_UNIT_ROW = 1  # the shop's top (components) item row
-BOARD_UNIT_COL = SHOP_GRID_COLS - 2  # the row's rightmost cell
+BOARD_UNIT_ROW = SHOP_PACK_ROW  # the shelf's lower row
+BOARD_UNIT_COL = SHOP_PACK_SLOTS + 1  # right of the three pack slots
 FPS = 60
 DT = 1.0 / FPS
 # The Procrastination whole card sends a finished run back in time: when every
@@ -346,9 +406,14 @@ MAX_STEP_DISTANCE = 4.0  # px per sub-step; <= 2 * MARBLE_RADIUS prevents tunnel
 GRAVITY = 2500  # pixels/s^2
 MARBLE_RADIUS = 8
 MARBLE_MASS = 1 # scales gravity and air resistance
-# The Singularity final boss (the 24th run) makes the marble gain mass at this
-# rate (mass per second), so it falls ever faster over the course of the run.
-SINGULARITY_MASS_GROWTH = 0.5
+# The Singularity trial makes the marble gain mass at this rate (mass per
+# second), so it falls ever faster over the course of the run. It used to be
+# 0.5, a FINAL boss's rate; as an ordinary run modifier it climbs more slowly
+# (user request: "make singularity increase mass more slowly").
+SINGULARITY_MASS_GROWTH = 0.2
+# The Sky High trial's factor on the run's required score (user request: "make
+# sky high give 2x required score"; it tripled the target as a final boss).
+SKY_HIGH_SCORE_FACTOR = 2.0
 FRICTION_COEFFICIENT = 1
 ROLLING_FRICTION = 0
 RESTITUTION = 0  # Bounciness factor for walls
@@ -1652,6 +1717,93 @@ class ActionItem:
         self.name = Action.name(value)
 
 
+class ResourceOption:
+    """One option of a resource pack: points of one scorer, ready to bank.
+
+    A resource pack deals these instead of items (see components.Pack). The
+    points are what a trigger of the scorer banks times Pack's
+    RESOURCE_PACK_FACTOR, at the magnitude the option rolled, and keeping one
+    banks them straight into the permanent bank (see
+    Game._grant_resource_points).
+    """
+    kind = "resource"
+
+    def __init__(self, scorer, amount, points):
+        self.scorer = scorer
+        self.amount = amount    # the magnitude the option rolled
+        self.points = points    # what keeping it banks
+        self.name = f"{points_text(points)} {resource_point_label(scorer)} point" \
+                    f"{'' if points == 1 else 's'}"
+
+
+class ItemPack:
+    """A shelf offer that is a bundle of options to choose from.
+
+    A pack is bought like any other offer and then OPENED: the player is shown
+    its options and keeps Pack.keep(size) of them (see components.Pack). The
+    pack itself is what sits on the shelf, with its size, its type and the
+    options it dealt out; the options are removed from ``options`` as they are
+    kept, so a mega pack's second pick is made from what is left.
+    """
+    kind = "pack"
+
+    def __init__(self, pack_type, size, options, price, col=0, row=0,
+                 keep=None, kept=0):
+        self.pack_type = pack_type
+        self.size = size
+        self.options = list(options)
+        self.price = price
+        self.col = col
+        self.row = row
+        # How many options the player keeps (from the size), and how many they
+        # already have: a pack saved mid-choice comes back with its count.
+        self.keep = Pack.keep(size) if keep is None else keep
+        self.kept = kept
+        self.name = f"{Pack.size_name(size)} {Pack.name(pack_type)}"
+
+    @property
+    def remaining(self):
+        """How many options the player still gets to keep."""
+        return max(0, self.keep - self.kept)
+
+    @property
+    def open(self):
+        """True while the player still has a pick to make from this pack."""
+        return self.remaining > 0 and bool(self.options)
+
+
+def resource_point_label(scorer):
+    """What a resource scorer's points are called (see _resource_display).
+
+    Shred points buy a card, rubble points a block, idea points an action and
+    option points a permanent shop slot, so the four are named after the
+    resource rather than after what they convert into.
+    """
+    return {Scorer.SHREDS: "shred", Scorer.RUBBLE: "rubble",
+            Scorer.IDEAS: "idea", Scorer.PICKY: "option"}.get(scorer, "resource")
+
+
+def offer_key(offer):
+    """A (kind, ...) key telling two shop offers apart, or None.
+
+    Every offer names what it sells in a different place — a component its kind
+    and value, a block its shape/effects/scorer, a card and an action their
+    value, a resource option its scorer and magnitude — so this is the one
+    answer to "is this the same offer as that one?", used to keep the shelf's
+    slots and a pack's options from repeating (see Shop._random_offer and
+    Shop._roll_pack). A pack keys on nothing: two packs are never the same
+    offer, whatever they hold.
+    """
+    kind = getattr(offer, "kind", None)
+    if kind == "pack":
+        return None
+    if kind == "block":
+        return (kind, offer.shape, tuple(offer.effects), offer.scorer)
+    if kind == "resource":
+        return (kind, offer.scorer, offer.amount)
+    return (kind, getattr(offer, "value", None))
+
+
 class ScorerToken:
     """A Spirit token: a whole sacrificed block, kept firing each run.
 
@@ -1805,13 +1957,17 @@ class Shop:
         return {action.value for action in game.actions}
 
     def refresh(self):
-        """Reroll the shop's random selection of components and blocks.
+        """Reroll the shelf: SHOP_ITEM_SLOTS random offers and SHOP_PACK_SLOTS packs.
 
-        Rarer (more expensive) components show up less often, and a block's
-        rarity is the product of its components' rarities, so a block made of
-        several rare parts is multiplicatively harder to find. The offers the
-        Hoard whole card is holding are put back afterwards, so a held cell is
-        the one part of the row a reroll does not touch.
+        The five item slots each hold ONE offer of a uniformly chosen kind — a
+        shape/effect/scorer component, a ready-made block, a card or an action
+        (see _random_offer) — so the shelf shows a mix rather than a fixed
+        layout, and no two slots show the same thing. The three pack slots hold
+        ITEM PACKS (see components.Pack), each of a randomly drawn type AND
+        size, which the player buys and then keeps part of (see _roll_pack).
+
+        The offers the Hoard whole card is holding are put back afterwards, so a
+        held cell is the one part of the shelf a reroll does not touch.
         """
         # Hoard's held offers, remembered by CELL: refresh rebuilds the whole
         # row, so the cell is the only thing that can carry an offer across one
@@ -1824,104 +1980,52 @@ class Shop:
         held_offers = {self.slot_key(item): item for item in self.items
                        if self.slot_key(item) in self.locked}
         self.items = []
-        # All shop items line up next to each other in a single horizontal row.
-        col = 1
-        # Two random shapes and effects plus THREE random scorers (cheap ones
-        # are more common). The shop never sells the free default parts — the
-        # Rect shape, the None effect, or the None scorer — because the
-        # assembler fills those in automatically when a part is left out.
-        # (Shape.NONE, the invisible field, is a real shape and stays on sale.)
-        shape_pool = [s for s in Shape.ORDER if s != Shape.RECT]
-        effect_pool = [e for e in Effect.ORDER if e != Effect.NONE]
-        scorer_pool = [s for s in Scorer.SHOP_ORDER if s != Scorer.NONE]
-        shape_weights = [component_weight(Component.SHAPE, s) for s in shape_pool]
-        effect_weights = [component_weight(Component.EFFECT, e) for e in effect_pool]
-        scorer_weights = [component_weight(Component.SCORER, s) for s in scorer_pool]
-        for shape in weighted_sample_without_replacement(shape_pool, shape_weights, 2):
-            self.items.append(Component.shape_component(shape, col=col, row=1))
-            col += 1
-        for effect in weighted_sample_without_replacement(effect_pool, effect_weights, 2):
-            # A scaleable effect is sold at its OWN rolled strength (a 2100 px/s
-            # piston, a 2400 px/s^2 repulsor) and priced for it — never at 0,
-            # which is not a strength any effect can have.
-            self.items.append(Component.effect_component(
-                effect, magnitude=roll_effect_magnitude(effect), col=col, row=1))
-            col += 1
-        for scorer in weighted_sample_without_replacement(scorer_pool, scorer_weights, 3):
-            # A role scorer (Start/Finish) is offered as a ready-made block
-            # instead of a scorer component — see _scorer_offer.
-            self.items.append(self._scorer_offer(scorer, col, 1))
-            col += 1
-        # FOUR card slots. Each offer draws its TIER first, by Rarity.WEIGHTS,
-        # and the card inside that tier second — see random_card_option_values,
-        # where the collision handling stays inside the drawn tier so that
-        # keeping the offers apart cannot tilt the rarity odds (a tier's card
-        # count must not change how often the tier comes up). None of the four
-        # may be a card the player already owns unless the Showman card lifts
-        # the one-copy rule — an offer that cannot be bought is a wasted slot,
-        # and a card the player owns should not come back around run after run
-        # (see owned_cards).
-        #
-        # Two of these four slots used to sell condition components; the
-        # condition system is commented out, so the row sells four cards.
-        card_col = 1
-        for card in random_card_option_values(4, self.owned_cards()):
-            self.items.append(make_card_item(card, col=card_col, row=3))
-            card_col += 1
+        # SHOP_ITEM_SLOTS "any item" offers along the shelf's top row: each is
+        # one component, block, card or action, drawn uniformly and kept apart
+        # from the other slots (see _random_offer).
+        used = set()
+        for index in range(SHOP_ITEM_SLOTS):
+            self.items.append(self._random_offer(col=1 + index, row=SHOP_ITEM_ROW,
+                                                 used=used))
+        # SHOP_PACK_SLOTS item packs on the lower row, beside the fixed Board
+        # Unit tile: a pack is a randomly drawn TYPE at a randomly drawn SIZE,
+        # and holding one opens it to choose from its options (see _roll_pack).
+        for index in range(SHOP_PACK_SLOTS):
+            self.items.append(self._roll_pack(random.choice(Pack.ORDER),
+                                              random.choice(Pack.SIZE_ORDER),
+                                              col=1 + index, row=SHOP_PACK_ROW))
         # COMMENTED OUT with the conditions: the two condition-component slots
-        # that sat next to the two whole cards. A scorer used to pair with the
-        # condition to build a card; every card is whole now, so the columns go
-        # to cards instead (see above).
+        # and the two-scorers-plus-four-cards layout they sat in. The shelf is
+        # now SHOP_ITEM_SLOTS mixed offers rather than a fixed grid of kinds, so
+        # those slots are gone; the condition code stays here as history.
         #
+        # shape_pool = [s for s in Shape.ORDER if s != Shape.RECT]
+        # effect_pool = [e for e in Effect.ORDER if e != Effect.NONE]
+        # scorer_pool = [s for s in Scorer.SHOP_ORDER if s != Scorer.NONE]
+        # shape_weights = [component_weight(Component.SHAPE, s) for s in shape_pool]
+        # effect_weights = [component_weight(Component.EFFECT, e) for e in effect_pool]
+        # scorer_weights = [component_weight(Component.SCORER, s) for s in scorer_pool]
+        # for shape in weighted_sample_without_replacement(shape_pool, shape_weights, 2):
+        #     self.items.append(Component.shape_component(shape, col=col, row=1))
+        # for effect in weighted_sample_without_replacement(effect_pool, effect_weights, 2):
+        #     self.items.append(Component.effect_component(
+        #         effect, magnitude=self._quake_effect(effect), col=col, row=1))
+        # for scorer in weighted_sample_without_replacement(scorer_pool, scorer_weights, 3):
+        #     self.items.append(self._scorer_offer(scorer, col, 1))
+        # card_col = 1
+        # for card in random_card_option_values(4, self.owned_cards()):
+        #     self.items.append(make_card_item(card, col=card_col, row=3))
         # cond_weights = [component_weight(Component.CONDITION, c) for c in CONDITION_ORDER]
-        # cond_col = 3
         # for condition in weighted_sample_without_replacement(CONDITION_ORDER,
         #                                                      cond_weights, 2):
         #     self.items.append(Component.condition_component(condition, col=cond_col, row=3))
-        #     cond_col += 1
-        cond_col = 5
-        # The action slots sit to the right of the cards in the same row.
-        # The catalogue is bigger than the room left in the row, so each refresh
-        # shows a random SHOP_ACTION_SLOTS of them — always DISTINCT actions
-        # (random.sample never repeats) — and each is rolled for its version, so
-        # a v2 action shows up on its own now and then. An action the player is
-        # already holding is left out (see owned_actions), which is why the
-        # pool may come up short: the whole catalogue is the fallback, so the
-        # row always fills its two slots.
-        action_col = cond_col
-        held = self.owned_actions()
-        action_pool = [a for a in Action.ORDER if a not in held]
-        if len(action_pool) < SHOP_ACTION_SLOTS:
-            action_pool = list(Action.ORDER)
-        for action in random.sample(action_pool, SHOP_ACTION_SLOTS):
-            self.items.append(ActionItem(action, Action.PRICES.get(action, 60),
-                                         version=random_action_version(),
-                                         col=action_col, row=3))
-            action_col += 1
-        # The two random pre-built blocks sit to the right of the actions in
-        # the same (bottom) row. Each component is drawn by rarity, so a
-        # block's overall chance is the product of its parts' weights. A block
-        # has no effect 1/4 of the time (a plain wall); otherwise 1 effect half
-        # the time, 2 a quarter, 3 an eighth, and so on. Pre-built blocks may
-        # still use any shape or scorer (a plain Rect block with no scorer is a
-        # legitimately useful wall) — except a block built around a run role,
-        # which is always a plain Rect (see role_block_parts).
-        all_shape_weights = [component_weight(Component.SHAPE, s) for s in Shape.ORDER]
-        all_scorer_weights = [component_weight(Component.SCORER, s) for s in Scorer.SHOP_ORDER]
-        block_col = action_col
-        for _ in range(2):
-            shape = random.choices(Shape.ORDER, weights=all_shape_weights, k=1)[0]
-            count = random_effect_count()
-            effects = random.sample(Effect.REAL_ORDER, count)
-            scorer = random.choices(Scorer.SHOP_ORDER, weights=all_scorer_weights, k=1)[0]
-            shape, effects = role_block_parts(scorer, shape, effects)
-            amount = roll_scorer_amount(scorer)
-            amounts = roll_effect_amounts(effects)
-            name = role_block_name(scorer, shape)
-            self.items.append(BlockItem(block_col, 3, shape, Effect.NONE, scorer, amount,
-                                        block_price_for(shape, effects, scorer),
-                                        name, effects=effects, effect_amounts=amounts))
-            block_col += 1
+        # action_pool = [a for a in Action.ORDER if a not in self.owned_actions()]
+        # for action in random.sample(action_pool, SHOP_ACTION_SLOTS):
+        #     self.items.append(ActionItem(action, Action.PRICES.get(action, 60),
+        #                                  version=random_action_version(),
+        #                                  col=action_col, row=3))
+        # for _ in range(2):
+        #     self.items.append(self._random_block_offer(block_col, 3))
         # Picky bonus slots: each banked slot adds one extra random offer to
         # the shop, with the offer's kind (shape/effect/scorer/block/card/
         # action) chosen uniformly. The offers sit in the rows below the
@@ -1964,6 +2068,49 @@ class Shop:
             return 0
         return self.game.shop_lock_cap()
 
+    def _quake_factor(self):
+        """The factor the shop's magnitudes are rolled at (see Card.EARTHQUAKE).
+
+        A shop built on its own (in a test) has no game to ask, so it rolls at
+        the plain average like every other magnitude.
+        """
+        if self.game is None or not hasattr(self.game, "cards"):
+            return 1.0
+        if self.game._has_card(Card.EARTHQUAKE):
+            return EARTHQUAKE_MAGNITUDE_FACTOR
+        return 1.0
+
+    def _quake(self, value, average):
+        """One magnitude this shop rolls, raised by the Earthquake whole card.
+
+        Earthquake makes every effect strength and scorer amount the SHOP offers
+        10% higher (see EARTHQUAKE_MAGNITUDE_FACTOR). The roll is scaled HERE,
+        once, as the offer is built — so a component or block bought while the
+        card is owned keeps the raised number for good, and keeps it even if
+        the card is later sold. The value is re-rounded to the precision a
+        magnitude of its size means, the same rounding the roll itself used, so
+        the raised number is as tidy as the rolled one.
+        """
+        factor = self._quake_factor()
+        if factor == 1.0:
+            return value
+        return round(value * factor, magnitude_precision(average))
+
+    def _quake_scorer(self, scorer):
+        """A shop roll of a scorer amount, raised by Earthquake."""
+        return self._quake(roll_scorer_amount(scorer),
+                           Scorer.DEFAULT_AMOUNT.get(scorer, 0))
+
+    def _quake_effect(self, effect):
+        """A shop roll of a scalable effect's strength, raised by Earthquake."""
+        return self._quake(roll_effect_magnitude(effect),
+                           Effect.MAGNITUDE.get(effect, 0))
+
+    def _quake_effect_amounts(self, effects):
+        """A shop roll of a block's {effect: magnitude} map, raised by Earthquake."""
+        return {effect: self._quake(value, Effect.MAGNITUDE.get(effect, 0))
+                for effect, value in roll_effect_amounts(effects).items()}
+
     def _scorer_offer(self, scorer, col, row):
         """The shop offer for a drawn scorer.
 
@@ -1980,41 +2127,190 @@ class Shop:
             return BlockItem(col, row, shape, Effect.NONE, scorer, amount,
                              block_price_for(shape, effects, scorer), name,
                              effects=effects)
-        amount = roll_scorer_amount(scorer)
+        amount = self._quake_scorer(scorer)
         return Component.scorer_component(scorer, amount=amount, col=col, row=row)
 
-    def _random_offer(self, col, row):
-        """One random shop offer of a uniformly chosen kind (Picky slots)."""
-        kind = random.choice([Component.SHAPE, Component.EFFECT, Component.SCORER,
-                              "block", "card", "action"])
-        if kind == Component.SHAPE:
+    def _random_block_offer(self, col, row):
+        """A ready-made block, rolled the way the shelf rolls one.
+
+        Every part is drawn by RARITY (see component_weight), so a block's own
+        chance is the product of its parts' weights — a Splitter block is far
+        rarer than a plain wall. A block has no effect 1/4 of the time
+        (main.random_effect_count), and otherwise 1, 2, 3 ... effects on the
+        geometric schedule. Any shape or scorer may turn up (a plain Rect block
+        with no scorer is a legitimately useful wall) except that a block built
+        around a run ROLE is always a plain Rect (see role_block_parts). The
+        magnitudes are rolled here, once, exactly as a component's are, so
+        Earthquake raises them (see _quake_scorer / _quake_effect_amounts).
+
+        The ONE roller for a random block: the shelf's offers, a Picky bonus
+        slot and a block pack all deal the same blocks (see _random_offer and
+        _roll_pack), so they can never drift apart.
+        """
+        shape_weights = [component_weight(Component.SHAPE, s) for s in Shape.ORDER]
+        scorer_weights = [component_weight(Component.SCORER, s)
+                          for s in Scorer.SHOP_ORDER]
+        shape = random.choices(Shape.ORDER, weights=shape_weights, k=1)[0]
+        effects = random.sample(Effect.REAL_ORDER, random_effect_count())
+        scorer = random.choices(Scorer.SHOP_ORDER, weights=scorer_weights, k=1)[0]
+        shape, effects = role_block_parts(scorer, shape, effects)
+        name = role_block_name(scorer, shape)
+        return BlockItem(col, row, shape, Effect.NONE, scorer,
+                         self._quake_scorer(scorer),
+                         block_price_for(shape, effects, scorer), name,
+                         effects=effects,
+                         effect_amounts=self._quake_effect_amounts(effects))
+
+    def _random_offer(self, col, row, used=None):
+        """One shop offer of a uniformly chosen kind.
+
+        ``used`` is the set of offers already on this shelf (or, for a random
+        pack, already in that pack), as (kind, value) keys: an offer that is
+        already there is re-rolled so two slots never sell the same thing. A
+        pool too small to fill every slot with something new (a player who owns
+        most of the cards) simply repeats after OFFER_DUPLICATE_TRIES, so a
+        slot is never left empty.
+        """
+        for _ in range(OFFER_DUPLICATE_TRIES if used is not None else 1):
+            offer = self._roll_random_offer(col, row)
+            key = offer_key(offer)
+            if used is None or key not in used:
+                if used is not None:
+                    used.add(key)
+                return offer
+        return offer
+
+    def _roll_random_offer(self, col, row):
+        """One random offer of a uniformly chosen kind, before any dedupe."""
+        return self._offer_of(random.choice(SHELF_OFFER_TYPES), col, row)
+
+    def _offer_of(self, source, col, row, parts_only=False):
+        """An offer of one PACK TYPE's goods, at this shop's rolls and prices.
+
+        ``source`` is a components.Pack type (Pack.SHAPE, Pack.BLOCK, ...), NOT
+        one of the Component kind strings: the one roller behind a shelf slot,
+        a Picky bonus slot and every pack option, so a shape pack, a part pack
+        and a random pack all deal exactly the shape a shelf slot would deal
+        (see _random_offer and _roll_pack_option). A resource option is not a
+        shelf item — points are not an item — so it is only ever dealt inside a
+        pack (see _roll_resource_option).
+
+        ``parts_only`` asks for a PART rather than whatever the source deals:
+        only the scorer branch has anything whole in it (a run role, see
+        _scorer_offer), so a part pack passes it to rule the roles out.
+        """
+        if source == Pack.SHAPE:
             value = random.choice([s for s in Shape.ORDER if s != Shape.RECT])
             return Component.shape_component(value, col=col, row=row)
-        if kind == Component.EFFECT:
+        if source == Pack.EFFECT:
             value = random.choice([e for e in Effect.ORDER if e != Effect.NONE])
-            return Component.effect_component(value, magnitude=roll_effect_magnitude(value),
+            return Component.effect_component(value,
+                                              magnitude=self._quake_effect(value),
                                               col=col, row=row)
-        if kind == Component.SCORER:
-            value = random.choice([s for s in Scorer.SHOP_ORDER if s != Scorer.NONE])
-            return self._scorer_offer(value, col, row)
-        if kind == "block":
-            shape = random.choice(Shape.ORDER)
-            count = random_effect_count()
-            effects = random.sample(Effect.REAL_ORDER, count)
-            scorer = random.choice(Scorer.SHOP_ORDER)
-            shape, effects = role_block_parts(scorer, shape, effects)
-            amount = roll_scorer_amount(scorer)
-            amounts = roll_effect_amounts(effects)
-            name = role_block_name(scorer, shape)
-            return BlockItem(col, row, shape, Effect.NONE, scorer, amount,
-                             block_price_for(shape, effects, scorer),
-                             name, effects=effects, effect_amounts=amounts)
-        if kind == "card":
-            value = random_card_option_value()
+        if source == Pack.SCORER:
+            pool = [s for s in Scorer.SHOP_ORDER if s != Scorer.NONE]
+            if parts_only:
+                # The run roles are not parts: they are bought as ready-made
+                # blocks and cannot be assembled onto another block's physics
+                # (see _scorer_offer), so a part pack never deals one while a
+                # scorer pack still may.
+                pool = [s for s in pool
+                        if s not in (Scorer.START, Scorer.FINISH)]
+            return self._scorer_offer(random.choice(pool), col, row)
+        if source == Pack.BLOCK:
+            return self._random_block_offer(col, row)
+        if source == Pack.CARD:
+            value = random_card_option_value(self.owned_cards())
+            if value is None:
+                value = random_card_option_value()
             return make_card_item(value, col=col, row=row)
-        value = random.choice(Action.ORDER)
+        if source == Pack.RESOURCE:
+            return self._roll_resource_option()
+        # An action the player is already holding is left out (see
+        # owned_actions) — an offer that would be refused is a wasted slot —
+        # and the whole catalogue is the fallback when the pool comes up short.
+        held = self.owned_actions()
+        pool = [a for a in Action.ORDER if a not in held]
+        if not pool:
+            pool = list(Action.ORDER)
+        value = random.choice(pool)
         return ActionItem(value, Action.PRICES.get(value, 60),
                           version=random_action_version(), col=col, row=row)
+
+    def _roll_resource_option(self, used=None):
+        """One resource pack option: points of a random resource scorer.
+
+        The option is worth RESOURCE_PACK_FACTOR times what a trigger of that
+        scorer banks, and the scorer's own magnitude is rolled here as it would
+        be for a component (so Earthquake raises it — see _quake_scorer), which
+        is what the player's "randomized just like their scorer" asks for: a
+        Picky option at the default magnitude is worth 2 x 0.5 = one option
+        point, and a well-rolled one is worth more.
+
+        ``used`` is what the pack has dealt so far: a scorer the pack has not
+        shown YET is preferred, so a resource pack is a real choice between the
+        four resources (a giga pack of six shows all four before it repeats
+        one) rather than four draws that can all land on Rubbish.
+        """
+        dealt = {key[1] for key in (used or ())
+                 if isinstance(key, tuple) and key[:1] == ("resource",)}
+        pool = [s for s in Scorer.RESOURCE_RATE if s not in dealt]
+        if not pool:
+            pool = list(Scorer.RESOURCE_RATE)
+        option = None
+        for _ in range(OFFER_DUPLICATE_TRIES):
+            scorer = random.choice(pool)
+            amount = self._quake_scorer(scorer)
+            points = RESOURCE_PACK_FACTOR * resource_points_for(scorer, amount)
+            option = ResourceOption(scorer, amount, points)
+            if used is None or offer_key(option) not in used:
+                return option
+        return option
+
+    def _roll_pack(self, pack_type, size, col=0, row=0):
+        """Deal a pack: its size's options of its type (see _roll_pack_option)."""
+        used = set()
+        options = []
+        for _ in range(Pack.options(size)):
+            option = self._roll_pack_option(pack_type, used)
+            if option is None:
+                break
+            options.append(option)
+            key = offer_key(option)
+            if key is not None:
+                used.add(key)
+        return ItemPack(pack_type, size, options, pack_price(pack_type, size),
+                        col=col, row=row)
+
+    def _roll_pack_option(self, pack_type, used):
+        """One option of a pack: a PART or RANDOM pack deals a mixed bundle.
+
+        A part pack deals any component part and a random pack deals anything
+        any other pack might (see components.Pack.PART_SOURCES /
+        RANDOM_SOURCES), while every other type deals its own goods; all of
+        them go through the same roller a shelf offer does, so a card pack's
+        cards obey the shop's ownership rule and a block pack's blocks are the
+        shelf's own blocks. ``used`` keeps an option off the ones already dealt.
+        """
+        if pack_type == Pack.PART:
+            source = random.choice(Pack.PART_SOURCES)
+            # A part pack deals PARTS: its scorer draw is a piece, never a run
+            # role (see _offer_of).
+            parts_only = source == Pack.SCORER
+        elif pack_type == Pack.RANDOM:
+            source = random.choice(Pack.RANDOM_SOURCES)
+            parts_only = False
+        else:
+            source = pack_type
+            parts_only = False
+        if source == Pack.RESOURCE:
+            return self._roll_resource_option(used)
+        for _ in range(OFFER_DUPLICATE_TRIES):
+            option = self._offer_of(source, 0, 0, parts_only=parts_only)
+            key = offer_key(option)
+            if key is None or key not in used:
+                return option
+        return option
 
     def item_at(self, pos):
         """Return the shop item occupying a screen position, or None."""
@@ -2126,6 +2422,12 @@ class Marble:
         # a phase block can't re-arm the phase forever.
         self.phase_timer = 0.0
         self.phase_block = None
+        # The key numbers this marble has collected this run: passing through a
+        # Key block remembers its pairing number (see Game._gate_key_and_lock),
+        # and the Gate whole card pays when THIS marble then passes through the
+        # matching opened Lock. Per marble, not per run: a lock another marble's
+        # key opened pays this one nothing.
+        self.collected_keys = set()
         # The collision normal physics resolved against each block this frame
         # (block -> unit normal), and the velocity the marble arrived with, both
         # keyed by block. The splitter reads them to send its copy off the
@@ -2494,6 +2796,26 @@ class Game:
         # Fresh block contacts THIS RUN (Rally): every fresh non-role block
         # touch counts (re-touches count); a Rally block subtracts its own.
         self.run_fresh_touches = 0
+        # Inaction: how many times the do-nothing action has been used. Every
+        # INACTION_USES_PER_SLOT of them win the card area another slot, for the
+        # rest of the game (saved), and a v2 use hands one over outright — those
+        # are counted separately in card_slots_won, and the action slots
+        # Foresight has won in action_slots_won (with action_slots_unlimited set
+        # by its v2, which removes the limit altogether).
+        self.inaction_used = 0
+        self.card_slots_won = 0
+        self.action_slots_won = 0
+        self.action_slots_unlimited = False
+        # Which page of a full action row is on show (see
+        # Game.action_row_window). A view state, not saved: it is clamped into
+        # range whenever it is read.
+        self.action_area_page = 0
+        # Odyssey: the blocks and components the card has put AWAY (see
+        # Game._bank_selected_item). They sit out of the inventory — drawn in
+        # their own column beside the Spirit tokens — until the run is over,
+        # when they come back and pay a fraction of their sell price. Capped by
+        # the card's own count, and saved with the game.
+        self.inaccessible = []
         # The first WATCH_BLOCK_LIMIT distinct non-role blocks freshly touched
         # THIS RUN, in touch order: the list is capped at the larger of the two
         # cards' limits, Pedestal retriggers the first PEDESTAL_RETRIGGERS of
@@ -2527,6 +2849,11 @@ class Game:
         # and is applied where the measure is read, not here.
         self.inside_block_time = 0.0
         self.inside_locked_time = 0.0
+        # Seconds the marble(s) spent inside a LOCKED board unit while the phase
+        # effect was OFF this run (the Matrix card). The same overlap test as the
+        # line above, gated on the marble not phasing (see
+        # _count_locked_no_phase_time).
+        self.inside_locked_no_phase_time = 0.0
         # Board units a marble has BEEN IN this run (see _note_visited_cell).
         # The Explorer card's whole payoff is the fraction of the board this
         # set covers, and while the card is owned ui.draw_board paints these
@@ -2571,6 +2898,16 @@ class Game:
         self.actions = []
         self.selected_action = None
         self.selected_action_subject = None
+        # The pack the player is currently choosing from, or None (see
+        # _open_pack / _click_pack): buying a pack opens it, and its overlay
+        # holds the screen until the player has kept everything the size
+        # allows (or skipped the rest).
+        self.open_pack = None
+        # The action a pack armed for immediate use (see _keep_action_from_pack):
+        # an action kept from an ACTION pack is never shelved in the action
+        # area, so it waits here for its target and the S key instead. None
+        # when no pack action is pending.
+        self.pending_pack_action = None
         # COMMENTED OUT with the conditions: the card builder's state. Selecting
         # an owned Condition component used to start card mode, selecting a
         # Scorer paired it up, and S built the (condition x scorer) card. Every
@@ -2641,9 +2978,14 @@ class Game:
         self.touch_shape_counts = {}
         self.touch_effect_counts = {}
         self.touch_scorer_counts = {}
-        # The final boss of the 24th run (a FinalBoss id, or None until the
-        # player reaches the last run). Beating it is required to win.
-        self.final_boss = None
+        # The final boss of the 24th run is gone (user request: "make the final
+        # bosses just normal bosses ... for the final boss, just use a random
+        # normal boss"): its two modifiers are ordinary trials now, so run 24
+        # plays like any other run. This flag records that an ACTION owns the
+        # run's target (Grace v2 sets it to 0), so re-deriving the target when
+        # the run's trial changes leaves such a run alone (see
+        # _refresh_run_target).
+        self.target_forced = False
         # Trials can be disabled (used by tests so a random trial can't
         # interfere with a test's expected run behavior).
         self.trials_enabled = True
@@ -3037,8 +3379,6 @@ class Game:
             collection.discover_component(Component.SCORER, value)
         for value in Trial.ORDER:
             collection.discover_trial(value)
-        for value in FinalBoss.ORDER:
-            collection.discover_final_boss(value)
 
     def _switch_profile(self, name):
         """Make ``name`` the active profile from the title screen.
@@ -3260,6 +3600,10 @@ class Game:
                 elif event.key == pygame.K_b:
                     # B: sell the selected block or component.
                     self._sell_selected_item()
+                elif event.key == pygame.K_g:
+                    # G: Odyssey puts the selected block/component away for the
+                    # run (it comes back, and pays, after the run is continued).
+                    self._bank_selected_item()
                 elif event.key == pygame.K_s:
                     # S: apply the selected action to its subject, assemble the
                     # assigned toolbox parts into a block (missing parts default
@@ -3317,6 +3661,13 @@ class Game:
                             # Leave the play screen and return to the title screen.
                             self._return_to_main_menu()
                             continue
+                        if self.open_pack is not None:
+                            # An OPEN PACK owns the click: its overlay is what
+                            # the player is looking at, so every click goes to
+                            # picking an option or leaving the rest (see
+                            # _click_pack) until the pack is closed.
+                            self._click_pack(mouse_pos)
+                            continue
                         if (self.run_complete and self.awaiting_after_run):
                             self._retry_run()
                         item = self.shop.item_at(mouse_pos)
@@ -3349,6 +3700,11 @@ class Game:
                             # The action-upgrade button upgrades the selected action.
                             keep_selection = True
                             self._upgrade_action()
+                        elif self.action_area_pager_at(mouse_pos):
+                            # The action row's pager slot: show the next page of a
+                            # row that holds more actions than the band can draw.
+                            keep_selection = True
+                            self._page_action_row()
                         elif action is not None:
                             # Left-clicking an owned action selects it to apply.
                             keep_selection = True
@@ -3437,6 +3793,11 @@ class Game:
                 # Anywhere else, right-click erases blocks; the info box is
                 # hover-driven now.
                 if (event.button == 3 and not self.game_over
+                        and self.open_pack is not None):
+                    # Right-clicking anywhere while a pack is open leaves the
+                    # options that are still on the table (see _click_pack).
+                    self._close_pack()
+                elif (event.button == 3 and not self.game_over
                         and not self._toggle_shop_lock(mouse_pos)):
                     self.erasing = True
 
@@ -3960,6 +4321,11 @@ class Game:
             keys = [(Component.SHAPE, item.shape)]
             keys += [(Component.EFFECT, e) for e in item.effects]
             keys.append((Component.SCORER, item.scorer))
+        elif getattr(item, "kind", None) in ("pack", "resource"):
+            # A pack is not a component and its price does not climb, so buying
+            # one counts toward nothing (see _buy_price); a resource option is
+            # not bought at all.
+            return
         else:
             keys = [(item.kind, item.value)]
         for key in keys:
@@ -3991,7 +4357,7 @@ class Game:
         unaffected: shop generation uses only the base COMPONENT_PRICES. The
         inflation trial raises the final price 50% on top.
         """
-        if getattr(item, "kind", None) in ("block", "card", "action"):
+        if getattr(item, "kind", None) in ("block", "card", "action", "pack"):
             return self._inflated(self._shop_discount(item.price))
         bought = self.component_purchases.get((item.kind, item.value), 0)
         base = self._shop_discount(item.price)
@@ -4033,6 +4399,11 @@ class Game:
         price = self._buy_price(item)
         if self.cash < price:
             self._set_shop_message(f"Need ${price} for {item.name}")
+            return
+        # A PACK is bought to be opened: the cash buys the options, and the
+        # player then keeps the ones the size allows (see _open_pack).
+        if getattr(item, "kind", None) == "pack":
+            self._open_pack(item, price)
             return
         # The ERR 404 card is a joke: it never joins the card area itself —
         # buying it grants a random card instead.
@@ -4077,10 +4448,12 @@ class Game:
             sounds.play_coin()
             return
         # An action goes to the action area above the toolbox (max
-        # MAX_ACTIONS) and doesn't drive component prices.
+        # self.max_actions, which Foresight can raise) and doesn't drive
+        # component prices.
         if getattr(item, "kind", None) == "action":
-            if len(self.actions) >= MAX_ACTIONS:
-                self._set_shop_message("Action area is full (2 actions)")
+            if len(self.actions) >= self.max_actions:
+                self._set_shop_message(
+                    f"Action area is full ({self.max_actions} actions)")
                 return
             self.actions.append(item)
             self.cash -= price
@@ -4147,6 +4520,169 @@ class Game:
         self._set_shop_message(f"Bought {item.name}")
         sounds.play_coin()
 
+    def _open_pack(self, pack, price):
+        """Buy a pack and open it for the player to choose from.
+
+        The cash buys the pack, not the items inside it: the player then keeps
+        what its size allows (see _click_pack / _keep_pack_option), and may skip
+        the rest. The offer leaves the shelf like a bought card or action — a
+        pack is a one-off, and the options it dealt are already decided — and
+        the overlay holds the screen until the picks are made.
+        """
+        self.cash -= price
+        self._consume_shop_offer(pack)
+        self.open_pack = pack
+        sounds.play_coin()
+        self._set_shop_message(
+            f"{pack.name} (${price}) — keep {pack.remaining} of "
+            f"{len(pack.options)}  •  right-click or SKIP to leave the rest")
+
+    def pack_option_at(self, pos):
+        """Which option of the open pack a screen position is over, or None."""
+        if self.open_pack is None:
+            return None
+        for index, rect in enumerate(ui.pack_option_rects(self)):
+            if rect.collidepoint(pos):
+                return index
+        return None
+
+    def _click_pack(self, pos):
+        """Handle a click while a pack is open (see handle_events).
+
+        Clicking an option keeps it, clicking SKIP takes nothing more and
+        closes the pack, and a right-click (anywhere but on the panel) does the
+        same. The pack is closed from here only once nothing is left to pick:
+        a mega pack stays open for its second choice.
+        """
+        index = self.pack_option_at(pos)
+        if index is not None:
+            if index < len(self.open_pack.options):
+                self._keep_pack_option(index)
+            return
+        self._close_pack()
+
+    def _close_pack(self, message=None):
+        """Close the open pack, leaving whatever was not kept behind."""
+        pack = self.open_pack
+        if pack is None:
+            return
+        self.open_pack = None
+        left = len(pack.options)
+        if message is not None:
+            self._set_shop_message(message)
+        elif left:
+            plural = "" if left == 1 else "s"
+            self._set_shop_message(
+                f"{pack.name}: left {left} option{plural} behind")
+        else:
+            self._set_shop_message(f"{pack.name}: everything kept")
+
+    def _keep_pack_option(self, index):
+        """Keep one option of the open pack: it is granted, then removed.
+
+        An option that cannot be taken right now (a full inventory, a full card
+        area, a card already owned) is REFUSED and stays on the table, so the
+        player can pick something else or skip it: nothing is ever lost to a
+        full shelf, exactly as a refused conversion keeps its points banked.
+        """
+        pack = self.open_pack
+        option = pack.options[index]
+        ok, message = self._receive_pack_item(option)
+        if not ok:
+            self._set_shop_message(message)
+            return
+        pack.options.pop(index)
+        pack.kept += 1
+        if not pack.open:
+            left = len(pack.options)
+            plural = "" if left == 1 else "s"
+            message = (f"{message} — pack closed" if not left
+                       else f"{message} — left {left} option{plural} behind")
+            self.open_pack = None
+        self._set_shop_message(message)
+
+    def _receive_pack_item(self, option):
+        """Hand one pack option over. Returns (taken, message).
+
+        The options a pack can deal are the same goods the shelf sells, but
+        they are already paid for, so this grants them WITHOUT charging (see
+        _buy_shop_item, which prices and charges as it goes). A portal or
+        Key/Lock block arrives as its matched PAIR, exactly as buying one does,
+        and an action kept from an ACTION pack is not shelved at all: it is
+        armed to be used (see _keep_action_from_pack).
+        """
+        kind = getattr(option, "kind", None)
+        if kind == "resource":
+            self._grant_resource_points(option.scorer, option.points)
+            return True, (f"Banked {option.name} ({Scorer.name(option.scorer)} "
+                          f"at {option.amount:g})")
+        if kind == "card":
+            if len(self.cards) >= self._card_capacity_for(option.value):
+                return False, f"Card area is full ({self.max_cards} cards) — kept as an option"
+            if self._owns_card(option.value) and not self._has_card(Card.SHOWMAN):
+                return False, "Already own this card — kept as an option"
+            self.cards.append(option)
+            self._discover_owned_card(option.value)
+            return True, f"Kept card: {option.name}"
+        if kind == "action":
+            if self.open_pack is not None and self.open_pack.pack_type == Pack.ACTION:
+                return self._keep_action_from_pack(option)
+            if len(self.actions) >= self.max_actions:
+                return False, f"Action area is full ({self.max_actions} actions) — kept as an option"
+            self.actions.append(option)
+            self._discover_action(option.value)
+            return True, f"Kept action: {self._item_name(option)}"
+        if kind == "block":
+            pair_shape = paired_shape(option.shape)
+            if option.has_effect(Effect.PORTAL) or pair_shape is not None:
+                if len(self.toolbox.items) + 2 > self.toolbox.cols * self.toolbox.rows:
+                    return False, "Inventory needs room for the pair — kept as an option"
+                number = (next_portal_number() if option.has_effect(Effect.PORTAL)
+                          else next_key_number())
+                second = (option.shape if option.has_effect(Effect.PORTAL)
+                          else pair_shape)
+                for shape in (option.shape, second):
+                    self.toolbox.add(
+                        BlockItem(0, 0, shape, Effect.NONE, option.scorer,
+                                  option.scorer_amount, option.price, option.name,
+                                  portal_number=number if option.has_effect(Effect.PORTAL) else 0,
+                                  key_number=0 if option.has_effect(Effect.PORTAL) else number,
+                                  effects=option.effects,
+                                  effect_amounts=getattr(option, "effect_amounts", None)))
+                self._discover_block(option)
+                return True, f"Kept {option.name} (pair)"
+            if not self.toolbox.add(option):
+                return False, "Inventory is full — kept as an option"
+            self._discover_block(option)
+            return True, f"Kept {option.name}"
+        # A component part (shape, effect or scorer): into the inventory.
+        if not self.toolbox.add(option):
+            return False, "Inventory is full — kept as an option"
+        self._record_component_purchases(option)
+        self._discover_component(option.kind, option.value)
+        return True, f"Kept {option.name}"
+
+    def _keep_action_from_pack(self, action):
+        """Use a kept action at once: it never takes an action-area slot.
+
+        The user's rule for action packs is that their actions are USED rather
+        than shelved, so the action is armed here instead of joining the action
+        area: a target-free action fires immediately, and one that needs a
+        target waits for the player to click it and press S (exactly like a
+        selected action, see _select_action). An action that refuses to fire
+        (nothing for it to do — a full board and no expansion left, say) STAYS
+        armed so the player can try it again, the same "refused and kept" rule
+        the action area follows.
+        """
+        self.pending_pack_action = action
+        self._select_action(action)
+        if Action.needs_target(action.value):
+            return True, (f"Kept action: {self._item_name(action)} — click a "
+                          f"target block/card, then press S")
+        if self._apply_action():
+            return True, f"Used action: {self._item_name(action)}"
+        return True, (f"Kept action: {self._item_name(action)} — press S to use")
+
     def _discover_component(self, kind, value):
         """Discover a component in the collection; pop it up if it's new."""
         if not collection.discover_component(kind, value):
@@ -4209,11 +4745,6 @@ class Game:
         if collection.discover_trial(trial):
             self._push_popup("New trial", Trial.name(trial), (180, 120, 255))
 
-    def _discover_final_boss(self, boss):
-        """Discover a beaten final boss in the collection; pop it up if new."""
-        if collection.discover_final_boss(boss):
-            self._push_popup("Final boss beaten", FinalBoss.name(boss), (255, 140, 0))
-
     @property
     def active_trial(self):
         """The trial this run is really playing, or None.
@@ -4230,16 +4761,10 @@ class Game:
     def tile_source(self):
         """(class, id) of the tile art the screen and panels wear this run.
 
-        The final boss of the 24th run REPLACES the trial in the run's display
-        (see ui.draw_trial_box), so that run is covered in — and tinted by — the
-        boss's own tile, and the boss's collection entry wears it too; every
-        other run wears its trial's. (None, None) when neither applies: a run
-        with no trial, or one whose trial was bought away. The EFFECTS side
-        still reads active_trial — a boss run plays its rolled trial's rules as
-        well, and only the art is the boss's.
+        The run's trial, or (None, None) when the run has none — a trial-free
+        run, or one whose trial was bought away. The screen, the panels and the
+        trial's collection entry all wear the same tile (see ui).
         """
-        if self.final_boss is not None:
-            return (FinalBoss, self.final_boss)
         if self.active_trial is not None:
             return (Trial, self.active_trial)
         return (None, None)
@@ -4358,6 +4883,12 @@ class Game:
         """
         if item is CASH_BREAKDOWN:
             return "Last run cash gained"
+        if getattr(item, "kind", None) == "pack":
+            # A pack is named for its size AND its type: "Jumbo Shape Pack" is
+            # exactly what it holds (see ItemPack.name).
+            return item.name
+        if getattr(item, "kind", None) == "resource":
+            return f"{item.name} ({Scorer.name(item.scorer)})"
         if isinstance(item, Block) or getattr(item, "kind", None) == "block":
             effects = " ".join(Effect.name(e) for e in item.effects if e != Effect.NONE)
             parts = ([effects, Shape.name(item.shape), Scorer.name(item.scorer)] if effects
@@ -4447,8 +4978,117 @@ class Game:
         _card_capacity_for, when the card being added may be Essence itself)
         before adding, so no card is ever left outside the slots: with the
         smaller area there is simply one fewer place to put one.
+
+        Two things can win slots back: every INACTION_USES_PER_SLOT uses of the
+        Inaction action, and each v2 use of it outright (see card_slot_bonus).
+        The tray shares one band with the action row, and the TRAY has first
+        call on it: the row keeps ACTION_ROW_MIN_SLOTS slots whatever the tray
+        wants, because the row pages when it holds more actions than that (see
+        action_slots_shown, action_row_window), so a tray that wants more slots
+        is never blocked by a row that can still work with two.
         """
-        return MAX_CARDS - 1 if self._has_card(Card.ESSENCE) else MAX_CARDS
+        wanted = self._card_slots_wanted()
+        return max(1, min(wanted, SLOT_ROW_SLOTS - ACTION_ROW_MIN_SLOTS))
+
+    def _card_slots_wanted(self):
+        """The card slots the player has EARNED, before the band's own limit."""
+        essence_cost = 1 if self._has_card(Card.ESSENCE) else 0
+        return MAX_CARDS - essence_cost + self.card_slot_bonus
+
+    @property
+    def card_slot_bonus(self):
+        """The card slots Inaction has won: one per INACTION_USES_PER_SLOT uses.
+
+        A v2 Inaction is the fifth use, handed over at once rather than counted
+        (see Game._action_inaction), so its slots are banked in card_slots_won.
+        """
+        return (self.card_slots_won
+                + self.inaction_used // INACTION_USES_PER_SLOT)
+
+    def card_slot_room(self):
+        """How many MORE card slots the band could show (0 when it is full)."""
+        return max(0, (SLOT_ROW_SLOTS - ACTION_ROW_MIN_SLOTS)
+                   - self._card_slots_wanted())
+
+    @property
+    def max_actions(self):
+        """How many actions the action area holds.
+
+        MAX_ACTIONS plus what Foresight has won (see Game._action_foresight) —
+        or ACTION_SLOTS_UNLIMITED, which its v2 sets: from then on nothing ever
+        refuses an action for lack of room, and the row pages through whatever
+        the player holds (see action_row_window).
+        """
+        if self.action_slots_unlimited:
+            return ACTION_SLOTS_UNLIMITED
+        return MAX_ACTIONS + self.action_slots_won
+
+    def action_slots_shown(self):
+        """How many action slots the row draws: its capacity, as far as it fits.
+
+        The row wants one slot per action it can hold (see max_actions) and the
+        card tray takes its own slots off the band first, so the row draws
+        whichever is smaller — and the rest of what it holds is reached by
+        paging (see action_row_window). An unlimited row therefore draws the
+        whole band the tray leaves it, which is what keeps it usable.
+        """
+        return max(1, min(self.max_actions, SLOT_ROW_SLOTS - self.max_cards))
+
+    def action_area_x(self):
+        """The action row's left edge: right-aligned with the shop panel's edge.
+
+        The row is anchored to the panel's right edge (where MAX_ACTIONS slots
+        put it) and grows LEFTWARDS as Foresight widens it, so it never pushes
+        into the action-upgrade button beside it and the space it takes is the
+        space the card tray is not using.
+        """
+        return (ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2]
+                - self.action_slots_shown() * GRID_SIZE)
+
+    def action_slot_rect(self, index):
+        """The screen rect of the action row's slot at ``index``."""
+        return pygame.Rect(self.action_area_x() + index * GRID_SIZE,
+                           ACTION_AREA_COORDS[1], GRID_SIZE, GRID_SIZE)
+
+    def action_row_window(self):
+        """The slice of Game.actions the action row's slots show.
+
+        Returns ``(start, count, paging)``: the first ``count`` slots hold
+        ``self.actions[start:start + count]``. When the player holds more actions
+        than the band can show, the LAST slot is a pager instead (so ``count``
+        is one fewer and ``paging`` is True), and clicking it turns
+        Game.action_area_page — which wraps, so however many actions are hoarded
+        (see Action.SLOTS_UNLIMITED via Foresight v2) every one of them is
+        reachable from the row.
+        """
+        slots = self.action_slots_shown()
+        total = len(self.actions)
+        if total <= slots:
+            return 0, total, False
+        per_page = max(1, slots - 1)
+        pages = -(-total // per_page)          # ceiling division
+        page = self.action_area_page % pages
+        start = page * per_page
+        return start, min(per_page, total - start), True
+
+    def action_area_pager_at(self, pos):
+        """True when ``pos`` is on the action row's pager slot."""
+        _start, _count, paging = self.action_row_window()
+        if not paging:
+            return False
+        return self.action_slot_rect(self.action_slots_shown() - 1).collidepoint(pos)
+
+    def _page_action_row(self):
+        """Turn the action row to its next page (see action_row_window)."""
+        self.action_area_page += 1
+        start, count, _paging = self.action_row_window()
+        self._set_shop_message(
+            f"Showing actions {start + 1}-{start + count} of "
+            f"{len(self.actions)}")
+
+    def action_slot_room(self):
+        """How many MORE action slots the band could hold (0 when it is full)."""
+        return max(0, SLOT_ROW_SLOTS - self.max_cards - self.max_actions)
 
     def _card_capacity_for(self, value):
         """The card area's size once ``value`` is owned (Essence shrinks it).
@@ -4521,18 +5161,33 @@ class Game:
         return granted
 
     def action_area_item_at(self, pos):
-        """Return the owned action at a screen position, or None."""
-        x, y = ACTION_AREA_COORDS[0], ACTION_AREA_COORDS[1]
-        if not (x <= pos[0] < x + MAX_ACTIONS * GRID_SIZE
+        """Return the owned action at a screen position, or None.
+
+        The row shows a WINDOW of the player's actions (see action_row_window),
+        so the slot index is read through it: a slot past the window holds
+        nothing — including the pager slot, which the mouse handler turns
+        separately (see Game.action_area_pager_at).
+        """
+        x, y = self.action_area_x(), ACTION_AREA_COORDS[1]
+        if not (x <= pos[0] < x + self.action_slots_shown() * GRID_SIZE
                 and y <= pos[1] < y + GRID_SIZE):
             return None
         index = (pos[0] - x) // GRID_SIZE
-        if 0 <= index < len(self.actions):
-            return self.actions[index]
+        start, count, _paging = self.action_row_window()
+        if 0 <= index < count:
+            return self.actions[start + index]
         return None
 
     def _select_action(self, action):
         """Select an owned action; the next block/card click picks its subject."""
+        if (self.pending_pack_action is not None
+                and action is not self.pending_pack_action):
+            # A pack action is armed and unspent: it is not in the action area,
+            # so nothing else may take the selection away from it or it would be
+            # lost (see _keep_action_from_pack).
+            self._set_shop_message("Use the packed action first (or press S) — "
+                                   f"{self.pending_pack_action.name} is waiting")
+            return
         self._clear_toolbox_selection()
         self.selected_action = action
         self.selected_action_subject = None
@@ -4577,7 +5232,8 @@ class Game:
         fires as soon as it is selected. Returns True when it was applied.
         """
         action = self.selected_action
-        if action is None or action not in self.actions:
+        pending = action is not None and action is self.pending_pack_action
+        if action is None or (action not in self.actions and not pending):
             self._set_shop_message("Select an action first")
             return False
         subject = self.selected_action_subject
@@ -4595,6 +5251,10 @@ class Game:
             applied = self._action_mass_production(action)
         elif action.value == Action.GRACE:
             applied = self._action_grace(action)
+        elif action.value == Action.INACTION:
+            applied = self._action_inaction(action)
+        elif action.value == Action.FORESIGHT:
+            applied = self._action_foresight(action)
         elif action.value == Action.DEATH:
             applied = self._action_death(action, subject)
         elif action.value == Action.RECOGNITION:
@@ -4611,9 +5271,21 @@ class Game:
             self._set_shop_message("That action does nothing yet")
             return False
         if applied:
-            self.actions.remove(action)
-            self._clear_action_selection()
+            self._consume_action(action)
         return applied
+
+    def _consume_action(self, action):
+        """Spend a used action: out of the action area, or off the pack.
+
+        An action a PACK handed over is not in the action area at all, so it is
+        spent by clearing the pending slot instead (see
+        _keep_action_from_pack). Everything else leaves the action area.
+        """
+        if action is self.pending_pack_action:
+            self.pending_pack_action = None
+        elif action in self.actions:
+            self.actions.remove(action)
+        self._clear_action_selection()
 
     def _action_cleansweep(self, action):
         """Cleansweep fills every empty card slot with a random card.
@@ -4739,8 +5411,97 @@ class Game:
                 f"(x{self.run_xmult_pending:g} banked)")
             return True
         self.required_score = 0
+        # An action owns this run's target now: re-deriving it from the run's
+        # schedule (see _refresh_run_target, called when the run's trial is
+        # bought or changed) must not quietly make the run failable again.
+        self.target_forced = True
         self._set_shop_message(
             f"{action.name}: this run needs a score of 0 — it cannot be failed")
+        return True
+
+    def _action_inaction(self, action):
+        """Inaction does nothing — but five of them win a card slot.
+
+        A v1 use is banked (see Game.inaction_used) and every
+        INACTION_USES_PER_SLOT of them win the card area one more slot, for the
+        rest of the game (saved). A v2 use HANDS THE SLOT OVER at once instead:
+        the upgrade buys the fifth use, not a better nothing. Either way the use
+        that would complete a slot is REFUSED, and the action kept, when the
+        band of slots above the inventory has no room left for it (see
+        Game.card_slot_room) — the same "refuse and keep it" rule Expansion and
+        Cleansweep follow when there is nothing to do, so a use is never spent on
+        a slot the panel cannot show.
+        """
+        if action.version >= 2:
+            if self.card_slot_room() <= 0:
+                self._set_shop_message(
+                    "The card area is as wide as the panel allows — kept")
+                return False
+            self.card_slots_won += 1
+            self._set_shop_message(
+                f"{action.name} did nothing, and handed over a card slot "
+                f"(the card area is now {self.max_cards} slots)")
+            sounds.play_coin()
+            return True
+        gains = 1
+        completes = ((self.inaction_used + gains) // INACTION_USES_PER_SLOT
+                     > self.card_slot_bonus)
+        if completes and self.card_slot_room() <= 0:
+            self._set_shop_message(
+                "The card area is as wide as the panel allows — kept")
+            return False
+        self.inaction_used += gains
+        used = self.inaction_used
+        left = INACTION_USES_PER_SLOT - (used % INACTION_USES_PER_SLOT)
+        if completes:
+            self._set_shop_message(
+                f"{action.name} did nothing {used} times — the card area grew "
+                f"to {self.max_cards} slots")
+            sounds.play_coin()
+        else:
+            self._set_shop_message(
+                f"{action.name} did nothing ({used} uses — {left} more for a "
+                "card slot)")
+        return True
+
+    def _action_foresight(self, action):
+        """Foresight widens the action area — for good.
+
+        A v1 adds FORESIGHT_ACTION_SLOTS slot to the game's own MAX_ACTIONS (see
+        Game.max_actions), so the action area draws one more slot from then on
+        and every path that checks whether there is room for an action — a
+        purchase, a 1000-handed grant, a Brain Loop roll — asks the game rather
+        than the constant. A v2 removes the limit ALTOGETHER:
+        Game.action_slots_unlimited is set, so nothing ever refuses an action
+        again, and the row pages through whatever the player holds (see
+        Game.action_row_window) — the action area's slots are, from then on,
+        effectively infinite.
+
+        A v1 is refused (and kept) when the band above the inventory is already
+        full, so a $90 action is never spent on a slot that could not be shown;
+        a v2 is refused only when the area is already unlimited.
+        """
+        if action.version >= 2:
+            if self.action_slots_unlimited:
+                self._set_shop_message(
+                    "The action area is already unlimited — kept")
+                return False
+            self.action_slots_unlimited = True
+            self._set_shop_message(
+                f"{action.name} removed the limit on actions: hold as many as "
+                "you like")
+            sounds.play_coin()
+            return True
+        if self.action_slot_room() < FORESIGHT_ACTION_SLOTS:
+            self._set_shop_message(
+                "The action area is as wide as the panel allows — kept")
+            return False
+        self.action_slots_won += FORESIGHT_ACTION_SLOTS
+        self._set_shop_message(
+            f"{action.name} added {FORESIGHT_ACTION_SLOTS} action slot"
+            f"{'s' if FORESIGHT_ACTION_SLOTS != 1 else ''} — "
+            f"{self.max_actions} in all")
+        sounds.play_coin()
         return True
 
     def _action_death(self, action, subject):
@@ -5168,6 +5929,122 @@ class Game:
         return pygame.Rect(TOKEN_COORDS[0], TOKEN_COORDS[1] + index * GRID_SIZE,
                            GRID_SIZE, GRID_SIZE)
 
+    def inaccessible_rect(self, index):
+        """Screen rect of one Odyssey-banked item (see INACCESSIBLE_COORDS).
+
+        The items the Odyssey card has put away sit in their own column to the
+        RIGHT of the token column, one slot each, in the order they were put
+        away — the same panel language the tokens use (see ui.draw_inaccessible).
+        """
+        return pygame.Rect(INACCESSIBLE_COORDS[0],
+                           INACCESSIBLE_COORDS[1] + index * GRID_SIZE,
+                           GRID_SIZE, GRID_SIZE)
+
+    def inaccessible_cap(self):
+        """How many items Odyssey may put away at once: one per copy of it.
+
+        The same rule every other capacity in the game follows (Hoard's holds):
+        a second copy of the card banks a second item.
+        """
+        return self._card_count(Card.ODYSSEY)
+
+    def can_bank_selected(self):
+        """True when the selected item is one Odyssey could put away (the G key).
+
+        A bankable item is a block or a component (never a card or an action)
+        that is actually IN the inventory — a block lifted off the board is not
+        in the inventory, so G has nothing to put away.
+        """
+        item = self.selected_toolbox_item
+        if item is None or item not in self.toolbox.items:
+            return False
+        return getattr(item, "kind", None) in ("block", Component.SHAPE,
+                                                Component.EFFECT, Component.SCORER)
+
+    def _bank_selected_item(self):
+        """Odyssey: put the selected item away for the run (the G key).
+
+        The item leaves the inventory and waits in its own column beside the
+        Spirit tokens (see Game.inaccessible_rect) until the run is over: after
+        a finished, CONTINUED run it comes back into the inventory and pays
+        ODYSSEY_CASH_FRACTION of its sell price in cash (see
+        _return_inaccessible) — a retry is a do-over, so a banked item stays
+        banked through one, exactly like every other piece of build state.
+        Only Odyssey may do this, and only inaccessible_cap-many items at a time:
+        one per copy of the card, the rule Hoard's holds follow. An item assigned
+        to the assembler is unassigned on its way out, so the assembler can never
+        point at something that is not in the inventory.
+        """
+        if not self._has_card(Card.ODYSSEY):
+            self._set_shop_message("Only the Odyssey card can put an item away")
+            return False
+        if not self.can_bank_selected():
+            self._set_shop_message(
+                "Select a block or component in your inventory first")
+            return False
+        if len(self.inaccessible) >= self.inaccessible_cap():
+            self._set_shop_message(
+                f"Odyssey already has {len(self.inaccessible)} item(s) away "
+                f"({self.inaccessible_cap()} max)")
+            return False
+        item = self.selected_toolbox_item
+        self.toolbox.items.remove(item)
+        # An item on its way out must not stay assigned to the assembler, which
+        # works by index into the inventory (see _sell_selected_item).
+        a = self.assembler
+        if item is a.shape:
+            a.shape = None
+        elif item is a.scorer:
+            a.scorer = None
+        elif item in a.effects:
+            a.effects.remove(item)
+        self.assigned_toolbox_indexes.pop(item, None)
+        self.inaccessible.append(item)
+        self._clear_toolbox_selection()
+        self._set_shop_message(
+            f"Odyssey: {self._item_name(item)} waits out this run "
+            f"(${self._bank_value(item)} when it returns)")
+        sounds.play_coin()
+        return True
+
+    def _bank_value(self, item):
+        """The cash a banked item pays when it comes back (half its sell price)."""
+        return int(self._sell_price(item) * ODYSSEY_CASH_FRACTION)
+
+    def _return_inaccessible(self):
+        """Give every Odyssey-banked item back after a run, and pay for each.
+
+        Called once a finished run is COMMITTED (see _continue_run), so a retry
+        neither returns the items nor pays — the same rule every other per-run
+        gain follows. An item comes back into the inventory and pays
+        ODYSSEY_CASH_FRACTION of its sell price. A full inventory withholds the
+        item (it was never sold, so it can wait longer) but the cash is still
+        paid, and the message says which happened. Returns the cash paid.
+        """
+        if not self.inaccessible:
+            return 0
+        paid = 0
+        waiting = 0
+        for item in list(self.inaccessible):
+            if not self.toolbox.add(item):
+                waiting += 1
+                continue
+            self.inaccessible.remove(item)
+            paid += self._bank_value(item)
+        if paid:
+            self.cash += paid
+        if waiting and not paid:
+            self._set_shop_message(
+                f"Odyssey: no room in the inventory for "
+                f"{waiting} banked item{'s' if waiting != 1 else ''}")
+        elif waiting:
+            self._set_shop_message(
+                f"Odyssey returned ${paid} — {waiting} item"
+                f"{'s' if waiting != 1 else ''} still wait for room")
+        else:
+            self._set_shop_message(f"Odyssey returned your item(s): ${paid}")
+        return paid
+
     def token_at(self, pos):
         """Return the token chip at a screen position, or None."""
         for i, token in enumerate(self.tokens):
@@ -5289,6 +6166,12 @@ class Game:
         that are already placed in the marble box, and the shop's "Last run
         cash gained" readout (which breaks the run's earnings down).
         """
+        # An OPEN PACK owns the hover as well as the clicks: its options are
+        # what the player is looking at, so the sidebar reads out the option
+        # under the cursor (see _click_pack and ui.draw_pack_overlay).
+        index = self.pack_option_at(pos)
+        if index is not None and index < len(self.open_pack.options):
+            return self.open_pack.options[index], "pack"
         # The cash readout is not an item, so it is checked first: hovering it
         # shows where the last run's dollars came from.
         if ui.last_run_cash_rect(self).collidepoint(pos):
@@ -5495,31 +6378,63 @@ class Game:
         for a future run; if a grant is refused (a full area), its point stays
         banked too.
         """
-        cost = self._resource_cost()
         self.shred_points += self.shred_run_gain
         self.shred_run_gain = 0
         # Mass production's run factor belongs to the run that just finished:
         # the points it tripled have been folded in above (and the permanent
         # factor, if any, stays).
         self.resource_gain_mult = 1.0
-        while self.shred_points >= cost and self._grant_random_card():
-            self.shred_points -= cost
         self.rubble_points += self.rubble_run_gain
         self.rubble_run_gain = 0
-        while self.rubble_points >= cost and self._grant_random_block():
-            self.rubble_points -= cost
         self.idea_points += self.idea_run_gain
         self.idea_run_gain = 0
-        while self.idea_points >= cost and self._grant_random_action():
-            self.idea_points -= cost
-        # Picky points: every banked point adds a permanent bonus shop slot
-        # (each slot shows an extra random offer on every shop refresh).
         self.option_points += self.option_run_gain
         self.option_run_gain = 0
+        self._convert_banked_points()
+
+    def _convert_banked_points(self):
+        """Spend every whole banked point on its scorer's reward.
+
+        The one conversion loop, run both when a run's points are committed and
+        when a resource PACK banks points mid-run (see _grant_resource_points),
+        so a pack's points buy exactly what a trigger's points buy. Shreds pay
+        a card, Rubble a block, Ideas an action and Picky a permanent shop slot
+        (each slot shows an extra random offer on every refresh); a refused
+        grant leaves its points banked for next time.
+        """
+        cost = self._resource_cost()
+        while self.shred_points >= cost and self._grant_random_card():
+            self.shred_points -= cost
+        while self.rubble_points >= cost and self._grant_random_block():
+            self.rubble_points -= cost
+        while self.idea_points >= cost and self._grant_random_action():
+            self.idea_points -= cost
         while self.option_points >= cost:
             self.option_points -= cost
             self.bonus_slots += 1
         self.shop.bonus_slots = self.bonus_slots
+
+    def _grant_resource_points(self, scorer, points):
+        """Bank resource points straight away, and convert what they buy.
+
+        What a resource PACK's option does (see ItemPack): the points go into
+        the PERMANENT bank — not this run's pending gains — and are converted at
+        once, so keeping the option has its effect on the spot rather than at
+        the end of the run. The four banks are the ones the scorers fill (see
+        _add_resource_points), and the conversion is the same loop a finished
+        run uses (see _convert_banked_points).
+        """
+        if scorer == Scorer.SHREDS:
+            self.shred_points += points
+        elif scorer == Scorer.RUBBLE:
+            self.rubble_points += points
+        elif scorer == Scorer.IDEAS:
+            self.idea_points += points
+        elif scorer == Scorer.PICKY:
+            self.option_points += points
+        else:
+            return
+        self._convert_banked_points()
 
     def _resource_cost(self):
         """Points needed for one resource conversion, after the Factory card.
@@ -5614,7 +6529,7 @@ class Game:
 
     def _grant_random_action(self):
         """Grant a random action to the action area."""
-        if len(self.actions) >= MAX_ACTIONS:
+        if len(self.actions) >= self.max_actions:
             self._set_shop_message("Action area is full — action withheld")
             return False
         value = random.choice(Action.ORDER)
@@ -5883,6 +6798,29 @@ class Game:
         """
         if item is CASH_BREAKDOWN:
             return self._cash_breakdown_rows()
+        if getattr(item, "kind", None) == "pack":
+            # A pack describes itself by what it holds and by its size's rule:
+            # how many options it deals out and how many of them are kept.
+            return [
+                (f"Pack - {Pack.name(item.pack_type)}",
+                 Pack.description(item.pack_type)),
+                (f"Size - {Pack.size_name(item.size)}",
+                 f"{Pack.options(item.size)} options, "
+                 f"{Pack.size_description(item.size)}"),
+                ("Kept", f"{item.kept} of {item.keep} kept so far"),
+            ]
+        if getattr(item, "kind", None) == "resource":
+            # A resource option is POINTS rather than a component, so it says
+            # what the scorer banks and what the option is worth: the factor
+            # times that, at the magnitude the option rolled.
+            plural = "" if item.points == 1 else "s"
+            return [
+                (f"Resource - {Scorer.name(item.scorer)}",
+                 scorer_description(item.scorer, item.amount)),
+                ("Option", f"Banks {points_text(item.points)} "
+                           f"{resource_point_label(item.scorer)} point{plural} "
+                           f"at once"),
+            ]
         if getattr(item, "kind", None) == "token":
             # A token is a whole kept block, so it describes itself the way that
             # block did on the board (shape, effects, scorer), plus when it
@@ -6032,10 +6970,35 @@ class Game:
     def _action_hint(self, item, source):
         """A short hint telling the player how to act on the hovered item."""
         if source == "shop":
+            # A pack is bought to be opened, so the hint says so rather than
+            # offering Hoard's hold (a pack that is opened leaves the shelf
+            # anyway — see _open_pack).
+            if getattr(item, "kind", None) == "pack":
+                return f"Left-click to buy and open ({Pack.size_description(item.size)})"
             if self._has_card(Card.HOARD):
                 return ("Left-click to buy | Right-click to hold it in place "
                         "across rerolls")
             return "Left-click to buy"
+        if source == "pack":
+            # The open pack's overlay: the hovered OPTION is one click away, and
+            # it is named by its own kind — a pack deals the same goods the
+            # shelf sells — so the player can tell a card from a shape before
+            # spending one of the pack's picks on it.
+            kind = getattr(item, "kind", None)
+            what = {"card": "this card", "action": "this action",
+                    "block": "this block",
+                    "resource": "these resource points"}.get(kind)
+            if what is None:
+                part = {"shape": "shape", "effect": "effect",
+                        "scorer": "scorer"}.get(kind, "part")
+                what = f"this {part}"
+            hint = f"Left-click to keep {what}"
+            pack = self.open_pack
+            if pack is not None and pack.remaining > 0:
+                plural = "" if pack.remaining == 1 else "s"
+                hint += (f" ({pack.remaining} pick{plural} left) | "
+                         f"Right-click to leave the rest")
+            return hint
         if source == "cards":
             return "Click another card to swap order | B to sell"
         if source == "actions":
@@ -6047,14 +7010,13 @@ class Game:
                 return "Fires at the end of each run it covers (xMult)"
             return "Fires at the start of each run it covers"
         if source == "toolbox":
-            if getattr(item, "kind", None) == "block":
-                return "Left-click to place | D to disassemble"
-            # COMMENTED OUT with the conditions: the condition component's hint
-            # ("Condition: click a card scorer, then press S to build").
-            #
-            # if getattr(item, "kind", None) == Component.CONDITION:
-            #     return "Condition: click a card scorer, then press S to build"
-            return "Left-click to toggle in the assembler | D to assemble"
+            hint = ("Left-click to place | D to disassemble"
+                    if getattr(item, "kind", None) == "block"
+                    else "Left-click to toggle in the assembler | D to assemble")
+            # Odyssey's own verb, where the player is looking when they use it.
+            if self._has_card(Card.ODYSSEY) and self.can_bank_selected():
+                hint += " | G to put it away for the run"
+            return hint
         return ""  # Placed blocks and other sources have no extra action.
 
     def _wrap_text(self, text, font, max_width):
@@ -6188,10 +7150,9 @@ class Game:
             sim_blocks = self._simulation_blocks()
             for marble in self.marbles:
                 marble.physics.update(marble, DT, sim_blocks)
-                # The Singularity final boss makes the marble gain mass quickly
-                # and linearly over time, so it falls ever faster as the run
-                # drags on.
-                if self.final_boss == FinalBoss.SINGULARITY:
+                # The Singularity trial makes the marble gain mass, slowly and
+                # linearly, so it falls ever faster as the run drags on.
+                if self.active_trial == Trial.SINGULARITY:
                     marble.mass += SINGULARITY_MASS_GROWTH * DT
                 # The astronaut card grants mult for every second a marble is
                 # pulled by a black hole, so accumulate that pull time per run.
@@ -6208,9 +7169,14 @@ class Game:
                 # spends inside a block, and much more for a second inside a
                 # locked board unit, so accumulate both as the run plays.
                 self._count_inside_time(marble)
-                # Record the board unit the marble is in: the Explorer card's
-                # xMult is the fraction of the board those units cover, and they
-                # are drawn salmon while it is owned (see ui.draw_board).
+                # The matrix card pays chips for every second a marble spends
+                # inside a locked board unit WITHOUT the phase effect, so that
+                # time is accumulated apart from the lock time above.
+                self._count_locked_no_phase_time(marble)
+                # Record the board units the marble's body is in: the Explorer
+                # card's xMult is the fraction of the board those units cover,
+                # and they are painted the title screen's colour while it is
+                # owned (see ui.draw_board).
                 self._note_visited_cell(marble)
                 # Leave a shrinking trail dot wherever the marble has moved. A
                 # dot laid while the marble-box fire is burning carries that
@@ -6436,9 +7402,11 @@ class Game:
         # Fresh run: no black-hole pull time has accumulated yet (astronaut).
         self.black_hole_time = 0.0
         # Fresh run: no time inside blocks or inside locked board units has
-        # accumulated yet (intangible).
+        # accumulated yet (intangible), and none inside a locked unit with the
+        # phase effect off either (matrix).
         self.inside_block_time = 0.0
         self.inside_locked_time = 0.0
+        self.inside_locked_no_phase_time = 0.0
         # Fresh run: no Fragile Breaks (Wrecking Ball) gains earned yet. They
         # only become permanent after a run.
         self._reset_wrecking_run_gain()
@@ -6623,12 +7591,12 @@ class Game:
         """True while the trial display's two purchase options can be used.
 
         A run's trial is fixed once its marbles are rolling, so the display can
-        only be bought from while BUILDING the run. It is also unavailable on
-        the final boss run (which shows a boss instead of a trial), during the
-        post-run RETRY/CONTINUE state, and when trials are switched off for the
-        save entirely.
+        only be bought from while BUILDING the run. It is also unavailable
+        during the post-run RETRY/CONTINUE state, and when trials are switched
+        off for the save entirely. (The 24th run used to show a final boss
+        instead of a trial and lock this; it plays a normal trial now.)
         """
-        return (self.trials_enabled and self.final_boss is None
+        return (self.trials_enabled
                 and not self.game_over and not self.run_active
                 and not self.run_complete and not self.awaiting_after_run)
 
@@ -6651,14 +7619,35 @@ class Game:
         choices = [t for t in Trial.ORDER if t != self.current_trial]
         return random.choice(choices or list(Trial.ORDER))
 
+    def trial_change_cost(self):
+        """Cash the trial display's CHANGE half charges (Challenger halves it).
+
+        The Challenger whole card halves both fees (see _trial_cost_factor), and
+        the display reads these rather than the constants so the price it shows
+        is the price it charges.
+        """
+        return int(TRIAL_CHANGE_COST * self._trial_cost_factor())
+
+    def trial_disable_cost(self):
+        """Cash the trial display's DISABLE half charges (Challenger halves it)."""
+        return int(TRIAL_DISABLE_COST * self._trial_cost_factor())
+
+    def _trial_cost_factor(self):
+        """The factor the two trial fees are charged at (see Card.CHALLENGER).
+
+        Read through _has_card, so the Card cutter restores the full price like
+        it restores every other card effect.
+        """
+        return CHALLENGER_COST_FACTOR if self._has_card(Card.CHALLENGER) else 1.0
+
     def _click_trial_display(self, pos):
         """Buy a new trial (left half) or no trial (right half) for cash.
 
-        The left half pays TRIAL_CHANGE_COST for a DIFFERENT random trial; the
-        right half pays TRIAL_DISABLE_COST to run with no trial at all. Either
-        way the trial's effects are rolled onto the current board immediately,
-        so what the player sees while building is what the run will play.
-        Returns True when a purchase went through.
+        The left half pays trial_change_cost() for a DIFFERENT random trial;
+        the right half pays trial_disable_cost() to run with no trial at all.
+        Either way the trial's effects are rolled onto the current board
+        immediately, so what the player sees while building is what the run will
+        play. Returns True when a purchase went through.
         """
         half = self._trial_half_at(pos)
         if half is None:
@@ -6666,32 +7655,34 @@ class Game:
         if not self.trial_options_available():
             self._set_shop_message("The trial can only be changed while building")
             return False
+        change_cost = self.trial_change_cost()
+        disable_cost = self.trial_disable_cost()
         if half == "left":
-            if self.cash < TRIAL_CHANGE_COST:
+            if self.cash < change_cost:
                 self._set_shop_message(
-                    f"Need ${TRIAL_CHANGE_COST} to change the trial")
+                    f"Need ${change_cost} to change the trial")
                 return False
-            self.cash -= TRIAL_CHANGE_COST
+            self.cash -= change_cost
             self.current_trial = self._random_other_trial()
             self._apply_trial()
             # A bought Slim pickings bites the shop already on screen, exactly
             # as a rerolled one would (see _trim_shop_for_trial).
             self._trim_shop_for_trial()
             self._set_shop_message(f"Trial changed: {Trial.name(self.current_trial)}"
-                                   f" (${TRIAL_CHANGE_COST})")
+                                   f" (${change_cost})")
             sounds.play_coin()
             return True
         if self.current_trial is None:
             self._set_shop_message("This run already has no trial")
             return False
-        if self.cash < TRIAL_DISABLE_COST:
+        if self.cash < disable_cost:
             self._set_shop_message(
-                f"Need ${TRIAL_DISABLE_COST} to disable the trial")
+                f"Need ${disable_cost} to disable the trial")
             return False
-        self.cash -= TRIAL_DISABLE_COST
+        self.cash -= disable_cost
         self.current_trial = None
         self._apply_trial()
-        self._set_shop_message(f"Trial disabled (${TRIAL_DISABLE_COST})")
+        self._set_shop_message(f"Trial disabled (${disable_cost})")
         sounds.play_coin()
         return True
 
@@ -6799,6 +7790,11 @@ class Game:
         Elephant are applied to each marble as it is released (see
         _release_start_marble).
 
+        Sky High is not applied to the board either — it acts on the RUN's
+        required score, which _refresh_run_target re-derives here so that buying
+        a different trial (or none) restores the target the run would otherwise
+        have had (see _trial_score_factor).
+
         The trial state is cleared again when the run advances (see
         _continue_run), so the NEXT run decides its own picks.
         """
@@ -6860,6 +7856,10 @@ class Game:
             index = min(int(decision.get("gravity", 0)),
                         len(VERTIGO_DIRECTIONS) - 1)
             self.trial_gravity_dir = VERTIGO_DIRECTIONS[index]
+        # Sky High (and the trial changing at all) decides the run's target: a
+        # bought trial change lands here too (see _click_trial_display), so the
+        # target follows whatever trial the run ends up playing.
+        self._refresh_run_target()
 
     def _apply_cards(self):
         """Apply the start-of-run card effects.
@@ -7094,13 +8094,19 @@ class Game:
         makes a locked square turn a gondola around without any extra rule.
         Only the blocks that are physically THERE stop it: a Shape.NONE field
         and an opened Lock are pass-through for the marble, so the car sails
-        through them too. Two gondolas stop each other like any two blocks.
+        through them too. OTHER CABLE CARS ARE NOT SOLIDS: a car's lane, its
+        turning points and its cables are about the board it was built on, so
+        two cars sharing a lane cross straight through each other rather than
+        turning around at one another — the marbles still collide with both of
+        them, since this list is only the effect's own geography.
         """
         solids = []
         for other in self._simulation_blocks():
             if other is block or other.shape == Shape.NONE:
                 continue
             if other.shape == Shape.LOCK and not other.locked:
+                continue
+            if other.has_effect(Effect.GONDOLA):
                 continue
             solids.append(other)
         return solids
@@ -7150,23 +8156,7 @@ class Game:
             rect.y += offset
         return rect
 
-    def _gondola_solid_rects(self, block, static=False):
-        """The rects a cable car must stay clear of, as rects (see _gondola_solids).
-
-        ``static`` measures the lane the board was BUILT with, every other cable
-        car sitting on its own cell. That is the lane the cables are drawn from
-        (ui._draw_gondola_cables), so the drawn track stays put while the other
-        cars patrol; the motion itself always uses the rects as they are now.
-        """
-        rects = []
-        for other in self._gondola_solids(block):
-            if static and other.has_effect(Effect.GONDOLA):
-                rects.append(self._gondola_home_rect(other))
-            else:
-                rects.append(other.rect)
-        return rects
-
-    def _gondola_lane(self, block, static=False):
+    def _gondola_lane(self, block):
         """How far a cable car may slide each way, as pixel travel from its cell.
 
         Returns ``(low, high)``: the most the car can slide backwards (negative
@@ -7175,6 +8165,8 @@ class Game:
         border (see _gondola_solids). It is the whole of the effect's geography:
         the car turns around at these two ends, and they are where the cables
         stop, so the drawn track spans exactly the ground the car can cover.
+        Another cable car is not one of these ends, so a lane is the same shape
+        whether or not other cars are sharing it.
         """
         axis, _sign = self._gondola_axis(block)
         home = self._gondola_home_rect(block)
@@ -7184,7 +8176,8 @@ class Game:
         else:
             low = MARBLE_BOX_COORDS[1] - home.top
             high = MARBLE_BOX_COORDS[1] + MARBLE_BOX_COORDS[3] - home.bottom
-        for rect in self._gondola_solid_rects(block, static):
+        for other in self._gondola_solids(block):
+            rect = other.rect
             if axis == "x":
                 if rect.bottom <= home.top or rect.top >= home.bottom:
                     continue
@@ -7216,10 +8209,11 @@ class Game:
         """Move one cable car, turning it around at the end of its lane.
 
         The car slides along its own axis at its rolled speed until the next
-        frame of travel would take it past the end of its lane — another block,
-        a locked square's wall or the board's border (see _gondola_lane) — where
-        it reverses and uses the rest of the frame on the way back, so a car
-        parked against a wall is never stuck. The travel itself is kept as a
+        frame of travel would take it past the end of its lane — a block, a
+        locked square's wall or the board's border (see _gondola_lane; another
+        cable car is not one of them, so cars sharing a lane cross) — where it
+        reverses and uses the rest of the frame on the way back, so a car parked
+        against a wall is never stuck. The travel itself is kept as a
         float and only floored into the rect (see _gondola_rect): quantizing it
         into the rect every frame, which is what Rect.move does, throws away the
         fraction and leaves a slow car standing still forever. Only the rect
@@ -7311,28 +8305,69 @@ class Game:
             self.pipe_streak_blocks = []
             self.pipe_streak_run_units += 1
 
+    def _marble_overlaps_cell(self, marble, gx, gy):
+        """True when ANY point of the marble is inside the board unit (gx, gy).
+
+        The game's one definition of a marble being "inside" a board unit: the
+        marble's own BODY (its circle, at whatever radius it currently has)
+        overlapping the unit's square at all — not the marble's centre sitting in
+        the cell. A marble sitting on the boundary between two columns is inside
+        BOTH, and one clipping the corner of a unit is inside it too, while a
+        marble merely RESTING against a unit's edge (its centre exactly a radius
+        away) is not: it touches, it does not overlap — the same test the
+        physics resolves collisions with (PhysicsEngine._circle_vs_rect), on the
+        same square.
+        """
+        left = MARBLE_BOX_COORDS[0] + gx * GRID_SIZE
+        top = MARBLE_BOX_COORDS[1] + gy * GRID_SIZE
+        x, y = marble.position[0], marble.position[1]
+        # The unit's square is [left, left + GRID_SIZE] x [top, top + GRID_SIZE],
+        # so the point of it closest to the marble's centre is found by clamping.
+        dx = max(left - x, 0.0, x - (left + GRID_SIZE))
+        dy = max(top - y, 0.0, y - (top + GRID_SIZE))
+        return dx * dx + dy * dy < marble.radius ** 2
+
+    def _overlapped_cells(self, marble):
+        """The board units a marble's body is inside (see _marble_overlaps_cell).
+
+        A circle can only reach the units its own bounding box covers, so at most
+        four cells are ever tested — which is what keeps this affordable for
+        every marble every frame. The range is clamped to the board: a unit
+        outside the 10x15 grid is not a board unit at all.
+        """
+        radius = marble.radius
+        x0 = int((marble.position[0] - radius - MARBLE_BOX_COORDS[0]) // GRID_SIZE)
+        x1 = int((marble.position[0] + radius - MARBLE_BOX_COORDS[0]) // GRID_SIZE)
+        y0 = int((marble.position[1] - radius - MARBLE_BOX_COORDS[1]) // GRID_SIZE)
+        y1 = int((marble.position[1] + radius - MARBLE_BOX_COORDS[1]) // GRID_SIZE)
+        cells = []
+        for gx in range(max(0, x0), min(GRID_WIDTH - 1, x1) + 1):
+            for gy in range(max(0, y0), min(GRID_HEIGHT - 1, y1) + 1):
+                if self._marble_overlaps_cell(marble, gx, gy):
+                    cells.append((gx, gy))
+        return cells
+
     def _note_visited_cell(self, marble):
-        """Record the board unit a marble is in this frame (Explorer card).
+        """Record the board units a marble's body is in this frame (Explorer).
 
-        The unit is the board's own grid cell containing the marble's CENTRE
-        ("the fraction of grid units a marble has been in"), floor-divided from
-        the marble box's top-left corner — the same origin the board wall
-        blocks and ui.draw_board's cell loop use — so the recorded cell is
-        exactly the square ui.draw_board repaints. Positions outside the board
-        (a marble flung past the edge before the box pushes it back) are
-        ignored: the measure is a fraction OF the board's units.
+        The units are the board's own grid cells ANY PART of the marble is inside
+        (see _marble_overlaps_cell / _overlapped_cells) — the same "inside a unit"
+        definition the locked-unit measures use (the user's request: "fix the
+        explorer card so that this definition of 'inside' applies to it too") —
+        so a marble rolled along a cell boundary has been in both columns it
+        straddles, not only the one its centre sits in. A marble outside the
+        board counts only the units it still reaches into; one clear of the board
+        counts none, since a unit outside the grid is not a board unit.
 
-        The cell is added to visited_cells, a set, so a unit the marble sits in
+        The cells are added to visited_cells, a set, so a unit the marble sits in
         for many frames counts once, and two marbles in one unit do not double
         count — "the fraction of grid units a marble has been in", not a
         fraction of marble-time. Reset with the run (see reset_run), so the
-        card measures this run only, and never saved.
+        card measures this run only, and never saved: it is per-run state like
+        air_time.
         """
-        origin_x, origin_y = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
-        gx = int((marble.position[0] - origin_x) // GRID_SIZE)
-        gy = int((marble.position[1] - origin_y) // GRID_SIZE)
-        if 0 <= gx < GRID_WIDTH and 0 <= gy < GRID_HEIGHT:
-            self.visited_cells.add((gx, gy))
+        for cell in self._overlapped_cells(marble):
+            self.visited_cells.add(cell)
 
     def _count_inside_time(self, marble):
         """Accumulate the time a marble spends inside a block, and in a lock.
@@ -7369,6 +8404,72 @@ class Game:
             if marble.physics.overlaps_block(marble, wall):
                 self.inside_locked_time += DT
                 break
+
+    def _count_locked_no_phase_time(self, marble):
+        """Accumulate the time a marble spends inside a locked unit unphased.
+
+        The Matrix whole card's measure (see cards._named_card_units), which is
+        Intangible's locked-unit clause with the opposite emphasis: +45 chips a
+        second instead of +15 mult, and only while the marble is NOT phasing.
+
+        "Inside a locked board unit" is the user's own definition — any point of
+        the marble overlapping any point of the unit (see
+        _marble_overlaps_cell) — which for a locked square is also exactly the
+        test the square's board wall gives the physics, so the two locked-unit
+        measures agree about where a marble is. What separates them is the phase
+        effect: a locked square is SOLID, so the only way inside one is to phase
+        through it (see _board_wall_blocks), and every frame the marble is
+        banking here is a frame it is inside the wall with its phase already
+        gone — the frames after a phase runs out, before the physics has pushed
+        it clear, and any marble that tunnelled or was squeezed in and is being
+        pushed back out. A phasing marble banks nothing: the card pays for being
+        stuck in the wall, not for walking through it.
+
+        Banked per marble per frame, once however many locked units the marble
+        straddles ("a marble inside a locked board unit" is a yes or no for that
+        marble), so two marbles inside walls bank twice as fast, exactly as the
+        air time, the black-hole time and the inside-a-block time do.
+        """
+        if marble.phase_timer > 0:
+            return
+        for gx, gy in self._overlapped_cells(marble):
+            if self.is_cell_locked(gx, gy):
+                self.inside_locked_no_phase_time += DT
+                return
+
+    def _gate_key_and_lock(self, marble, block):
+        """The Gate whole card's two halves: collect a Key, pass through its Lock.
+
+        Passing through a Key block (a pass-through pickup) remembers that key
+        number on the MARBLE — the bookkeeping is kept whether or not the card is
+        owned, like every other measure in the game — and passing through that
+        key's opened Lock pays GATE_PASS_CHIPS. "Corresponding" is the pairing
+        number the two halves share (see _unlock_matching_locks): a Lock is only
+        ever opened by its own Key, and this looks at the marble that is moving,
+        so a lock another marble's key opened pays this marble nothing.
+
+        Every pass pays: the key is not used up, because the card reads "each
+        time ... passes through its corresponding open lock". The block's own
+        triggers are deliberately not consulted — Gate is about the key/lock
+        mechanic, not about the Lock block's scorer half, and a Lock is a doorway
+        the marble may cross as many times as it likes once it is open.
+        """
+        number = getattr(block, "key_number", 0)
+        shape = block_shape(block)
+        if shape == Shape.KEY:
+            marble.collected_keys.add(number)
+            return
+        if shape != Shape.LOCK or getattr(block, "locked", True):
+            return
+        if number not in marble.collected_keys:
+            return
+        if not self._has_card(Card.GATE):
+            return
+        card = next((c for c in self.cards if c.value == Card.GATE), None)
+        self.score_chips += GATE_PASS_CHIPS
+        self._spawn_card_particle(card,
+                                  self._particle_amount_text(GATE_PASS_CHIPS),
+                                  GREEN, block=block)
 
     def _contact_normal(self, marble, block):
         """The unit collision normal of the marble's contact with a block.
@@ -7428,6 +8529,10 @@ class Game:
         copy.bouncy_castle = getattr(marble, "bouncy_castle", False)
         copy.effect_mass_mult = getattr(marble, "effect_mass_mult", 1.0)
         copy.start_block = getattr(marble, "start_block", None)
+        # The keys the half came from its parent carrying: a split copy is a full
+        # marble, so a key one half collected still opens its lock for it (see
+        # _gate_key_and_lock).
+        copy.collected_keys = set(marble.collected_keys)
         copy.velocity = -reflected
         self.marbles.append(copy)
         self._spawn_score_particle(marble.position[0], marble.position[1],
@@ -7478,6 +8583,10 @@ class Game:
                     # for the rest of this run.
                     if block_shape(block) == Shape.KEY:
                         self._unlock_matching_locks(block)
+                    # Gate: passing through a Key remembers it on the marble, and
+                    # passing that key's opened Lock pays chips (see
+                    # _gate_key_and_lock).
+                    self._gate_key_and_lock(marble, block)
                     # Sound the impact: every real effect on the block rings its
                     # own sound (a plain effect-less block rings the neutral
                     # one), so the player hears what the marble just hit.
@@ -7623,9 +8732,6 @@ class Game:
                 # Beating a run with a trial reveals it in the collection.
                 if self.current_trial is not None:
                     self._discover_trial(self.current_trial)
-                # Beating the final boss (the 24th run) reveals it too.
-                if self.final_boss is not None:
-                    self._discover_final_boss(self.final_boss)
             else:
                 self.failed_runs += 1
             # The run is done but progression is deferred: the player chooses
@@ -8357,6 +9463,12 @@ class Game:
         if self._has_card(Card.THOUSAND_HANDED) and self._grant_random_action():
             self._set_shop_message(
                 f"1000-handed grants {self._item_name(self.actions[-1])}")
+        # Odyssey: every item the card put away for the finished run comes back
+        # into the inventory here, and pays a fraction of its sell price. It is
+        # part of committing the run, so a retry returns nothing and pays
+        # nothing (see _return_inaccessible), and the board-expansion messages
+        # above are already out of the way.
+        self._return_inaccessible()
         # Spirit tokens spend a run of coverage; Satanic and Sharp tokens obey
         # their scorer's own destruction rules (see _advance_tokens).
         self._advance_tokens()
@@ -8371,12 +9483,9 @@ class Game:
         self.free_rerolls_run_gain = 0
         # Choose the next run's trial now, before the run starts, so the info
         # box shows it during setup (a new round draws its own trials here, see
-        # _choose_trial). The final boss run (run 24) has a boss instead of a
-        # trial.
-        if self.run_number == TOTAL_RUNS - 2:
-            self.current_trial = None
-        else:
-            self._choose_trial(self.run_number + 1)
+        # _choose_trial). The 24th run is no exception any more: it used to be a
+        # boss run, and that run now plays a normal, drawn trial like the rest.
+        self._choose_trial(self.run_number + 1)
         # The just-finished run's trial effects are spent: clear the state so
         # the next run's trial (chosen above, which also re-seeded the run and
         # dropped its decided picks) re-applies fresh when it starts.
@@ -8412,10 +9521,10 @@ class Game:
             self.game_perfect = False
             self._award_defeat_dice()
         elif not self.continue_past_game_over and self.run_number >= TOTAL_RUNS:
-            # The 24th run is a boss run: it must be CLEARED to win. Clearing
-            # it wins (a perfect win if every run was cleared); failing it is
-            # a loss, and a player reaching run 24 has at most 2 prior losses
-            # (3 losses ends the game earlier), so failing it ends in defeat.
+            # The last run (24) must be CLEARED to win. Clearing it wins (a
+            # perfect win if every run was cleared); failing it is a loss, and a
+            # player reaching run 24 has at most 2 prior losses (3 losses ends
+            # the game earlier), so failing it ends in defeat.
             self.game_over = True
             if cleared_this_run and self.runs_cleared >= REQUIRED_RUNS_TO_WIN:
                 self.game_won = True
@@ -8427,42 +9536,65 @@ class Game:
         else:
             # Advance to the next run with its (round-based) score target,
             # grown by the save's own difficulty (1.6x on difficulty 1, 2x on
-            # the rest — see Difficulty.SCORE_GROWTH).
+            # the rest — see Difficulty.SCORE_GROWTH) and scaled by the trial
+            # that run has been given (Sky High doubles it — see
+            # _refresh_run_target).
             self.round_index = self.run_number // RUNS_PER_ROUND
             self.run_in_round = self.run_number % RUNS_PER_ROUND
-            self.required_score = get_next_required_score(self.run_number,
-                                                          self.score_growth)
-            # The 24th (last) run is the final boss run: pick a boss now so its
-            # modifier applies when the run starts. Sky High triples the target
-            # the player must beat.
-            if self.run_number == TOTAL_RUNS - 1:
-                self.final_boss = random.choice(FinalBoss.ORDER)
-                if self.final_boss == FinalBoss.SKY_HIGH:
-                    self.required_score *= 3
-            else:
-                # Past the boss run the game is endless, and no final boss
-                # applies: one left over from run 24 would keep modifying every
-                # run that follows and lock the trial display for good.
-                self.final_boss = None
+            # Grace v2's "this run needs a score of 0" belonged to the run that
+            # just finished, so it no longer owns the next run's target.
+            self.target_forced = False
+            self._refresh_run_target()
 
     def _begin_endless_play(self):
         """Keep playing after the game-over screen: set the next run up.
 
         The run that ended on the game-over screen never took _continue_run's
         normal advance path (the defeat win/loss branch stopped before it), so
-        the next run's target, round and run-in-round are computed here, and no
-        final boss applies. The screen itself never shows again for this save
-        (see continue_past_game_over).
+        the next run's target, round and run-in-round are computed here. The
+        screen itself never shows again for this save (see
+        continue_past_game_over).
         """
         self.game_over = False
         self.game_won = False
         self.game_perfect = False
         self.continue_past_game_over = True
-        self.final_boss = None
         self.round_index = self.run_number // RUNS_PER_ROUND
         self.run_in_round = self.run_number % RUNS_PER_ROUND
-        self.required_score = get_next_required_score(self.run_number,
-                                                      self.score_growth)
+        self.target_forced = False
+        self._refresh_run_target()
+
+    def _refresh_run_target(self):
+        """Re-derive this run's required score: the schedule's number, scaled by
+        the run's trial.
+
+        Called wherever a run's target is set (_continue_run,
+        _begin_endless_play) and wherever its trial changes — applying a trial
+        (see _apply_trial), or buying a different one or no trial at all (see
+        _click_trial_display) — because a trial's modifier belongs to the TRIAL
+        and not to the run: Sky High doubles the target, and every other trial
+        (and none) leaves it at 1x, so the recompute from the run's own
+        scheduled number lands on the right answer however the trial got there.
+
+        A target an ACTION has taken over is left alone: Grace v2 sets this
+        run's target to 0 to make it unfailable (see _action_grace), and
+        re-deriving it would quietly make the run failable again.
+        """
+        if self.target_forced:
+            return
+        self.required_score = int(get_next_required_score(self.run_number,
+                                                          self.score_growth)
+                                  * self._trial_score_factor())
+
+    def _trial_score_factor(self):
+        """The factor this run's trial puts on its required score (Sky High: 2).
+
+        Read through active_trial, so a run with trials switched off (or one
+        whose trial was bought away) is 1x whatever id the game is holding.
+        """
+        if self.active_trial == Trial.SKY_HIGH:
+            return SKY_HIGH_SCORE_FACTOR
+        return 1.0
 
     def _award_defeat_dice(self):
         """Award metagame dice for a defeat: (run number - 3) squared.
@@ -8686,10 +9818,6 @@ class Game:
             d = collection.is_trial_discovered(value)
             entries.append(("trial", value, Trial.name(value) if d else "???",
                             Trial.description(value) if d else "???", True, d))
-        for value in FinalBoss.ORDER:
-            d = collection.is_final_boss_discovered(value)
-            entries.append(("final_boss", value, FinalBoss.name(value) if d else "???",
-                            FinalBoss.description(value) if d else "???", True, d))
         return entries
 
     def _toggle_crt_filter(self):

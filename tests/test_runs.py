@@ -818,16 +818,39 @@ class RunsTests(GameTestCase):
             position=(main.MARBLE_BOX_COORDS[0] + 20, main.MARBLE_BOX_COORDS[1] + 20))
         self.game._note_visited_cell(marble)
         self.assertEqual(self.game.visited_cells, {(0, 0)})
-        # A position off the board — a marble flung past an edge before the box
-        # pushed it back — is not a board unit and records nothing.
+        # A unit outside the grid is not a board unit, and a marble flung past
+        # an edge records only the units its BODY still reaches into — here, with
+        # its centre 5px past the left edge, only the edge unit it is still
+        # hanging into (see _marble_overlaps_cell).
         marble.position = np.array(
             [main.MARBLE_BOX_COORDS[0] - 5.0, main.MARBLE_BOX_COORDS[1] + 20.0])
         self.game._note_visited_cell(marble)
+        self.assertEqual(self.game.visited_cells, {(0, 0)})
+        # A whole marble's width clear of the board is in no unit at all, so it
+        # records nothing.
         marble.position = np.array(
-            [main.MARBLE_BOX_COORDS[0] + 20.0,
-             main.MARBLE_BOX_COORDS[1] + main.MARBLE_BOX_COORDS[3] + 5.0])
+            [main.MARBLE_BOX_COORDS[0] - 2 * main.MARBLE_RADIUS,
+             main.MARBLE_BOX_COORDS[1] + 20.0])
         self.game._note_visited_cell(marble)
         self.assertEqual(self.game.visited_cells, {(0, 0)})
+
+    def test_visited_units_are_every_unit_the_marble_reaches_into(self):
+        # The measure is the user's "any point of the marble inside any point of
+        # the unit" (see Game._marble_overlaps_cell), not the unit the marble's
+        # CENTRE sits in: a marble rolled onto the boundary between two columns
+        # has been in both of them.
+        self.game.visited_cells = set()
+        boundary = main.MARBLE_BOX_COORDS[0] + main.GRID_SIZE
+        marble = self._add_marble((boundary, main.MARBLE_BOX_COORDS[1] + 20))
+        self.game._note_visited_cell(marble)
+        self.assertEqual(self.game.visited_cells, {(0, 0), (1, 0)})
+        # A marble resting exactly one radius clear of a column is NOT in it: it
+        # touches the boundary, it does not overlap the column.
+        marble.position = np.array(
+            [boundary + main.MARBLE_RADIUS, main.MARBLE_BOX_COORDS[1] + 20.0])
+        self.game.visited_cells = set()
+        self.game._note_visited_cell(marble)
+        self.assertEqual(self.game.visited_cells, {(1, 0)})
         # The card measures THIS run, so a new run starts with a clean map.
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())

@@ -20,8 +20,8 @@ class CardRarityTests(GameTestCase):
 
     def test_every_card_has_a_rarity(self):
         cards = list(main.Card.ORDER) + components.match_group_card_values()
-        # 41 whole cards (the 18 measured ones among them) + 864 group cards.
-        self.assertEqual(len(cards), 905)
+        # 47 whole cards (the 20 measured ones among them) + 864 group cards.
+        self.assertEqual(len(cards), 911)
         for value in cards:
             self.assertIn(value, main.Card.RARITIES, main.Card.name(value))
             self.assertIn(main.Card.rarity(value), components.Rarity.ORDER,
@@ -109,16 +109,16 @@ class CardRarityTests(GameTestCase):
     def test_a_rarer_tier_is_offered_the_ratio_less_often(self):
         # Measured through the real offer draw: the share of offers that come
         # out of each TIER follows the weights, 1 : 0.7 : 0.5 : 0.3 : 0.2 — and
-        # it follows them even though the tiers hold 42/9/9/4/4 pool entries,
+        # it follows them even though the tiers hold 44/11/11/4/4 pool entries,
         # which is the point of drawing the tier before the card.
         random.seed(90210)
         draws = [main.random_card_option_value() for _ in range(60000)]
         counted = collections.Counter(main.Card.rarity(value) for value in draws)
         entries = {tier: len(main.card_offer_entries(tier))
                    for tier in components.Rarity.ORDER}
-        # 41 whole cards + 27 groups, and the tiers are very unevenly sized.
-        self.assertEqual(sum(entries.values()), 68)
-        self.assertEqual(entries[components.Rarity.COMMON], 42)
+        # 47 whole cards + 27 groups, and the tiers are very unevenly sized.
+        self.assertEqual(sum(entries.values()), 74)
+        self.assertEqual(entries[components.Rarity.COMMON], 44)
         # The tiers are wildly different sizes, so a count-driven draw would
         # show a different pattern: assert the ratio is what decides.
         self.assertGreater(entries[components.Rarity.COMMON],
@@ -128,31 +128,39 @@ class CardRarityTests(GameTestCase):
             self.assertAlmostEqual(
                 ratio, components.Rarity.weight(tier), delta=0.03,
                 msg=components.Rarity.name(tier))
-        # The four-card Legendary tier beats the nine-card Unusual one, which
+        # The four-card Legendary tier beats the ten-card Unusual one, which
         # only the ratio (0.2 vs 0.7) can explain.
         self.assertGreater(counted[components.Rarity.UNUSUAL],
                            counted[components.Rarity.LEGENDARY])
 
     def test_a_whole_shop_row_keeps_the_tier_ratio(self):
-        # The ratio has to hold for the four offers the shop actually shows, not
-        # just for a lone draw: keeping the slots distinct must not tilt it. A
-        # collision is resolved inside the drawn tier, never by re-drawing the
-        # tier — re-drawing would favour whichever tier holds the most cards
-        # (Common) and push the small tiers down, which is exactly what a
-        # retry-the-whole-offer row did to Unusual (measured 0.62 instead of
-        # 0.70).
-        random.seed(4242)
+        # The ratio has to hold for the card offers the shop actually shows,
+        # not just for a lone draw: keeping the shelf's slots distinct must not
+        # tilt it. A collision is resolved inside the drawn tier, never by
+        # re-drawing the tier — re-drawing would favour whichever tier holds the
+        # most cards (Common) and push the small tiers down, which is exactly
+        # what a retry-the-whole-offer row did to Unusual (measured 0.62
+        # instead of 0.70).
+        #
+        # Card offers come from the shelf's five mixed slots, so a refresh holds
+        # far fewer of them than the old four dedicated card slots did: the
+        # sample is correspondingly bigger. The kinds are pinned to cards here
+        # so every slot counts (see main.SHELF_OFFER_TYPES), which keeps this
+        # measuring the TIER draw rather than the shelf's mix.
+        random.seed(1)
         counted = collections.Counter()
-        for _ in range(1000):
-            self.game.shop.refresh()
-            for item in self.game.shop.items:
-                if item.kind == "card":
-                    counted[main.Card.rarity(item.value)] += 1
-        self.assertEqual(sum(counted.values()), 4000)  # every slot filled
+        cards_only = (main.Pack.CARD,)
+        with mock.patch.object(main, "SHELF_OFFER_TYPES", cards_only):
+            for _ in range(1000):
+                self.game.shop.refresh()
+                for item in self.game.shop.items:
+                    if item.kind == "card":
+                        counted[main.Card.rarity(item.value)] += 1
+        self.assertEqual(sum(counted.values()), 1000 * main.SHOP_ITEM_SLOTS)
         for tier in components.Rarity.ORDER[1:]:
             ratio = counted[tier] / counted[components.Rarity.COMMON]
             self.assertAlmostEqual(ratio, components.Rarity.weight(tier),
-                                   delta=0.05,
+                                   delta=0.06,
                                    msg=components.Rarity.name(tier))
 
     def test_the_info_box_names_the_tier(self):

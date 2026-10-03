@@ -47,7 +47,8 @@ class NamedCardCatalogueTests(GameTestCase):
                           "Banker", "Wrecking Ball", "Skater", "Glitch",
                           "Ripped Card", "Cozy", "Painting", "Synthesizer",
                           "Island", "Fountain", "Intangible",
-                          "Swashbuckler", "Stencil"])
+                          "Swashbuckler", "Stencil", "Claustrophobia",
+                          "Matrix"])
         for value in components.NAMED_CARD_ORDER:
             with self.subTest(card=main.Card.name(value)):
                 # A whole card: in the catalogue (so the shop offers it and the
@@ -69,9 +70,10 @@ class NamedCardCatalogueTests(GameTestCase):
         ends = {name for name, phase in phases.items() if phase == "end"}
         self.assertEqual(starts, {"Joker", "Pillar", "Banker", "Glitch",
                                   "Ripped Card", "Cozy", "Painting",
-                                  "Synthesizer", "Swashbuckler", "Stencil"})
+                                  "Synthesizer", "Swashbuckler", "Stencil",
+                                  "Claustrophobia"})
         self.assertEqual(ends, {"Explorer", "Astronaut", "Plane", "Skater",
-                                "Fountain", "Island", "Intangible"})
+                                "Fountain", "Island", "Intangible", "Matrix"})
         self.assertEqual([name for name, phase in phases.items()
                           if phase == "fragile"], ["Wrecking Ball"])
         # A card that is not named has no start/end/fragile phase at all: the
@@ -110,6 +112,10 @@ class NamedCardCatalogueTests(GameTestCase):
             "Swashbuckler": ("start", main.Scorer.MULT_ADD, 1.0 / 20.0,
                              "card_sell_total"),
             "Stencil": ("start", main.Scorer.MULT_MUL, 4.0, "stencil_slots"),
+            "Claustrophobia": ("start", main.Scorer.MULT_ADD, 3.0 / 4.0,
+                               "plain_rects"),
+            "Matrix": ("end", main.Scorer.CHIPS_ADD, 1.5,
+                       "inside_locked_no_phase"),
         }
         for value in components.NAMED_CARD_ORDER:
             meta = components.named_card_meta(value)
@@ -138,12 +144,13 @@ class NamedCardCatalogueTests(GameTestCase):
             else:
                 self.assertEqual(tier, components.Rarity.LEGENDARY,
                                  main.Card.name(value))
-        # Twelve cheap measured cards and the four dear ones ($32/$34): every
-        # one of the cheap ones is a Common or an Unusual. The two newest are
-        # the measured cards' first dear tiers: Swashbuckler ($42) is Rare and
-        # Stencil ($46) is Epic.
+        # Twelve cheap measured cards and the five dear ones: every one of the
+        # cheap cards is a Common or an Unusual. The measured cards' first dear
+        # tiers arrive later: Swashbuckler ($42) is Rare, Stencil ($46) is Epic
+        # and Claustrophobia ($40) is the second Rare.
         self.assertEqual(tiers[components.Rarity.COMMON], 12)
-        self.assertEqual(tiers[components.Rarity.UNUSUAL], 4)
+        self.assertEqual(tiers[components.Rarity.UNUSUAL], 5)
+        self.assertEqual(tiers[components.Rarity.RARE], 2)
         self.assertEqual({main.Card.rarity(v) for v in
                           (main.Card.EXPLORER, main.Card.SKATER,
                            main.Card.ISLAND, main.Card.FOUNTAIN)},
@@ -161,7 +168,7 @@ class NamedCardCatalogueTests(GameTestCase):
             self.assertGreater(art.get_bounding_rect().width, 0,
                                main.Card.name(value))
             drawings.add(pygame.image.tobytes(art, "RGBA"))
-        self.assertEqual(len(drawings), 18)
+        self.assertEqual(len(drawings), 20)
 
     def test_the_shop_pool_holds_the_named_cards(self):
         pool = main.card_offer_entries()
@@ -719,6 +726,146 @@ class IntangibleTests(GameTestCase):
         self.assertEqual(self.game.inside_locked_time, 0.0)
 
 
+class MatrixTests(GameTestCase):
+    """The Matrix: +45 chips a second inside a locked unit, while not phasing."""
+
+    def _lock_unit(self, unlocked=((0, 0),)):
+        """Lock every board unit but the given ones (and drop placed blocks)."""
+        self.game.grid.clear()
+        self.game.unlocked_cells = set(unlocked)
+        self.game._board_walls_dirty = True
+
+    def _marble_at(self, x, y):
+        """A marble centred at a board PIXEL position."""
+        return self._add_marble((main.MARBLE_BOX_COORDS[0] + x,
+                                 main.MARBLE_BOX_COORDS[1] + y))
+
+    def test_the_card_data(self):
+        self.assertEqual(main.Card.name(main.Card.MATRIX), "Matrix")
+        self.assertEqual(main.Card.PRICES[main.Card.MATRIX], 30)
+        self.assertEqual(main.Card.rarity_name(main.Card.MATRIX), "Unusual")
+        self.assertTrue(main.Card.comment(main.Card.MATRIX))
+        description = main.Card.description(main.Card.MATRIX)
+        self.assertIn("45 chips", description)
+        self.assertIn("locked board unit", description)
+        self.assertIn("at the end of the run", description)
+        self.assertIn(main.Card.MATRIX, main.Card.ORDER)
+        self.assertIn(main.Card.MATRIX, main.Card.COLORS)
+        self.assertIn(main.Card.MATRIX, main.Card.GLYPHS)
+        # A whole card: no group half, no scorer half, and its rate comes from
+        # the measured table (chips base 30 x ratio 1.5 = 45 a second).
+        self.assertIsNone(components.match_group_card_meta(main.Card.MATRIX))
+        self.assertIsNone(components.card_scorer(main.Card.MATRIX))
+        self.assertIn(main.Card.MATRIX, components.NAMED_CARD_ORDER)
+
+    def test_it_pays_forty_five_chips_a_second(self):
+        # 2 unphased seconds x 45 = +90 chips, paid as the run settles (the
+        # measure is only final once the marbles have stopped).
+        self.game.cards = _own(main.Card.MATRIX)
+        self.game.inside_locked_no_phase_time = 2.0
+        self.game.score_chips = 100
+        self.game._apply_cards_on_finish()
+        self.assertEqual(self.game.score_chips, 100 + 90)
+        self.assertEqual(len(self.game.score_particles), 1)
+        # ...and no time inside pays nothing at all.
+        self.game.inside_locked_no_phase_time = 0.0
+        self.game.score_chips = 100
+        self.game.score_particles.clear()
+        self.game._apply_cards_on_finish()
+        self.assertEqual(self.game.score_chips, 100)
+        self.assertEqual(len(self.game.score_particles), 0)
+
+    def test_owning_no_matrix_pays_nothing(self):
+        self.game.inside_locked_no_phase_time = 5.0
+        self.game.score_chips = 100
+        self.game._apply_cards_on_finish()
+        self.assertEqual(self.game.score_chips, 100)
+
+    def test_only_the_unphased_seconds_count(self):
+        # The user's rule: the card counts time inside a locked unit WITHOUT the
+        # phase effect, so a phasing marble buried in a wall banks nothing —
+        # only the frames it is still inside once its phase has run out do.
+        self._lock_unit()
+        marble = self._marble_at(5 * main.GRID_SIZE + 20,
+                                 5 * main.GRID_SIZE + 20)   # a locked unit
+        self.game._count_locked_no_phase_time(marble)
+        self.assertAlmostEqual(self.game.inside_locked_no_phase_time, main.DT)
+        marble.phase_timer = 1.0
+        self.game._count_locked_no_phase_time(marble)
+        self.assertAlmostEqual(self.game.inside_locked_no_phase_time, main.DT)
+        marble.phase_timer = 0.0
+        self.game._count_locked_no_phase_time(marble)
+        self.assertAlmostEqual(self.game.inside_locked_no_phase_time, 2 * main.DT)
+
+    def test_the_measure_is_the_marble_body_not_its_centre(self):
+        # "Inside" is the user's geometric definition: ANY point of the marble
+        # overlapping ANY point of the unit. This marble's CENTRE is in the only
+        # unlocked unit, but its body reaches over the boundary into the locked
+        # unit next door, so it banks.
+        self._lock_unit(unlocked=((0, 0),))
+        marble = self._marble_at(main.GRID_SIZE - 2, 20.0)
+        self.game._count_locked_no_phase_time(marble)
+        self.assertAlmostEqual(self.game.inside_locked_no_phase_time, main.DT)
+        # ...while a marble clear of every locked unit banks nothing: the units
+        # here are all locked, but this one's centre is in the unlocked (0, 0)
+        # with its body reaching only into it.
+        marble = self._marble_at(20.0, 20.0)
+        self.game.inside_locked_no_phase_time = 0.0
+        self.game._count_locked_no_phase_time(marble)
+        self.assertEqual(self.game.inside_locked_no_phase_time, 0.0)
+
+    def test_a_marble_straddling_four_locked_units_banks_once_a_frame(self):
+        # "A marble inside a locked board unit" is a yes or no for that marble:
+        # the seconds are not multiplied by how many walls it is standing in.
+        # This one sits on the corner where four units meet — one of them
+        # unlocked — so its body is in three locked units at once.
+        self._lock_unit(unlocked=((0, 0),))
+        marble = self._marble_at(main.GRID_SIZE, main.GRID_SIZE)
+        self.game._count_locked_no_phase_time(marble)
+        self.assertAlmostEqual(self.game.inside_locked_no_phase_time, main.DT)
+
+    def test_an_unlocked_unit_banks_nothing(self):
+        self._lock_unit()
+        marble = self._marble_at(20.0, 20.0)
+        self.game._count_locked_no_phase_time(marble)
+        self.assertEqual(self.game.inside_locked_no_phase_time, 0.0)
+        # A fully unlocked board has no locked units at all.
+        self._lock_unit(unlocked={(x, y) for x in range(main.GRID_WIDTH)
+                                  for y in range(main.GRID_HEIGHT)})
+        marble = self._marble_at(5 * main.GRID_SIZE + 20, 5 * main.GRID_SIZE + 20)
+        self.game._count_locked_no_phase_time(marble)
+        self.assertEqual(self.game.inside_locked_no_phase_time, 0.0)
+
+    def test_each_marble_banks_its_own_seconds(self):
+        self._lock_unit()
+        first = self._marble_at(5 * main.GRID_SIZE + 20, 5 * main.GRID_SIZE + 20)
+        second = self._marble_at(6 * main.GRID_SIZE + 20, 6 * main.GRID_SIZE + 20)
+        self.game._count_locked_no_phase_time(first)
+        self.game._count_locked_no_phase_time(second)
+        self.assertAlmostEqual(self.game.inside_locked_no_phase_time, 2 * main.DT)
+
+    def test_the_measure_belongs_to_the_run(self):
+        self.game.inside_locked_no_phase_time = 3.0
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.inside_locked_no_phase_time, 0.0)
+
+    def test_the_run_accumulates_it_while_it_plays(self):
+        # The real frame loop feeds it, not only a test's direct call: a marble
+        # dropped inside a locked unit banks seconds as the run plays.
+        self._lock_unit()
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.upgrades_enabled = False
+        self.assertTrue(self.game.reset_run())
+        marble = self.game.marbles[0]
+        marble.position = np.array(
+            [main.MARBLE_BOX_COORDS[0] + 5 * main.GRID_SIZE + 20,
+             main.MARBLE_BOX_COORDS[1] + 5 * main.GRID_SIZE + 20], dtype=float)
+        self.game.run_active = True
+        self.game.update()
+        self.assertGreater(self.game.inside_locked_no_phase_time, 0.0)
+
+
 class NamedCardFragileTests(GameTestCase):
     """The Wrecking Ball: +3 mult a break, banked for good."""
 
@@ -968,3 +1115,113 @@ class StencilTests(GameTestCase):
         self.game._apply_cards()
         self.game._flush_run_xmult()
         self.assertEqual(self.game.score_mult, 1)
+
+
+class ClaustrophobiaTests(GameTestCase):
+    """Claustrophobia: +3 mult a plain Rect wall on the board, at run start."""
+
+    def _start(self, *values):
+        """Own the cards, fire the start of the run, and read the multiplier."""
+        self.game.cards = _own(*values)
+        self.game.score_mult = 0
+        self.game._apply_cards()
+
+    def test_the_card_data(self):
+        self.assertEqual(main.Card.name(main.Card.CLAUSTROPHOBIA),
+                         "Claustrophobia")
+        self.assertEqual(main.Card.PRICES[main.Card.CLAUSTROPHOBIA], 40)
+        self.assertEqual(main.Card.rarity_name(main.Card.CLAUSTROPHOBIA), "Rare")
+        self.assertTrue(main.Card.comment(main.Card.CLAUSTROPHOBIA))
+        self.assertIn("3 mult", main.Card.description(main.Card.CLAUSTROPHOBIA))
+        self.assertIn("Rect", main.Card.description(main.Card.CLAUSTROPHOBIA))
+        # A measured card like the classic ones: it pays at the START of a run,
+        # where the board it counts is the board the run will play.
+        self.assertEqual(components.named_card_phase(main.Card.CLAUSTROPHOBIA),
+                         "start")
+
+    def test_three_mult_for_every_plain_wall(self):
+        self.game.grid = {(x, 1): main.Block(x, 1) for x in range(4)}
+        self.assertEqual(main.cards.plain_rect_count(self.game), 4)
+
+        self._start(main.Card.CLAUSTROPHOBIA)
+
+        self.assertEqual(self.game.score_mult, 12)      # 4 x 3
+        self.assertEqual(len(self.game.score_particles), 1)
+
+    def test_only_plain_rects_count(self):
+        # A wall with an EFFECT, a wall with a SCORER, and another SHAPE are
+        # each something more than plain, so only the bare Rect pays.
+        self.game.grid = {
+            (0, 1): main.Block(0, 1),                                # plain
+            (1, 1): main.Block(1, 1, effects=[main.Effect.BOUNCY]),
+            (2, 1): main.Block(2, 1, scorer=main.Scorer.CHIPS_ADD),
+            (3, 1): main.Block(3, 1, shape=main.Shape.CIRCLE),
+        }
+        self.assertEqual(main.cards.plain_rect_count(self.game), 1)
+
+        self._start(main.Card.CLAUSTROPHOBIA)
+
+        self.assertEqual(self.game.score_mult, 3)
+
+    def test_a_plain_rect_with_a_start_or_finish_role_is_not_plain(self):
+        # The run's roles are Rect blocks with a scorer, so they never count:
+        # the card cannot be paid for by the two blocks every board has.
+        start = main.Block(1, 1, scorer=main.Scorer.START)
+        finish = main.Block(2, 1, scorer=main.Scorer.FINISH)
+        self.game.grid = {(1, 1): start, (2, 1): finish}
+
+        self.assertEqual(main.cards.plain_rect_count(self.game), 0)
+        self._start(main.Card.CLAUSTROPHOBIA)
+        self.assertEqual(self.game.score_mult, 0)
+
+    def test_only_the_board_counts_not_the_inventory(self):
+        # "on the board": a wall waiting in the inventory is not crowding the
+        # marble box, so it pays nothing.
+        self.game.grid = {}
+        self.game.toolbox.add(main.BlockItem(0, 0, main.Shape.RECT,
+                                             main.Effect.NONE, main.Scorer.NONE,
+                                             0, 12, "Wall"))
+
+        self.assertEqual(main.cards.plain_rect_count(self.game), 0)
+        self._start(main.Card.CLAUSTROPHOBIA)
+        self.assertEqual(self.game.score_mult, 0)
+        self.assertEqual(len(self.game.score_particles), 0)
+
+    def test_the_locked_squares_own_walls_do_not_count(self):
+        # A locked board is drawn as walls the GAME generates around the locked
+        # region; they never sit in the grid, so they are not the player's
+        # walls and the card does not pay for them.
+        self.game._reset_board_to_start()
+        self.game.grid = {}
+
+        self.assertEqual(main.cards.plain_rect_count(self.game), 0)
+        self._start(main.Card.CLAUSTROPHOBIA)
+        self.assertEqual(self.game.score_mult, 0)
+
+    def test_an_empty_board_pays_nothing_at_all(self):
+        self.game.grid = {}
+
+        self._start(main.Card.CLAUSTROPHOBIA)
+
+        self.assertEqual(self.game.score_mult, 0)       # the card's gate
+        self.assertEqual(len(self.game.score_particles), 0)
+
+    def test_a_cut_card_pays_nothing(self):
+        card = main.CardItem(main.Card.CLAUSTROPHOBIA, 40)
+        self.game.cards = [card]
+        self.game.disabled_card = card
+        self.game.grid = {(x, 1): main.Block(x, 1) for x in range(4)}
+        self.game.score_mult = 0
+
+        self.game._apply_cards()
+
+        self.assertEqual(self.game.score_mult, 0)
+
+    def test_it_pays_every_run(self):
+        self.game.grid = {(1, 1): main.Block(1, 1)}
+        self.game.cards = _own(main.Card.CLAUSTROPHOBIA)
+        for _ in range(3):
+            self.game.score_mult = 0
+            self.game._apply_cards()
+            self.assertEqual(self.game.score_mult, 3)
+

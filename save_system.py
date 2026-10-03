@@ -43,8 +43,10 @@ DEFAULT_DIFFICULTY = _save_source.DEFAULT_DIFFICULTY
 Difficulty = _save_source.Difficulty
 Effect = _save_source.Effect
 GREEN = _save_source.GREEN
+ItemPack = _save_source.ItemPack
 PORTAL_MAX_ACTIVATIONS = _save_source.PORTAL_MAX_ACTIVATIONS
 REQUIRED_SCORES = _save_source.REQUIRED_SCORES
+ResourceOption = _save_source.ResourceOption
 ROUND_COUNT = _save_source.ROUND_COUNT
 RUNS_PER_ROUND = _save_source.RUNS_PER_ROUND
 SCREEN_HEIGHT = _save_source.SCREEN_HEIGHT
@@ -52,7 +54,6 @@ SCREEN_WIDTH = _save_source.SCREEN_WIDTH
 ScorerToken = _save_source.ScorerToken
 Scorer = _save_source.Scorer
 Shape = _save_source.Shape
-TOTAL_RUNS = _save_source.TOTAL_RUNS
 Trial = _save_source.Trial
 WHITE = _save_source.WHITE
 del _save_source
@@ -210,6 +211,32 @@ def _serialize_item(item):
             "col": item.col, "row": item.row,
             "name": item.name,
         }
+    if kind == "resource":
+        # A resource pack option: points of one scorer, at the magnitude the
+        # option rolled (the points themselves are stored, so a save cannot
+        # reroll what the option is worth).
+        return {
+            "kind": "resource",
+            "scorer": int(item.scorer),
+            "amount": float(item.amount),
+            "points": float(item.points),
+            "name": item.name,
+        }
+    if kind == "pack":
+        # A pack, with everything it holds: the shop's pack slots and a pack the
+        # player is in the middle of choosing from are the same object (see
+        # Game.open_pack), so one branch covers both.
+        return {
+            "kind": "pack",
+            "pack_type": int(item.pack_type),
+            "size": int(item.size),
+            "keep": int(item.keep),
+            "kept": int(item.kept),
+            "price": int(item.price),
+            "col": item.col, "row": item.row,
+            "name": item.name,
+            "options": [_serialize_item(option) for option in item.options],
+        }
     # A Component (shape/effect/scorer piece).
     return {
         "kind": item.kind,
@@ -223,6 +250,17 @@ def _serialize_item(item):
 
 def _deserialize_item(data):
     """Rebuild a toolbox/shop/grid item from a serialized dict."""
+    if data["kind"] == "resource":
+        return ResourceOption(data["scorer"], data.get("amount", 0),
+                              data.get("points", 0))
+    if data["kind"] == "pack":
+        return ItemPack(data["pack_type"], data["size"],
+                        [_deserialize_item(option)
+                         for option in data.get("options", [])],
+                        data.get("price", 0),
+                        col=data.get("col", 0), row=data.get("row", 0),
+                        keep=data.get("keep"),
+                        kept=data.get("kept", 0))
     if data["kind"] == "card":
         return _restore_random_rolls(
             CardItem(data["value"], data.get("price", 20),
@@ -369,6 +407,9 @@ def _save_data(game):
         "round_index": game.round_index,
         "run_in_round": game.run_in_round,
         "required_score": game.required_score,
+        # True while an ACTION owns this run's target (Grace v2's 0), so loading
+        # does not re-derive it from the schedule (see _refresh_run_target).
+        "target_forced": bool(game.target_forced),
         "required_scores": list(REQUIRED_SCORES),
         "run_results": list(game.run_results),
         "runs_cleared": game.runs_cleared,
@@ -381,13 +422,19 @@ def _save_data(game):
         # The save's difficulty (chosen when it was started): how many of a
         # round's runs play a trial and the score growth per run.
         "difficulty": int(game.difficulty),
-        "final_boss": (int(game.final_boss)
-                        if game.final_boss is not None else None),
         "cards": [_serialize_item(c) for c in game.cards],
         "actions": [_serialize_item(a) for a in game.actions],
         "toolbox": [_serialize_item(i) for i in game.toolbox.items],
         "grid": [_serialize_item(b) for b in game.grid.values()],
         "shop": [_serialize_item(i) for i in game.shop.items],
+        # The pack the player is choosing from, if any (it has already left the
+        # shelf, so it is saved on its own — see Game.open_pack), and the action
+        # an action pack armed for immediate use (see Game.pending_pack_action).
+        "open_pack": (_serialize_item(game.open_pack)
+                      if game.open_pack is not None else None),
+        "pending_pack_action": (_serialize_item(game.pending_pack_action)
+                                if getattr(game, "pending_pack_action", None)
+                                is not None else None),
         # The shop offers the Hoard whole card is holding, as the CELLS they
         # were held in (see main.Shop.slot_key): the offers themselves are
         # already in the key above, so this is what keeps them held through a
@@ -413,6 +460,18 @@ def _save_data(game):
         "free_rerolls": game.free_rerolls,
         "option_points": game.option_points,
         "bonus_slots": game.bonus_slots,
+        # The slots cards and actions have won: Inaction's banked uses (every
+        # INACTION_USES_PER_SLOT of them is a card slot, and a v2 use hands one
+        # over outright), Foresight's action slots, and whether its v2 has
+        # removed the action limit altogether. All permanent for the game.
+        "inaction_used": game.inaction_used,
+        "card_slots_won": game.card_slots_won,
+        "action_slots_won": game.action_slots_won,
+        "action_slots_unlimited": game.action_slots_unlimited,
+        # Odyssey's banked items, as whole items (see _serialize_item), in the
+        # order they were put away: they are out of the inventory until the run
+        # they are waiting out is continued, so a save has to keep them.
+        "inaccessible": [_serialize_item(i) for i in game.inaccessible],
         # Action bonuses (see Game._action_mass_production / _action_brainstorm
         # / _action_grace): Mass production's factor for the run being played
         # and its permanent one, Brainstorm's reroll-price factor, and the
@@ -486,6 +545,7 @@ def _load_save_data(game, data, slot):
     game.round_index = data.get("round_index", 0)
     game.run_in_round = data.get("run_in_round", 0)
     game.required_score = data.get("required_score", game.required_score)
+    game.target_forced = bool(data.get("target_forced", False))
     # The lazily-grown required-score schedule persists so a loaded game
     # continues the same targets. reset_game (called above) clears it first;
     # a fresh game keeps the clean [1] default.
@@ -502,14 +562,6 @@ def _load_save_data(game, data, slot):
     game.last_run_cash_gained = data.get("last_run_cash_gained", 0)
     game.last_run_cash_breakdown = dict(data.get("last_run_cash_breakdown", {}))
     game.current_trial = data.get("current_trial")
-    # The final boss of the 24th run persists so a save made during the boss
-    # run keeps its boss (and required-score triple) on load. A run past the
-    # boss has no boss, so a lingering one (an old save from endless play) is
-    # dropped: otherwise it would keep showing FINAL BOSS and lock the trial
-    # options (see main.Game._begin_endless_play).
-    game.final_boss = data.get("final_boss")
-    if game.run_number != TOTAL_RUNS - 1:
-        game.final_boss = None
     game.component_purchases = {}
     for k, v, c in data.get("component_purchases", []):
         game.component_purchases[(k, v)] = c
@@ -547,6 +599,14 @@ def _load_save_data(game, data, slot):
     game.option_points = data.get("option_points", 0)
     game.bonus_slots = data.get("bonus_slots", 0)
     game.shop.bonus_slots = game.bonus_slots
+    # The gained slots (Inaction's uses and handed-over slots, Foresight's
+    # action slots and its unlimited flag) persist; a save written before
+    # either action existed simply has none of them.
+    game.inaction_used = data.get("inaction_used", 0)
+    game.card_slots_won = data.get("card_slots_won", 0)
+    game.action_slots_won = data.get("action_slots_won", 0)
+    game.action_slots_unlimited = data.get("action_slots_unlimited", False)
+    game.action_area_page = 0
     # The action bonuses above: a save written before they existed reads as an
     # untouched game (no factor, full reroll price, no banked xMult).
     game.resource_gain_mult = data.get("resource_gain_mult", 1.0)
@@ -591,6 +651,10 @@ def _load_save_data(game, data, slot):
     game.touch_scorer_counts = {}
     # Rebuild the owned/shop collections from the save.
     game.toolbox.items = [_deserialize_item(d) for d in data.get("toolbox", [])]
+    # Odyssey's banked items come back before anything asks the toolbox for
+    # room (see Game._return_inaccessible), and a save written before the card
+    # existed banks nothing.
+    game.inaccessible = [_deserialize_item(d) for d in data.get("inaccessible", [])]
     game.shop.items = [_deserialize_item(d) for d in data.get("shop", [])]
     game.cards = [_deserialize_item(d) for d in data.get("cards", [])]
     game.actions = [_deserialize_item(d) for d in data.get("actions", [])]
@@ -600,6 +664,17 @@ def _load_save_data(game, data, slot):
     # (see Game.shop_lock_cap).
     game.shop.locked = [tuple(slot) for slot in data.get("shop_locked", [])]
     game._clip_shop_locks()
+    # A pack the player was choosing from comes back open, with the options it
+    # had left, and the action an action pack armed comes back armed (both are
+    # saved on their own — see Game.open_pack / pending_pack_action).
+    open_pack = data.get("open_pack")
+    game.open_pack = _deserialize_item(open_pack) if open_pack else None
+    pending = data.get("pending_pack_action")
+    game.pending_pack_action = _deserialize_item(pending) if pending else None
+    if game.pending_pack_action is not None:
+        # The armed action is the selected one again, so S picks up where the
+        # save left off (see Game._keep_action_from_pack).
+        game.selected_action = game.pending_pack_action
     game.grid = {}
     for d in data.get("grid", []):
         block = _deserialize_item(d)

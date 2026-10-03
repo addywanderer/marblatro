@@ -850,7 +850,6 @@ class UiTests(GameTestCase):
                               main.Scorer.CHIPS_ADD, 10, 20, "B")
         pos = (main.SCREEN_WIDTH // 2, main.SCREEN_HEIGHT // 2)
         self.game.trials_enabled = True
-        self.game.final_boss = None
         self.game.current_trial = main.Trial.CRUMBLING
         self.game.screen.fill(main.BG_COLOR)
         self.game._draw_item_info(item, "toolbox", pos)
@@ -1523,7 +1522,6 @@ class UiTests(GameTestCase):
         # tile per lattice cell and nothing else drawn over it: the pattern is
         # the background as it is, with no shading pass on top.
         self.game.trials_enabled = True
-        self.game.final_boss = None
         self.game.current_trial = main.Trial.SPEEDRUN
         size = main.ui.TILE_SIZE
 
@@ -1567,49 +1565,11 @@ class UiTests(GameTestCase):
                       main.ui._tile_background(main.Trial,
                                                main.Trial.ALL_FINISHES))
 
-    def test_a_boss_run_wears_the_bosses_own_tile(self):
-        # The final boss REPLACES the trial in the run's display, so the 24th
-        # run is covered in — and tinted by — the boss's tile rather than the
-        # rolled trial's. The trial's RULES still apply: only the art changes.
-        self.game.trials_enabled = True
-        self.game.final_boss = main.FinalBoss.SKY_HIGH
-        self.game.current_trial = main.Trial.SPEEDRUN
-        size = main.ui.TILE_SIZE
-        self.game.screen.fill((1, 2, 3))
-        main.ui.draw_background(self.game)
-        boss_tile = main.ui._tile_art(main.FinalBoss, main.FinalBoss.SKY_HIGH)
-        trial_tile = main.ui._tile_art(main.Trial, main.Trial.SPEEDRUN)
-        for cell_x, cell_y, px, py in ((0, 0, 10, 10),
-                                       (main.SCREEN_WIDTH // size - 1, 0,
-                                        size - 10, 10),
-                                       (3, main.SCREEN_HEIGHT // size - 1, 40,
-                                        size - 10)):
-            with self.subTest(cell=(cell_x, cell_y)):
-                got = tuple(self.game.screen.get_at(
-                    (cell_x * size + px, cell_y * size + py)))[:3]
-                self.assertEqual(got, tuple(boss_tile.get_at((px, py)))[:3])
-        self.assertNotEqual(self._pixel_hash(boss_tile),
-                            self._pixel_hash(trial_tile))
-        # The panels take the boss's colour, and the trial the run is really
-        # playing is still the one its effects come from.
-        self.assertEqual(main.ui.panel_fill(self.game),
-                         main.FinalBoss.panel_color(main.FinalBoss.SKY_HIGH))
-        self.assertEqual(main.ui.locked_fill(self.game),
-                         main.FinalBoss.locked_color(main.FinalBoss.SKY_HIGH))
-        self.assertEqual(self.game.active_trial, main.Trial.SPEEDRUN)
-        # With no boss (the endless runs after it, or any earlier run) the
-        # trial's own tile is back.
-        self.game.final_boss = None
-        main.ui.draw_background(self.game)
-        self.assertEqual(tuple(self.game.screen.get_at((10, 10)))[:3],
-                         tuple(trial_tile.get_at((10, 10)))[:3])
-
     def test_a_running_trials_panels_take_its_own_colour(self):
         # The board, the inventory and the shop are filled with the running
         # trial's tile colour, a little lighter, so the play areas take the
         # run's palette instead of the game's own panel colour.
         self.game.trials_enabled = True
-        self.game.final_boss = None
         self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
                                     for y in range(main.GRID_HEIGHT)}
         self.game.screen.fill((1, 2, 3))
@@ -1678,7 +1638,6 @@ class UiTests(GameTestCase):
     def test_the_background_is_the_plain_colour_without_a_trial(self):
         # No trial running: the screen keeps the game's flat background colour.
         self.game.current_trial = None
-        self.game.final_boss = None
         self.game.screen.fill((1, 2, 3))
         main.ui.draw_background(self.game)
         for pos in ((0, 0), (main.SCREEN_WIDTH - 1, 0),
@@ -1693,24 +1652,19 @@ class UiTests(GameTestCase):
         # and the game's own panel colour with none. It never carries the tile
         # itself: the tile is the SCREEN's background (see draw_background).
         box = main.TRIAL_BOX_RECT
-        cases = (("trial", None, main.Trial.SPEEDRUN),
-                 ("boss", main.FinalBoss.SINGULARITY, main.Trial.SPEEDRUN),
-                 ("no trial", None, None))
-        for label, boss, trial in cases:
+        cases = (("trial", main.Trial.SPEEDRUN),
+                 ("another trial", main.Trial.SKY_HIGH),
+                 ("yet another", main.Trial.SINGULARITY),
+                 ("no trial", None))
+        for label, trial in cases:
             with self.subTest(case=label):
-                self.game.final_boss = boss
                 self.game.trials_enabled = True
                 self.game.current_trial = trial
                 self.game.screen.fill(main.BG_COLOR)
                 self.game.draw_trial_box()
                 fill = main.ui.panel_fill(self.game)
-                if boss is None:
-                    expected = (main.Trial.panel_color(trial)
-                                if trial is not None else main.MARBLE_BOX_COLOR)
-                else:
-                    # The boss replaces the trial: its run wears the boss's own
-                    # colour (see Game.tile_source).
-                    expected = main.FinalBoss.panel_color(boss)
+                expected = (main.Trial.panel_color(trial)
+                            if trial is not None else main.MARBLE_BOX_COLOR)
                 self.assertEqual(fill, expected)
                 # A 4px strip down the panel's left edge, clear of the rounded
                 # corners: inside the panel, and out of reach of the centred
@@ -1721,7 +1675,6 @@ class UiTests(GameTestCase):
                             (box.left + 4, box.bottom - 16)):
                     self.assertEqual(
                         tuple(self.game.screen.get_at(pos))[:3], fill)
-        self.game.final_boss = None
         self.game.current_trial = main.Trial.SPEEDRUN
 
     def test_a_discovered_trials_collection_icon_is_its_tile(self):
@@ -1745,37 +1698,6 @@ class UiTests(GameTestCase):
         # ...while an undiscovered trial still shows the ??? square.
         entry = next(e for e in entries
                      if e[0] == "trial" and e[1] == main.Trial.INFLATION)
-        self.assertTrue(entry[4])
-        self.assertFalse(entry[5])
-
-    def test_a_discovered_final_boss_icon_is_its_tile(self):
-        # A final boss has icon art of its own now: its collection entry shows
-        # the same tile its run is covered in, not the "???" square.
-        collection.discover_final_boss(main.FinalBoss.SINGULARITY)
-        entries = self.game._collection_entries()
-        entry = next(e for e in entries
-                     if e[0] == "final_boss"
-                     and e[1] == main.FinalBoss.SINGULARITY)
-        self.assertTrue(entry[4], "a final boss needs an icon in the collection")
-        self.assertTrue(entry[5], "the boss was just discovered")
-
-        self.game.screen.fill(main.BG_COLOR)
-        icon_rect = pygame.Rect(40, 40, main.GRID_SIZE, main.GRID_SIZE)
-        main.ui.draw_collection_icon(self.game, "final_boss",
-                                     main.FinalBoss.SINGULARITY, icon_rect)
-        tile = main.ui._tile_art(main.FinalBoss, main.FinalBoss.SINGULARITY)
-        for px, py in ((10, 10), (30, 20), (20, 35)):
-            self.assertEqual(tuple(self.game.screen.get_at(
-                (icon_rect.x + px, icon_rect.y + py)))[:3],
-                tuple(tile.get_at((px, py)))[:3])
-        # The other boss wears its own tile, and an undiscovered boss still
-        # shows the ??? square.
-        self.assertNotEqual(
-            self._pixel_hash(tile),
-            self._pixel_hash(main.ui._tile_art(main.FinalBoss,
-                                               main.FinalBoss.SKY_HIGH)))
-        entry = next(e for e in entries
-                     if e[0] == "final_boss" and e[1] == main.FinalBoss.SKY_HIGH)
         self.assertTrue(entry[4])
         self.assertFalse(entry[5])
 
@@ -1925,6 +1847,59 @@ class UiTests(GameTestCase):
             self.assertIn(tuple(self.game.screen.get_at(
                 (card_slot.left + px, card_slot.top + py)))[:3], back, (px, py))
 
+    def test_the_action_row_pages_when_it_holds_more_than_it_can_show(self):
+        # The row draws ONE PAGE of the actions at a time, with the last slot
+        # spent on a pager rather than an action (see Game.action_row_window) —
+        # which is what keeps an unlimited action area (Foresight v2) usable.
+        # Distinct action values, so a turned page is visibly a different row.
+        values = (main.Action.DEATH, main.Action.RECOGNITION,
+                  main.Action.DEJA_VU, main.Action.EXPANSION,
+                  main.Action.ANOINTMENT, main.Action.STRENGTH,
+                  main.Action.SPIRIT)
+        self.game.actions = [main.ActionItem(value, 24) for value in values]
+        self.game.cards.clear()
+        slots = self.game.action_slots_shown()
+        self.assertGreater(len(self.game.actions), slots)
+        self.game.draw()
+
+        start, count, paging = self.game.action_row_window()
+        self.assertTrue(paging)
+        self.assertEqual(count, slots - 1)
+        # The action slots show the page's actions (they are not empty backs)...
+        first = self.game.action_slot_rect(0)
+        pager = self.game.action_slot_rect(slots - 1)
+        self.assertNotEqual(
+            self._pixel_hash(self.game.screen.subsurface(first).copy()),
+            self._pixel_hash(self.game.screen.subsurface(pager).copy()))
+        # ...and the pager slot is not a bare slot back either: it carries the
+        # forward arrow and the page number.
+        self.assertTrue(self.game.action_area_pager_at(pager.center))
+        page_pixels = {tuple(self.game.screen.get_at((x, y)))[:3]
+                       for x in range(pager.left, pager.right)
+                       for y in range(pager.top, pager.bottom)}
+        self.assertIn(main.YELLOW, page_pixels)
+        # Turning the page swaps which actions those slots hold.
+        before = self._pixel_hash(self.game.screen.subsurface(first).copy())
+        self.game._page_action_row()
+        self.game.draw()
+        self.assertNotEqual(
+            before, self._pixel_hash(self.game.screen.subsurface(first).copy()))
+        self.assertNotEqual(self.game.action_row_window()[0], start)
+
+    def test_an_unlimited_action_row_fills_the_band_the_tray_leaves(self):
+        # A v2 Foresight takes the row's cap away; what it DRAWS is the space
+        # the card tray is not using, and the row stays inside the panel.
+        self.game.action_slots_unlimited = True
+        self.game.draw()
+        self.assertEqual(self.game.action_slots_shown(),
+                         main.SLOT_ROW_SLOTS - self.game.max_cards)
+        self.assertGreater(self.game.action_slots_shown(), main.MAX_ACTIONS)
+        self.assertEqual(self.game.action_area_x()
+                         + self.game.action_slots_shown() * main.GRID_SIZE,
+                         main.ACTION_AREA_COORDS[0] + main.ACTION_AREA_COORDS[2])
+        self.assertGreaterEqual(self.game.action_area_x(),
+                                main.CARD_AREA_COORDS[0])
+
     def test_disabled_card_draws_dimmed(self):
         joker = _card_item(main.match_group_for_shape(main.Shape.PIPE),
                            main.Scorer.MULT_ADD)
@@ -2014,10 +1989,9 @@ class UiTests(GameTestCase):
 
     def test_continuing_past_the_game_over_overlay_sets_up_the_next_run(self):
         # CONTINUE on the game-over screen resumes endless play with the next
-        # run's own target and no boss (the run that ended there never got the
-        # normal advance).
+        # run's own target (the run that ended there never got the normal
+        # advance).
         self.game.run_number = main.TOTAL_RUNS
-        self.game.final_boss = main.FinalBoss.SKY_HIGH
         self.game.required_score = 12345
         self.game.game_over = True
 
@@ -2025,7 +1999,6 @@ class UiTests(GameTestCase):
 
         self.assertFalse(self.game.game_over)
         self.assertTrue(self.game.continue_past_game_over)
-        self.assertIsNone(self.game.final_boss)
         self.assertEqual(self.game.required_score,
                          main.get_next_required_score(main.TOTAL_RUNS))
         self.assertEqual(self.game.round_index,
@@ -2034,13 +2007,25 @@ class UiTests(GameTestCase):
                          main.TOTAL_RUNS % main.RUNS_PER_ROUND)
 
 
-    def test_boss_box_draws_title_and_description(self):
-        # The trial box shows the final boss on the boss run without raising.
-        self.game.final_boss = main.FinalBoss.SINGULARITY
-        self.game.draw_trial_box()
-        self.game.final_boss = main.FinalBoss.SKY_HIGH
-        self.game.draw_trial_box()
-        self.game.final_boss = None
+    def test_the_box_draws_a_former_boss_as_an_ordinary_trial(self):
+        # Sky High and Singularity are ordinary trials now, so the trial box
+        # draws them like any other: its panel takes their own colour, and no
+        # FINAL BOSS title is drawn over it (see draw_trial_box).
+        self.game.trials_enabled = True
+        box = main.TRIAL_BOX_RECT
+        gold = (255, 215, 0)  # the title's colour, every trial alike
+        for trial in (main.Trial.SKY_HIGH, main.Trial.SINGULARITY):
+            with self.subTest(trial=main.Trial.name(trial)):
+                self.game.current_trial = trial
+                self.game.screen.fill(main.BLACK)
+                with mock.patch("main.pygame.mouse.get_pos", return_value=(0, 0)):
+                    self.game.draw_trial_box()
+                self.assertEqual(
+                    tuple(self.game.screen.get_at((box.left + 4,
+                                                   box.bottom - 16)))[:3],
+                    main.ui.panel_fill(self.game))
+                self.assertIn(gold, {tuple(self.game.screen.get_at(
+                    (box.left + x, box.top + 13)))[:3] for x in range(box.width)})
         self.game.current_trial = None
         self.game.draw_trial_box()  # nothing to draw
 
@@ -2223,8 +2208,10 @@ class UiTests(GameTestCase):
             (6, 9): main.Block(6, 9, shape=main.Shape.RECT,
                                effect=main.Effect.GONDOLA, angle=0),
             # A wall above the vertical car's lane, so its cable stops short of
-            # the top of the board where its car could never go.
+            # the top of the board where its car could never go, and one past
+            # the horizontal car, which its cable stops at as well.
             (6, 3): main.Block(6, 3, shape=main.Shape.RECT),
+            (8, 9): main.Block(8, 9, shape=main.Shape.RECT),
         }
         with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
             self.game.draw()
@@ -2236,11 +2223,12 @@ class UiTests(GameTestCase):
             return tuple(self.game.screen.get_at((x, y)))[:3]
 
         # The horizontal car: two lines along its own row, at the two sides of
-        # its cell, reaching from the board's left edge to the vertical car's
-        # cell — as far as its car can slide — and no further.
+        # its cell, reaching from the board's left edge to the wall past it —
+        # and NOT stopped by the vertical car sharing its row, which is a car
+        # and not an end of anything (see Game._gondola_solids).
         lane = y0 + 9 * size + 3
         for y in (lane, lane + size - 6):
-            for x in (x0 + 6, x0 + 6 * size - 6):     # the reachable span
+            for x in (x0 + 6, x0 + 6 * size - 6, x0 + 7 * size + 10):
                 self.assertEqual(pixel(x, y), cable, (x, y))
             self.assertNotEqual(pixel(x0 + 8 * size + 5, y), cable, y)
 

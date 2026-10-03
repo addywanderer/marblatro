@@ -1370,9 +1370,10 @@ class BlocksTests(GameTestCase):
 
 
     def test_singularity_makes_marble_gain_mass_linearly(self):
-        # The Singularity boss grows the marble's mass at a constant rate per
+        # The Singularity TRIAL grows the marble's mass at a constant rate per
         # second, so it falls ever faster over the run.
-        self.game.final_boss = main.FinalBoss.SINGULARITY
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.SINGULARITY
         marble = self._add_marble()
         self.game.run_active = True
         before = marble.mass
@@ -1383,7 +1384,9 @@ class BlocksTests(GameTestCase):
 
 
     def test_mass_stays_constant_without_singularity(self):
-        # Without the Singularity boss the marble's mass never changes.
+        # Without the Singularity trial the marble's mass never changes.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.DEAD_ZONE
         marble = self._add_marble()
         self.game.run_active = True
         for _ in range(60):
@@ -2046,6 +2049,27 @@ class GondolaTests(GameTestCase):
         self.assertEqual(self.game._gondola_lane(car),
                          (main.MARBLE_BOX_COORDS[0] - home,
                           wall - home - main.GRID_SIZE))
+
+    def test_gondolas_ignore_each_other(self):
+        # A car's lane is about the BOARD, not about the other cars: two cars
+        # sharing a lane never turn around at one another, they cross (see
+        # _gondola_solids), and their cables run the whole way down the lane.
+        left = self._place(2, 7, angle=90)          # sets off right
+        right = self._place(6, 7, angle=270)        # sets off left, at it
+        x0 = main.MARBLE_BOX_COORDS[0]
+        x1 = x0 + main.MARBLE_BOX_COORDS[2]
+        for car in (left, right):
+            low, high = self.game._gondola_lane(car)
+            self.assertEqual(car.rect.left + low, x0)    # the board's edges,
+            self.assertEqual(car.rect.right + high, x1)  # not the other car
+        crossed = False
+        for _ in range(240):
+            self.game._update_gondolas(main.DT)
+            self.assertIn(left.gondola_dir, (1, -1))
+            # Neither car is ever turned back by the other: they pass through
+            # each other's cell and keep going to the wall behind it.
+            crossed = crossed or left.rect.colliderect(right.rect)
+        self.assertTrue(crossed, "the cars never crossed each other")
 
     def test_it_turns_back_at_the_board_border(self):
         car = self._place(2, 7, angle=90)

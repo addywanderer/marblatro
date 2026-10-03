@@ -45,7 +45,7 @@ pip install pygame numpy
 
 | File | Role |
 |---|---|
-| `components.py` | **The source of truth for game data.** Enums for shapes, effects, scorers, conditions, cards, actions, trials and final bosses, plus their `NAMES` / `DESCRIPTIONS` / `PRICES` / `COLORS` / `GLYPHS` / `ORDER` tables, the price helpers, and the magnitude roll (see `MAGNITUDE_SPREAD`). |
+| `components.py` | **The source of truth for game data.** Enums for shapes, effects, scorers, conditions, cards, actions and trials, plus their `NAMES` / `DESCRIPTIONS` / `PRICES` / `COLORS` / `GLYPHS` / `ORDER` tables, the price helpers, and the magnitude roll (see `MAGNITUDE_SPREAD`). |
 | `main.py` | Every constant and all the logic: `Game` (run cycle, shop, card area, toolbox, input, saves), `Block`, `BlockItem`, `Marble`, `ScorerToken`, the generic card effects in `cards.py`'s hooks… **It contains zero drawing code.** |
 | `ui.py` | **All drawing.** Screens (`draw`, `draw_title_screen`, `draw_collection`, …), the board and marble rendering, the sidebar and every info box, the icon art, and the shared font table. Functions take the object they draw as their first argument; `main.py` keeps thin delegating wrappers (`Game.draw`, `Block.draw`, …). |
 | `physics.py` | The marble simulation: per-frame integration, every collision shape, effects like portals, magnets and black holes. |
@@ -95,7 +95,7 @@ produces.
 | `test_blocks.py` | Blocks: shapes, effects, triggers, portals, keys and locks, borders, and placing one with `_place_block_at`. |
 | `test_runs.py` | A run's life: scoring, cash, marbles, trails, retries and the run cycle. |
 | `test_actions.py` | The one-shot actions (Death, Recognition, Deja Vu, Anointment, …). |
-| `test_trials.py` | Trials and final bosses. |
+| `test_trials.py` | Trials. |
 | `test_tokens.py` | Spirit tokens kept from sacrificed blocks. |
 | `test_collision_behaviors.py` | The physics: what the marble actually does against every shape and effect. |
 | `test_save_profiles.py` | Saving/loading and the profile + player-data-path rules. |
