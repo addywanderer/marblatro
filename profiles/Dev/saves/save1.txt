@@ -5,18 +5,16 @@
   "round_index": 0,
   "run_in_round": 0,
   "required_score": 100,
+  "target_forced": false,
   "required_scores": [
     100
   ],
   "run_results": [],
   "runs_cleared": 0,
   "failed_runs": 0,
-  "current_trial": 6,
-  "trial_decision": {
-    "trial": 6
-  },
+  "current_trial": 14,
+  "trial_decision": null,
   "difficulty": 4,
-  "final_boss": null,
   "cards": [],
   "actions": [],
   "toolbox": [
@@ -24,9 +22,33 @@
       "kind": "block",
       "placed": false,
       "col": 0,
+      "row": 0,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "price": 109,
+      "name": "Start Block",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
       "row": 1,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
@@ -41,166 +63,63 @@
       "random_rolls": null
     }
   ],
-  "grid": [
-    {
-      "kind": "block",
-      "placed": true,
-      "x": 4,
-      "y": 6,
-      "shape": 0,
-      "effects": [],
-      "effect_amounts": {},
-      "scorer": 4,
-      "scorer_amount": 0.0,
-      "angle": 0,
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "spin": 0.0,
-      "triggers_left": 1,
-      "portal_uses_left": 0,
-      "fragile_shape": null,
-      "resale_price": 109,
-      "random_rolls": null
-    }
-  ],
+  "grid": [],
   "shop": [
     {
       "kind": "shape",
-      "value": 2,
+      "value": 8,
       "amount": 0,
       "price": 12,
-      "name": "Line",
+      "name": "Pipe Bend",
       "col": 1,
       "row": 1
     },
     {
-      "kind": "shape",
-      "value": 15,
-      "amount": 0,
-      "price": 9,
-      "name": "Corner",
+      "kind": "action",
+      "value": 8,
+      "price": 25,
+      "version": 1,
       "col": 2,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 15,
-      "amount": 0,
-      "price": 22,
-      "name": "Zipper",
-      "col": 3,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 9,
-      "amount": 0,
-      "price": 20,
-      "name": "Fragile",
-      "col": 4,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 16,
-      "amount": 0.754,
-      "price": 17,
-      "name": "Picky",
-      "col": 5,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 10,
-      "amount": 0.355,
-      "price": 16,
-      "name": "Shreds",
-      "col": 6,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 25,
-      "amount": 1.264,
-      "price": 24,
-      "name": "Rally",
-      "col": 7,
-      "row": 1
-    },
-    {
-      "kind": "card",
-      "value": 91,
-      "price": 40,
-      "amount": 0,
-      "col": 1,
-      "row": 3,
-      "name": "Watch",
-      "random_rolls": null
+      "row": 1,
+      "name": "Brainstorm"
     },
     {
       "kind": "card",
       "value": 83,
       "price": 44,
       "amount": 0,
-      "col": 2,
-      "row": 3,
+      "col": 3,
+      "row": 1,
       "name": "Pedestal",
       "random_rolls": null
     },
     {
-      "kind": "card",
-      "value": 85,
-      "price": 46,
-      "amount": 0,
-      "col": 3,
-      "row": 3,
-      "name": "Doppelganger",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 95,
-      "price": 42,
-      "amount": 0,
-      "col": 4,
-      "row": 3,
-      "name": "1000-handed",
-      "random_rolls": null
-    },
-    {
-      "kind": "action",
-      "value": 1,
+      "kind": "scorer",
+      "value": 22,
+      "amount": 2.364,
       "price": 24,
-      "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Recognition"
-    },
-    {
-      "kind": "action",
-      "value": 5,
-      "price": 36,
-      "version": 1,
-      "col": 6,
-      "row": 3,
-      "name": "Spirit"
+      "name": "Drill",
+      "col": 4,
+      "row": 1
     },
     {
       "kind": "block",
       "placed": false,
-      "col": 7,
-      "row": 3,
-      "shape": 15,
+      "col": 5,
+      "row": 1,
+      "shape": 3,
       "effects": [
+        17,
+        18,
         8
       ],
-      "effect_amounts": {},
-      "scorer": 9,
-      "scorer_amount": 1.117,
-      "price": 24,
-      "name": "Corner Parts",
+      "effect_amounts": {
+        "18": 49.95
+      },
+      "scorer": 25,
+      "scorer_amount": 1.295,
+      "price": 162,
+      "name": "None Rally",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -210,28 +129,185 @@
       "random_rolls": null
     },
     {
-      "kind": "block",
-      "placed": false,
-      "col": 8,
+      "kind": "pack",
+      "pack_type": 0,
+      "size": 3,
+      "keep": 2,
+      "kept": 0,
+      "price": 24,
+      "col": 1,
       "row": 3,
-      "shape": 11,
-      "effects": [
-        4
-      ],
-      "effect_amounts": {},
-      "scorer": 25,
-      "scorer_amount": 0.708,
-      "price": 42,
-      "name": "Curved Slope Line Rally",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null
+      "name": "Mega Shape Pack",
+      "options": [
+        {
+          "kind": "shape",
+          "value": 19,
+          "amount": 0,
+          "price": 9,
+          "name": "Bump",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 11,
+          "amount": 0,
+          "price": 12,
+          "name": "Curved Slope Line",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 17,
+          "amount": 0,
+          "price": 11,
+          "name": "Sawtooth",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 15,
+          "amount": 0,
+          "price": 9,
+          "name": "Corner",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 9,
+          "amount": 0,
+          "price": 8,
+          "name": "Convex Slope",
+          "col": 0,
+          "row": 0
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 7,
+      "size": 4,
+      "keep": 2,
+      "kept": 0,
+      "price": 117,
+      "col": 2,
+      "row": 3,
+      "name": "Giga Resource Pack",
+      "options": [
+        {
+          "kind": "resource",
+          "scorer": 10,
+          "amount": 0.966,
+          "points": 0.6439999999999999,
+          "name": "0.644 shred points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 12,
+          "amount": 1.082,
+          "points": 1.082,
+          "name": "1.082 idea points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 11,
+          "amount": 0.648,
+          "points": 0.648,
+          "name": "0.648 rubble points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 16,
+          "amount": 0.576,
+          "points": 0.576,
+          "name": "0.576 option points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 10,
+          "amount": 1.141,
+          "points": 0.7606666666666666,
+          "name": "0.761 shred points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 16,
+          "amount": 0.939,
+          "points": 0.939,
+          "name": "0.939 option points"
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 5,
+      "size": 2,
+      "keep": 1,
+      "kept": 0,
+      "price": 53,
+      "col": 3,
+      "row": 3,
+      "name": "Jumbo Card Pack",
+      "options": [
+        {
+          "kind": "card",
+          "value": 0,
+          "price": 24,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "name": "Joker",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 99,
+          "price": 32,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "name": "Island",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 82,
+          "price": 44,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "name": "Conquistador",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 3059,
+          "price": 50,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "name": "Platform/Corner card (Bomb)",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 3683,
+          "price": 34,
+          "amount": 2.322,
+          "col": 0,
+          "row": 0,
+          "name": "Repulsor card (Effective)",
+          "random_rolls": null
+        }
+      ]
     }
   ],
+  "open_pack": null,
+  "pending_pack_action": null,
+  "shop_locked": [],
   "component_purchases": [],
   "wrecking_bonus": [
     [
@@ -255,8 +331,17 @@
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
+  "inaction_used": 0,
+  "card_slots_won": 0,
+  "action_slots_won": 0,
+  "action_slots_unlimited": false,
+  "inaccessible": [],
+  "resource_gain_mult": 1.0,
+  "resource_gain_bonus": 1.0,
+  "reroll_discount": 1.0,
+  "run_xmult_bonus": 0.0,
   "marble_type": 2,
-  "upgrades_enabled": false,
+  "upgrades_enabled": true,
   "game_over": false,
   "game_won": false,
   "game_perfect": false,

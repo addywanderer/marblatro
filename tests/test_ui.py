@@ -1886,17 +1886,19 @@ class UiTests(GameTestCase):
             before, self._pixel_hash(self.game.screen.subsurface(first).copy()))
         self.assertNotEqual(self.game.action_row_window()[0], start)
 
-    def test_an_unlimited_action_row_fills_the_band_the_tray_leaves(self):
-        # A v2 Foresight takes the row's cap away; what it DRAWS is the space
-        # the card tray is not using, and the row stays inside the panel.
+    def test_an_unlimited_action_row_fills_its_own_line_in_the_column(self):
+        # A v2 Foresight takes the row's cap away; what it DRAWS is its own line
+        # in the panel column — the card tray's slots no longer come off the row
+        # (SLOT_ROW_SLOTS is only the pair's combined ceiling, see Game.max_cards
+        # and action_slot_room), and the row stays left-aligned with the tray and
+        # clear of the upgrade button beside it.
         self.game.action_slots_unlimited = True
         self.game.draw()
-        self.assertEqual(self.game.action_slots_shown(),
-                         main.SLOT_ROW_SLOTS - self.game.max_cards)
-        self.assertGreater(self.game.action_slots_shown(), main.MAX_ACTIONS)
-        self.assertEqual(self.game.action_area_x()
-                         + self.game.action_slots_shown() * main.GRID_SIZE,
-                         main.ACTION_AREA_COORDS[0] + main.ACTION_AREA_COORDS[2])
+        self.assertEqual(self.game.action_slots_shown(), main.ACTION_BAND_SLOTS)
+        self.assertEqual(self.game.action_area_x(), main.ACTION_AREA_COORDS[0])
+        self.assertLessEqual(self.game.action_area_x()
+                             + self.game.action_slots_shown() * main.GRID_SIZE,
+                             main.ACTION_UPGRADE_RECT.left)
         self.assertGreaterEqual(self.game.action_area_x(),
                                 main.CARD_AREA_COORDS[0])
 

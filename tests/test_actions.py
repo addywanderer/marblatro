@@ -748,10 +748,10 @@ class InactionTests(GameTestCase):
                       main.Action.description(main.Action.INACTION, 2))
 
     def test_it_is_refused_when_the_panel_cannot_show_another_slot(self):
-        # The card tray and the action row share one band (SLOT_ROW_SLOTS): with
-        # the tray already as wide as the panel allows, a use that would win a
-        # slot is refused and the action KEPT, rather than spent on a slot that
-        # could not be drawn.
+        # The tray's slots and the action row's add up to SLOT_ROW_SLOTS in all:
+        # with the tray already as wide as the panel column allows, a use that
+        # would win a slot is refused and the action KEPT, rather than spent on a
+        # slot that could not be drawn.
         for _ in range(3 * main.INACTION_USES_PER_SLOT):
             self.assertTrue(self._use())
         self.assertEqual(self.game.max_cards,
@@ -809,19 +809,21 @@ class ForesightTests(GameTestCase):
         self.assertEqual(self.game.max_actions, main.MAX_ACTIONS + 1)
         self.assertEqual(self.game.action_slots_won, 1)
         self.assertIn("added 1 action slot", self.game.shop_message)
-        # The row is right-aligned with the panel's edge, so the extra slot
-        # moves its LEFT edge instead of growing past the upgrade button.
-        self.assertEqual(self.game.action_area_x(),
-                         main.ACTION_AREA_COORDS[0] + main.ACTION_AREA_COORDS[2]
-                         - self.game.max_actions * main.GRID_SIZE)
-        self.assertEqual(self.game.action_area_x() + self.game.max_actions
-                         * main.GRID_SIZE,
-                         main.ACTION_AREA_COORDS[0] + main.ACTION_AREA_COORDS[2])
+        # The row is its own line in the panel column, so a wider row does not
+        # move it: it still starts beside the card tray's left edge, and the
+        # slot past the ones that fit before the upgrade button is reached by
+        # paging the row (see Game.action_row_window).
+        self.assertEqual(self.game.action_area_x(), main.ACTION_AREA_COORDS[0])
+        self.assertEqual(self.game.action_slots_shown(), main.ACTION_BAND_SLOTS)
+        self.assertEqual(self.game.action_area_x()
+                         + self.game.action_slots_shown() * main.GRID_SIZE
+                         + 12,
+                         main.ACTION_UPGRADE_RECT.left)
 
     def test_the_extra_slot_really_holds_an_action(self):
         # Every path that fills the action area asks the GAME for its size, so
         # the wider row is not just decoration: one more action fits, and the
-        # hit test finds an action in the new slot.
+        # hit test finds the action the row shows in its first slot.
         self.game.actions = []
         self.assertTrue(self._use())
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
@@ -844,7 +846,7 @@ class ForesightTests(GameTestCase):
         self.assertIn("removed the limit", self.game.shop_message)
         self.assertIn("no limit at all",
                       main.Action.description(main.Action.FORESIGHT, 1))
-        # Nothing refuses an action for room any more: fill far past the band
+        # Nothing refuses an action for room any more: fill far past the line
         # and both the purchase path and the grant path still say yes.
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
                              for _ in range(main.SLOT_ROW_SLOTS + 4)]
@@ -859,8 +861,8 @@ class ForesightTests(GameTestCase):
         self.assertIn(action, self.game.actions)
 
     def test_a_full_row_pages_every_action_into_reach(self):
-        # The band can only SHOW so many slots, so the row pages through the
-        # rest: every held action stays clickable, which is what makes an
+        # The row's line can only SHOW so many slots, so the row pages through
+        # the rest: every held action stays clickable, which is what makes an
         # unlimited action area usable (see Game.action_row_window).
         self._use(version=2)
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)

@@ -3647,12 +3647,13 @@ def draw_action_area(game):
     gets a green outline, and its upgrade button appears beside the area
     (v1 -> v2 for ACTION_UPGRADE_COST).
 
-    The row is RIGHT-aligned with the shop panel's edge and grows leftwards as
-    the Foresight action widens it (see Game.action_area_x), so the upgrade
-    button beside it never has to move and the space it takes is space the
-    card tray is not using. When the player holds more actions than the band can
-    show, the last slot is a PAGER instead of an action, which keeps an
-    unlimited action area usable (see Game.action_row_window).
+    The row is its own line in the panel column, left-aligned with the card tray
+    and growing rightwards as the Foresight action widens it (see
+    Game.action_area_x), so the upgrade button beside it never has to move. When
+    the player holds more actions than fit on the line — the slots up to that
+    button, see ACTION_BAND_SLOTS — the last slot is a PAGER instead of an
+    action, which keeps a widened or unlimited action area usable (see
+    Game.action_row_window).
     """
     x, y = game.action_area_x(), ACTION_AREA_COORDS[1]
     slots = game.action_slots_shown()

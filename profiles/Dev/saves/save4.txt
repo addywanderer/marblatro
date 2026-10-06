@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": 7,
+  "cash": 36,
   "run_number": 0,
   "round_index": 0,
   "run_in_round": 0,
@@ -12,21 +12,10 @@
   "run_results": [],
   "runs_cleared": 0,
   "failed_runs": 0,
-  "current_trial": 18,
+  "current_trial": 6,
   "trial_decision": null,
   "difficulty": 4,
-  "cards": [
-    {
-      "kind": "card",
-      "value": 14,
-      "price": 36,
-      "amount": 0,
-      "col": 0,
-      "row": 0,
-      "name": "Hoard",
-      "random_rolls": null
-    }
-  ],
+  "cards": [],
   "actions": [],
   "toolbox": [
     {
@@ -35,7 +24,9 @@
       "col": 0,
       "row": 0,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
@@ -55,7 +46,9 @@
       "col": 0,
       "row": 1,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
@@ -68,44 +61,33 @@
       "angle": null,
       "triggers_left": null,
       "random_rolls": null
+    },
+    {
+      "kind": "scorer",
+      "value": 23,
+      "amount": 0,
+      "price": 24,
+      "name": "Lucky",
+      "col": 2,
+      "row": 0
     }
   ],
   "grid": [],
   "shop": [
     {
-      "kind": "shape",
-      "value": 1,
-      "amount": 0,
-      "price": 11,
-      "name": "Slope",
-      "col": 1,
-      "row": 1
-    },
-    {
-      "kind": "shape",
-      "value": 11,
-      "amount": 0,
-      "price": 12,
-      "name": "Curved Slope Line",
-      "col": 2,
-      "row": 1
-    },
-    {
       "kind": "block",
       "placed": false,
-      "col": 3,
+      "col": 1,
       "row": 1,
       "shape": 16,
       "effects": [
-        5
+        0
       ],
-      "effect_amounts": {
-        "5": 679.0
-      },
-      "scorer": 9,
-      "scorer_amount": 0.461,
-      "price": 30,
-      "name": "Peg Parts",
+      "effect_amounts": {},
+      "scorer": 21,
+      "scorer_amount": 4.343,
+      "price": 21,
+      "name": "Peg Seed",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -115,38 +97,181 @@
       "random_rolls": null
     },
     {
-      "kind": "effect",
-      "value": 5,
-      "amount": 2774.0,
-      "price": 23,
-      "name": "Black Hole",
+      "kind": "block",
+      "placed": false,
+      "col": 2,
+      "row": 1,
+      "shape": 15,
+      "effects": [
+        10,
+        7,
+        2
+      ],
+      "effect_amounts": {
+        "7": 999.3,
+        "2": 23677.0
+      },
+      "scorer": 19,
+      "scorer_amount": 0.5672,
+      "price": 73,
+      "name": "Corner Summit",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
+      "random_rolls": null
+    },
+    {
+      "kind": "scorer",
+      "value": 23,
+      "amount": 0,
+      "price": 24,
+      "name": "Lucky",
+      "col": 3,
+      "row": 1
+    },
+    {
+      "kind": "shape",
+      "value": 19,
+      "amount": 0,
+      "price": 9,
+      "name": "Bump",
       "col": 4,
       "row": 1
     },
     {
-      "kind": "effect",
-      "value": 11,
+      "kind": "shape",
+      "value": 7,
       "amount": 0,
-      "price": 24,
-      "name": "Shrinking",
+      "price": 10,
+      "name": "Drain",
       "col": 5,
       "row": 1
     },
     {
       "kind": "pack",
-      "pack_type": 1,
-      "size": 3,
-      "keep": 2,
+      "pack_type": 8,
+      "size": 1,
+      "keep": 1,
       "kept": 0,
-      "price": 59,
-      "col": 2,
+      "price": 47,
+      "col": 1,
       "row": 3,
-      "name": "Mega Effect Pack",
+      "name": "Big Random Pack",
       "options": [
         {
           "kind": "effect",
+          "value": 13,
+          "amount": 850.0,
+          "price": 23,
+          "name": "Repulsor",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "scorer",
+          "value": 26,
+          "amount": 0,
+          "price": 34,
+          "name": "Echo",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "action",
+          "value": 9,
+          "price": 36,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "name": "Mass production"
+        },
+        {
+          "kind": "shape",
+          "value": 8,
+          "amount": 0,
+          "price": 12,
+          "name": "Pipe Bend",
+          "col": 0,
+          "row": 0
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 1,
+      "size": 1,
+      "keep": 1,
+      "kept": 0,
+      "price": 31,
+      "col": 2,
+      "row": 3,
+      "name": "Big Effect Pack",
+      "options": [
+        {
+          "kind": "effect",
+          "value": 8,
+          "amount": 0,
+          "price": 12,
+          "name": "Slippery",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 16,
+          "amount": 1.147,
+          "price": 26,
+          "name": "Phase",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 7,
+          "amount": 819.8,
+          "price": 16,
+          "name": "Rotate",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
+          "value": 9,
+          "amount": 0,
+          "price": 20,
+          "name": "Fragile",
+          "col": 0,
+          "row": 0
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 1,
+      "size": 0,
+      "keep": 1,
+      "kept": 0,
+      "price": 23,
+      "col": 3,
+      "row": 3,
+      "name": "Normal Effect Pack",
+      "options": [
+        {
+          "kind": "effect",
+          "value": 13,
+          "amount": 1941.0,
+          "price": 23,
+          "name": "Repulsor",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "effect",
           "value": 18,
-          "amount": 61.09,
+          "amount": 129.9,
           "price": 46,
           "name": "Gondola",
           "col": 0,
@@ -154,92 +279,26 @@
         },
         {
           "kind": "effect",
-          "value": 3,
-          "amount": 1365.0,
-          "price": 36,
-          "name": "Piston",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "effect",
-          "value": 17,
-          "amount": 0,
-          "price": 124,
-          "name": "Splitter",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "effect",
-          "value": 6,
-          "amount": 0,
-          "price": 31,
-          "name": "Portal",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "effect",
-          "value": 16,
-          "amount": 1.359,
-          "price": 26,
-          "name": "Phase",
-          "col": 0,
-          "row": 0
-        }
-      ]
-    },
-    {
-      "kind": "pack",
-      "pack_type": 6,
-      "size": 0,
-      "keep": 1,
-      "kept": 0,
-      "price": 35,
-      "col": 3,
-      "row": 3,
-      "name": "Normal Action Pack",
-      "options": [
-        {
-          "kind": "action",
           "value": 5,
-          "price": 36,
-          "version": 1,
+          "amount": 5119.0,
+          "price": 23,
+          "name": "Black Hole",
           "col": 0,
-          "row": 0,
-          "name": "Spirit"
-        },
-        {
-          "kind": "action",
-          "value": 11,
-          "price": 24,
-          "version": 1,
-          "col": 0,
-          "row": 0,
-          "name": "Inaction"
-        },
-        {
-          "kind": "action",
-          "value": 0,
-          "price": 24,
-          "version": 1,
-          "col": 0,
-          "row": 0,
-          "name": "Death"
+          "row": 0
         }
       ]
     }
   ],
   "open_pack": null,
   "pending_pack_action": null,
-  "shop_locked": [
+  "shop_locked": [],
+  "component_purchases": [
     [
-      1,
+      "scorer",
+      23,
       1
     ]
   ],
-  "component_purchases": [],
   "wrecking_bonus": [
     [
       1,

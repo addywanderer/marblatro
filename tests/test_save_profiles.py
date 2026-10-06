@@ -297,6 +297,67 @@ class SaveSystemTests(unittest.TestCase):
         self.assertFalse(fresh.run_active)
 
 
+    def test_loading_a_shelf_from_an_older_layout_puts_every_offer_back_in_its_cell(self):
+        # The shelf's CELLS belong to the layout, not to the save: a save whose
+        # offers all sit in one row — the shelf an older build dealt — comes back
+        # with every offer in the cell this layout gives its kind, rather than
+        # drawn over the cash header or past the panel's right edge (see
+        # Shop.reseat).
+        self.game.shop.refresh()
+        for index, item in enumerate(self.game.shop.items):
+            item.col, item.row = index, 0
+        self.game.save_slot = 5
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 5)
+
+        offers = [i for i in fresh.shop.items if getattr(i, "kind", None) != "pack"]
+        packs = [i for i in fresh.shop.items if getattr(i, "kind", None) == "pack"]
+        self.assertEqual(len(offers), main.SHOP_ITEM_SLOTS)
+        self.assertEqual(len(packs), main.SHOP_PACK_SLOTS)
+        self.assertEqual([(i.col, i.row) for i in offers],
+                         [(1 + n, main.SHOP_ITEM_ROW)
+                          for n in range(main.SHOP_ITEM_SLOTS)])
+        self.assertEqual([(i.col, i.row) for i in packs],
+                         [(1 + n, main.SHOP_PACK_ROW)
+                          for n in range(main.SHOP_PACK_SLOTS)])
+        # Every offer is inside the panel the shop is drawn in, and the cell it
+        # is drawn in is the cell the hit test finds it in.
+        for item in fresh.shop.items:
+            cell = main.pygame.Rect(
+                fresh.shop.rect.x + item.col * main.GRID_SIZE,
+                fresh.shop.rect.y + item.row * main.GRID_SIZE,
+                main.GRID_SIZE, main.GRID_SIZE)
+            self.assertTrue(fresh.shop.rect.contains(cell), (item.col, item.row))
+            self.assertIs(fresh.shop.item_at(cell.center), item)
+
+
+    def test_a_held_offer_follows_its_offer_to_the_cell_it_is_re_seated_in(self):
+        # The Hoard card's held cells are cells too, so re-seating a restored
+        # shelf moves a hold to wherever the offer it holds now sits: the reroll
+        # it was pinned against still finds it.
+        self.game.shop.refresh()
+        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
+        for index, item in enumerate(self.game.shop.items):
+            item.col, item.row = index, 0
+        held = self.game.shop.items[2]
+        self.game.shop.locked = [(2, 0)]
+        self.game.save_slot = 6
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 6)
+
+        reseated = [i for i in fresh.shop.items if i.name == held.name]
+        self.assertEqual(len(reseated), 1)
+        self.assertIn(fresh.shop.slot_key(reseated[0]), fresh.shop.locked)
+
+
     def test_random_outcomes_save_and_load(self):
         # An item's pre-rolled RANDOM/LUCKY reward is part of the save, so
         # loading a save is never a chance to reroll a block or a card the

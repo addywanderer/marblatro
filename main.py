@@ -15,6 +15,7 @@ from components import (
     MAGNITUDE_MAX_STEPS,
     MAGNITUDE_SCALE,
     MAGNITUDE_STEP_DIVISOR,
+    MAGNITUDES,
     MATCH_GROUPS,
     PIPE_GROUP_SHAPES,
     RESOURCE_PACK_FACTOR,
@@ -69,8 +70,23 @@ SQRT_2 = np.sqrt(2)
 # Constants
 SCREEN_WIDTH = 1200
 SCREEN_HEIGHT = 800
+GRID_SIZE = 40  # Size of each grid cell in pixels
+
+MAX_CARDS = 5  # Maximum owned cards the card area can hold at once
+MAX_ACTIONS = 2  # Maximum owned actions the action area can hold at once
+
+MARBLE_BOX_COORDS = (160, 160, 400, 600)  # board: 180..580 x, 150..750 y
+TOOLBOX_COORDS = (600, 320, 240, 40)  # x, y, width, height of the toolbox (the inventory)
+ASSEMBLER_COORDS = (600, 670, 320, 80)  # x, y, width, height of the assembler/disassembler (overlay on the shop's bottom-left)
+CARD_AREA_COORDS = (600, 160, MAX_CARDS * GRID_SIZE, GRID_SIZE)
+ACTION_AREA_COORDS = (600, 240, MAX_ACTIONS * GRID_SIZE, GRID_SIZE)
+CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and card area
+SHOP_COORDS = (600, 520, 280, 240)  # x, y, width, height of the shop
+TRIAL_BOX_COORDS = (620, 50, 200, 80)  # trial box above the cards (top-left stack)
+SHOP_GRID_COLS = SHOP_COORDS[2] // GRID_SIZE
+SHOP_GRID_ROWS = SHOP_COORDS[3] // GRID_SIZE
+
 BG_COLOR = (255, 50, 50)
-MARBLE_BOX_COORDS = (180, 150, 400, 600)  # board: 180..580 x, 150..750 y
 MARBLE_BOX_COLOR = (255, 100, 100)
 FONT_SCALE = 0.7
 GARET_FONT_PATH = "fonts/garet-heavy.otf"
@@ -120,7 +136,7 @@ INFINITY_ANCHOR = 0.75
 # saturating curve reads INFINITY_ANCHOR at SCALE * tan(INFINITY_ANCHOR * pi/2)
 # — 12071 px of travel, or 48.3 types, for the game's own two scales.
 INFINITY_ANCHOR_TANGENT = math.tan(INFINITY_ANCHOR * math.pi / 2)
-QUICK_SCALE = 0.05  # chips a Quick scorer grants per px/s of the marble's speed
+QUICK_SCALE = MAGNITUDES.QUICK_CHIPS_PER_SPEED  # chips a Quick scorer grants per px/s
 RECENT_SPEED_DECAY = 0.9
 # Growing/Shrinking blocks multiply the marble's radius by these factors on
 # each fresh touch. Shrinking clamps at MIN_MARBLE_RADIUS so a marble never
@@ -143,23 +159,11 @@ TRIAL_TRIGGER_PENALTY = 1
 # The Concert whole card hands every block that is not a plain rect AND has both
 # an effect and a scorer one extra trigger per run (see Game._trigger_limit).
 CONCERT_TRIGGER_BONUS = 1
-GRID_SIZE = 40  # Size of each grid cell in pixels
-SHOP_COORDS = (620, 510, 400, 240)  # x, y, width, height of the shop
-TRIAL_BOX_COORDS = (620, 50, 200, 80)  # trial box above the cards (top-left stack)
-SHOP_GRID_COLS = SHOP_COORDS[2] // GRID_SIZE
-SHOP_GRID_ROWS = SHOP_COORDS[3] // GRID_SIZE
 SHOP_MESSAGE_DURATION = 90  # Frames a shop purchase message stays visible
 # Seconds between autosaves while a game is being played (see
 # Game._tick_autosave): the game otherwise only saves when the player presses P
 # or quits, so a long session could lose everything since the last one.
 AUTOSAVE_INTERVAL = 30.0
-TOOLBOX_COORDS = (620, 190, 400, 280)  # x, y, width, height of the toolbox (the inventory)
-ASSEMBLER_COORDS = (620, 670, 320, 80)  # x, y, width, height of the assembler/disassembler (overlay on the shop's bottom-left)
-MAX_CARDS = 5  # Maximum owned cards the card area can hold at once
-# Owned-card row above the inventory's top-LEFT corner.
-CARD_AREA_COORDS = (620, 142, MAX_CARDS * GRID_SIZE, GRID_SIZE)
-CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and card area
-MAX_ACTIONS = 2  # Maximum owned actions the action area can hold at once
 # The shop's shelf: SHOP_ITEM_SLOTS rows of "any item" offers — one random
 # component, block, card or action each (see Shop._random_offer) — plus
 # SHOP_PACK_SLOTS item packs, plus the fixed Board Unit tile. The five item
@@ -170,6 +174,9 @@ SHOP_ITEM_SLOTS = 5
 SHOP_PACK_SLOTS = 3
 SHOP_ITEM_ROW = 1
 SHOP_PACK_ROW = 3
+# The row Picky's extra offers start on, below the two standard rows (they fill
+# it left to right and wrap onto the rows under it — see Shop.refresh/reseat).
+SHOP_BONUS_ROW = 5
 # How many times a shelf slot or a pack option re-rolls to avoid repeating
 # something already on the shelf (or already in the pack) before accepting the
 # duplicate: enough to keep a full shelf varied, few enough that a pool which
@@ -185,7 +192,7 @@ SHOP_ACTION_SLOTS = 2
 # Spirit tokens (see Action.SPIRIT): a token keeps the whole block a Spirit
 # destroyed and is drawn as that block, in a column to the right of the
 # inventory (see ui.draw_token).
-MAX_TOKENS = 5
+MAX_TOKENS = 999
 TOKEN_COORDS = (TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2] + 10, TOOLBOX_COORDS[1],
                 GRID_SIZE, GRID_SIZE * MAX_TOKENS)
 # The "run" a Spirit token's Random/Lucky block is tagged with: the reward was
@@ -194,9 +201,6 @@ TOKEN_COORDS = (TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2] + 10, TOOLBOX_COORDS[1],
 # or loading a save cannot reroll what the token pays (see
 # Game._run_random_result / _roll_kept_reward).
 KEPT_ROLL_RUN = "kept"
-# Owned-action row above the inventory's top-RIGHT corner (actions modify
-# blocks/cards).
-ACTION_AREA_COORDS = (940, 142, MAX_ACTIONS * GRID_SIZE, GRID_SIZE)
 # Service fees and upgrade costs are all 20% lower than the original
 # (rounded down): 25->20, 70->56, 50->40, 40->32. Upgrading an action from v1
 # to v2 costs ACTION_UPGRADE_COST (was 300, then 240, now a flat 200).
@@ -287,28 +291,44 @@ MARBLE_UPGRADES_TOGGLE_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 180, 668, 360, 44)
 ACTION_UPGRADE_RECT = pygame.Rect(ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2] + 12,
                                   ACTION_AREA_COORDS[1], 150, GRID_SIZE)
 # --- Slots that cards and actions can win (Inaction, Foresight) ----------------
-# The owned-card tray and the owned-action row sit in ONE band above the
-# inventory: the tray grows rightwards from CARD_AREA_COORDS, the action row
-# leftwards from the shop panel's right edge (see Game.action_area_x), and the
-# action-upgrade button sits just outside the band. SLOT_ROW_SLOTS is therefore
-# the hard ceiling on how many slots the two of them can show together, derived
-# from that geometry rather than typed in.
-SLOT_ROW_SLOTS = ((ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2]
-                   - CARD_AREA_COORDS[0]) // GRID_SIZE)
 # Inaction does nothing, five times over: every INACTION_USES_PER_SLOT uses win
 # the card area one more slot, and a v2 Inaction hands one over outright (see
 # Game._action_inaction).
 INACTION_USES_PER_SLOT = 5
 # Foresight's permanent gift: one action slot, or — as a v2 — no limit on owned
 # actions at all, which is what ACTION_SLOTS_UNLIMITED stands in for. The row
-# PAGES when more actions are held than the band can show (see
+# PAGES when more actions are held than it can show (see
 # Game.action_row_window), so "unlimited" is honest: every action stays
 # reachable whatever the count.
 FORESIGHT_ACTION_SLOTS = 1
 ACTION_SLOTS_UNLIMITED = 999
-# The action row keeps at least this many slots of the band, whatever the card
-# tray wants: one to hold an action and one to page with.
+# The action row keeps at least this many slots, whatever the card tray wants:
+# one to hold an action and one to page with.
 ACTION_ROW_MIN_SLOTS = 2
+# The owned-card tray and the owned-action row are STACKED in the panel column
+# to the right of the board: each is one line that starts at its own rect's left
+# edge and grows RIGHTWARDS (see Game.action_area_x). What bounds a row of slots
+# is therefore the column itself, so the numbers are derived from it:
+#
+#   SLOT_COLUMN_RIGHT   the right edge of the widest panel in the column, the
+#                       furthest a row of slots can run,
+#   CARD_BAND_SLOTS     the slots the card tray can show — and so the ones
+#                       Inaction can win it,
+#   ACTION_BAND_SLOTS   the slots the action row can show before it reaches the
+#                       upgrade button parked beside it.
+#
+# SLOT_ROW_SLOTS is the pair's combined ceiling — the tray's own room plus the
+# row's minimum — which is what Inaction and Foresight are refused against (see
+# Game.card_slot_room / action_slot_room).
+SLOT_COLUMN_RIGHT = max(CARD_AREA_COORDS[0] + CARD_AREA_COORDS[2],
+                        ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2],
+                        TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2],
+                        SHOP_COORDS[0] + SHOP_COORDS[2],
+                        ASSEMBLER_COORDS[0] + ASSEMBLER_COORDS[2])
+CARD_BAND_SLOTS = (SLOT_COLUMN_RIGHT - CARD_AREA_COORDS[0]) // GRID_SIZE
+ACTION_BAND_SLOTS = ((ACTION_UPGRADE_RECT.left - ACTION_AREA_COORDS[0])
+                     // GRID_SIZE)
+SLOT_ROW_SLOTS = CARD_BAND_SLOTS + ACTION_ROW_MIN_SLOTS
 # The Earthquake whole card: the factor the magnitudes the SHOP rolls are raised
 # by (see Shop._quake).
 EARTHQUAKE_MAGNITUDE_FACTOR = 1.1
@@ -318,7 +338,7 @@ CHALLENGER_COST_FACTOR = 0.5
 # The Odyssey whole card: the fraction of an item's SELL price the banked item
 # pays when it comes back after a run, and the column its banked items are
 # shown in — one column to the right of the Spirit tokens (see TOKEN_COORDS).
-ODYSSEY_CASH_FRACTION = 0.5
+ODYSSEY_CASH_FRACTION = MAGNITUDES.ODYSSEY_CASH_FRACTION
 INACCESSIBLE_COORDS = (TOKEN_COORDS[0] + GRID_SIZE + 10, TOKEN_COORDS[1],
                        GRID_SIZE, GRID_SIZE * MAX_TOKENS)
 # The bottom-left MAIN MENU button on the play screen: leaving the current game
@@ -366,24 +386,24 @@ BRAIN_LOOP_ACTION_CHANCE = 1 / 3
 # The Gate whole card's reward for one trip through a lock: one standard chips
 # unit (+30 chips), paid by Game._gate_key_and_lock every time a marble that
 # collected the lock's Key passes through it.
-GATE_PASS_CHIPS = 30
+GATE_PASS_CHIPS = MAGNITUDES.GATE_PASS_CHIPS
 # The Fountain whole card pays +0.25 xMult for every this-many PIPE-GROUP blocks
 # (Pipe, Drain, Pipe Bend — see components.PIPE_GROUP_SHAPES) a marble touches in
 # a row without touching anything else; the run's sightings are counted in
 # Game._count_pipe_streak and read at the end of the run.
 FOUNTAIN_STREAK_LENGTH = 3
 # The Inferno whole card adds this to the total-score exponent.
-INFERNO_EXPONENT_BONUS = 0.07
+INFERNO_EXPONENT_BONUS = MAGNITUDES.INFERNO_EXPONENT_BONUS
 # The Tesseract whole card permanently gains this much xMult for every shop
 # reroll (saved with the game; applied at the start of each run).
-TESSERACT_REROLL_XMULT = 0.1
+TESSERACT_REROLL_XMULT = MAGNITUDES.TESSERACT_REROLL_XMULT
 # The Doppelganger whole card's extra marble leaves the Start block with this
 # sideways drift (px/s), so the two marbles separate instead of overlapping.
 DOPPELGANGER_START_VX = 1.0
 # The Essence whole card: $10 at the end of every run, one card slot fewer in
 # the area while it is owned, and this many random permanent Spirit tokens when
 # it is sold (see Game._card_sold_message / _grant_permanent_tokens).
-ESSENCE_RUN_CASH = 10
+ESSENCE_RUN_CASH = MAGNITUDES.ESSENCE_RUN_CASH
 ESSENCE_TOKENS = 2
 BOARD_UNIT_ROW = SHOP_PACK_ROW  # the shelf's lower row
 BOARD_UNIT_COL = SHOP_PACK_SLOTS + 1  # right of the three pack slots
@@ -2028,15 +2048,14 @@ class Shop:
         #     self.items.append(self._random_block_offer(block_col, 3))
         # Picky bonus slots: each banked slot adds one extra random offer to
         # the shop, with the offer's kind (shape/effect/scorer/block/card/
-        # action) chosen uniformly. The offers sit in the rows below the
-        # standard ones and reappear every time the shop refreshes.
-        bcol, brow = 1, 5
-        for _ in range(self.bonus_slots):
-            self.items.append(self._random_offer(col=bcol, row=brow))
-            bcol += 1
-            if bcol > self.cols:
-                bcol = 1
-                brow += 1
+        # action) chosen uniformly. The offers take the cells the panel has room
+        # for below the standard rows (see _bonus_cells) and reappear every time
+        # the shop refreshes; a slot past the panel's last cell simply deals
+        # nothing, rather than an offer drawn outside the panel it belongs to.
+        for index, (col, row) in enumerate(self._bonus_cells()):
+            if index >= self.bonus_slots:
+                break
+            self.items.append(self._random_offer(col=col, row=row))
         # Hoard: the held cells take their offers back, unchanged — the same
         # item at the same price, in the cell the player pinned it to. Every
         # other cell keeps what this reroll rolled for it.
@@ -2044,6 +2063,58 @@ class Shop:
             kept = held_offers.get(self.slot_key(item))
             if kept is not None:
                 self.items[index] = kept
+
+    def _bonus_cells(self):
+        """The cells an offer may take past the two standard rows, in order.
+
+        Picky's extra offers fill them left to right, row by row (see refresh),
+        and they stop at the panel's own edges: an offer in a cell the panel does
+        not have — past its bottom row, or in the column past its right edge —
+        could be neither drawn nor clicked, so a shelf simply holds fewer.
+        """
+        return [(col, row) for row in range(SHOP_BONUS_ROW, self.rows)
+                for col in range(1, self.cols)]
+
+    def reseat(self):
+        """Seat every offer in the cell THIS layout gives it, and say where.
+
+        The shelf's cells belong to the layout, not to a save, and the layout can
+        change under a save's feet: offers restored verbatim can land in cells
+        this layout does not have — over the cash header, or off the panel's
+        right edge. The offer's kind and its place in the row are what decide its
+        cell (the same rule refresh deals by): the packs take the pack row beside
+        the fixed Board Unit tile, every other offer the "any item" row, and
+        anything past those two rows is a Picky bonus slot, which fills the rows
+        below both. An offer the panel has no cell left for is DROPPED: a save
+        written under an older shelf can hold more offers than this layout has
+        places to put them, and one that cannot be seen or clicked is not worth
+        keeping in the shelf.
+
+        Returns {(old col, old row): (new col, new row)}, so a caller restoring
+        more than the offers — the Hoard card's held cells — can move those along
+        with the offers they hold.
+        """
+        moved = {}
+        seated = []
+        bonus = iter(self._bonus_cells())
+        item_col = pack_col = 1
+        for item in self.items:
+            is_pack = getattr(item, "kind", None) == "pack"
+            if is_pack and pack_col <= SHOP_PACK_SLOTS:
+                cell = (pack_col, SHOP_PACK_ROW)
+                pack_col += 1
+            elif not is_pack and item_col <= SHOP_ITEM_SLOTS:
+                cell = (item_col, SHOP_ITEM_ROW)
+                item_col += 1
+            else:
+                cell = next(bonus, None)
+                if cell is None:
+                    continue
+            moved[(item.col, item.row)] = cell
+            item.col, item.row = cell
+            seated.append(item)
+        self.items = seated
+        return moved
 
     @staticmethod
     def slot_key(item):
@@ -3702,7 +3773,7 @@ class Game:
                             self._upgrade_action()
                         elif self.action_area_pager_at(mouse_pos):
                             # The action row's pager slot: show the next page of a
-                            # row that holds more actions than the band can draw.
+                            # row that holds more actions than its line can draw.
                             keep_selection = True
                             self._page_action_row()
                         elif action is not None:
@@ -4305,6 +4376,15 @@ class Game:
         """Remove a block from the grid and return it to the toolbox as a block."""
         block = self.grid.pop((grid_x, grid_y), None)
         if block is not None:
+            # A block the player picked up (see _select_placed_block) IS the
+            # armed selection, so erasing it has to drop that selection with it.
+            # _refund_block puts the block back in the toolbox; leaving it armed
+            # would let the player place it again while the refunded copy sits
+            # in the toolbox — the same block fielded twice, since
+            # _place_block_at treats a selected Block as a MOVE and so removes
+            # nothing from the inventory.
+            if block is self.selected_toolbox_item:
+                self._clear_toolbox_selection()
             self._refund_block(block)
             if block.scorer == Scorer.START:
                 # Erasing a start block removes the marble released from it.
@@ -4981,17 +5061,17 @@ class Game:
 
         Two things can win slots back: every INACTION_USES_PER_SLOT uses of the
         Inaction action, and each v2 use of it outright (see card_slot_bonus).
-        The tray shares one band with the action row, and the TRAY has first
-        call on it: the row keeps ACTION_ROW_MIN_SLOTS slots whatever the tray
-        wants, because the row pages when it holds more actions than that (see
-        action_slots_shown, action_row_window), so a tray that wants more slots
-        is never blocked by a row that can still work with two.
+        The tray has its own line in the panel column, so what caps it is the
+        column's width (CARD_BAND_SLOTS) — not the action row, which now sits on
+        a line of its own below it and keeps ACTION_ROW_MIN_SLOTS slots whatever
+        the tray wants (it pages when it holds more actions than it can show, see
+        action_slots_shown / action_row_window).
         """
         wanted = self._card_slots_wanted()
-        return max(1, min(wanted, SLOT_ROW_SLOTS - ACTION_ROW_MIN_SLOTS))
+        return max(1, min(wanted, CARD_BAND_SLOTS))
 
     def _card_slots_wanted(self):
-        """The card slots the player has EARNED, before the band's own limit."""
+        """The card slots the player has EARNED, before the column's own limit."""
         essence_cost = 1 if self._has_card(Card.ESSENCE) else 0
         return MAX_CARDS - essence_cost + self.card_slot_bonus
 
@@ -5006,9 +5086,8 @@ class Game:
                 + self.inaction_used // INACTION_USES_PER_SLOT)
 
     def card_slot_room(self):
-        """How many MORE card slots the band could show (0 when it is full)."""
-        return max(0, (SLOT_ROW_SLOTS - ACTION_ROW_MIN_SLOTS)
-                   - self._card_slots_wanted())
+        """How many MORE card slots the tray could show (0 when it is full)."""
+        return max(0, CARD_BAND_SLOTS - self._card_slots_wanted())
 
     @property
     def max_actions(self):
@@ -5026,24 +5105,25 @@ class Game:
     def action_slots_shown(self):
         """How many action slots the row draws: its capacity, as far as it fits.
 
-        The row wants one slot per action it can hold (see max_actions) and the
-        card tray takes its own slots off the band first, so the row draws
-        whichever is smaller — and the rest of what it holds is reached by
-        paging (see action_row_window). An unlimited row therefore draws the
-        whole band the tray leaves it, which is what keeps it usable.
+        The row wants one slot per action it can hold (see max_actions), and it
+        has a line of its own in the panel column, so it draws whichever is
+        smaller of that and the slots that fit on its line before the upgrade
+        button beside it (ACTION_BAND_SLOTS); the rest of what it holds is
+        reached by paging (see action_row_window). An unlimited row therefore
+        draws its line full, which is what keeps it usable.
         """
-        return max(1, min(self.max_actions, SLOT_ROW_SLOTS - self.max_cards))
+        return max(1, min(self.max_actions, ACTION_BAND_SLOTS))
 
     def action_area_x(self):
-        """The action row's left edge: right-aligned with the shop panel's edge.
+        """The action row's left edge: its own line in the panel column.
 
-        The row is anchored to the panel's right edge (where MAX_ACTIONS slots
-        put it) and grows LEFTWARDS as Foresight widens it, so it never pushes
-        into the action-upgrade button beside it and the space it takes is the
-        space the card tray is not using.
+        The row is left-aligned with the card tray's line (both start at
+        ACTION_AREA_COORDS[0]) and grows RIGHTWARDS as Foresight widens it, so a
+        wider row never reaches back over the board and never has to move to
+        make room: the slots that would run into the action-upgrade button
+        beside it are shown by paging instead.
         """
-        return (ACTION_AREA_COORDS[0] + ACTION_AREA_COORDS[2]
-                - self.action_slots_shown() * GRID_SIZE)
+        return ACTION_AREA_COORDS[0]
 
     def action_slot_rect(self, index):
         """The screen rect of the action row's slot at ``index``."""
@@ -5055,8 +5135,8 @@ class Game:
 
         Returns ``(start, count, paging)``: the first ``count`` slots hold
         ``self.actions[start:start + count]``. When the player holds more actions
-        than the band can show, the LAST slot is a pager instead (so ``count``
-        is one fewer and ``paging`` is True), and clicking it turns
+        than the row's line can show, the LAST slot is a pager instead (so
+        ``count`` is one fewer and ``paging`` is True), and clicking it turns
         Game.action_area_page — which wraps, so however many actions are hoarded
         (see Action.SLOTS_UNLIMITED via Foresight v2) every one of them is
         reachable from the row.
@@ -5087,7 +5167,12 @@ class Game:
             f"{len(self.actions)}")
 
     def action_slot_room(self):
-        """How many MORE action slots the band could hold (0 when it is full)."""
+        """How many MORE action slots the pair could show (0 when it is full).
+
+        Measured against the pair's combined ceiling (SLOT_ROW_SLOTS) rather than
+        the row's own line, so an action that widens the row is refused once the
+        tray and the row together have taken the column (see _action_foresight).
+        """
         return max(0, SLOT_ROW_SLOTS - self.max_cards - self.max_actions)
 
     def _card_capacity_for(self, value):
@@ -5426,8 +5511,8 @@ class Game:
         INACTION_USES_PER_SLOT of them win the card area one more slot, for the
         rest of the game (saved). A v2 use HANDS THE SLOT OVER at once instead:
         the upgrade buys the fifth use, not a better nothing. Either way the use
-        that would complete a slot is REFUSED, and the action kept, when the
-        band of slots above the inventory has no room left for it (see
+        that would complete a slot is REFUSED, and the action kept, when the card
+        tray's line in the panel column has no room left for it (see
         Game.card_slot_room) — the same "refuse and keep it" rule Expansion and
         Cleansweep follow when there is nothing to do, so a use is never spent on
         a slot the panel cannot show.
@@ -5477,9 +5562,10 @@ class Game:
         Game.action_row_window) — the action area's slots are, from then on,
         effectively infinite.
 
-        A v1 is refused (and kept) when the band above the inventory is already
-        full, so a $90 action is never spent on a slot that could not be shown;
-        a v2 is refused only when the area is already unlimited.
+        A v1 is refused (and kept) when the pair of slots above the inventory is
+        already as wide as the panel allows, so a $90 action is never spent on a
+        slot that could not be shown; a v2 is refused only when the area is
+        already unlimited.
         """
         if action.version >= 2:
             if self.action_slots_unlimited:
@@ -9098,23 +9184,23 @@ class Game:
                     block, self._particle_amount_text(gained), BLUE)
             return True
         if block.scorer == Scorer.RANDOM:
-            # Random blocks grant one of three rewards: +35 chips, +5 mult, or
-            # +0.3 xMult. The reward is chosen BEFORE the run (see
-            # _roll_run_random_outputs), so every trigger of this block gives
-            # the same one and retrying the run replays it. The Rigged Casino
-            # card rigs the odds of that pre-roll (chips:mult:xMult = 1:3:9,
-            # instead of the even thirds).
+            # Random blocks grant one of three fixed rewards (their magnitudes
+            # are in components.MAGNITUDES). The reward is chosen BEFORE the run
+            # (see _roll_run_random_outputs), so every trigger of this block
+            # gives the same one and retrying the run replays it. The Rigged
+            # Casino card rigs the odds of that pre-roll (chips:mult:xMult =
+            # 1:3:9, instead of the even thirds).
             reward = self._run_random_result(block, Scorer.RANDOM)["reward"]
             if reward == 0:
-                self.score_chips += 35
+                self.score_chips += MAGNITUDES.RANDOM_CHIPS
                 self._spawn_block_particle(
-                    block, self._particle_amount_text(35), GREEN)
+                    block, self._particle_amount_text(MAGNITUDES.RANDOM_CHIPS), GREEN)
             elif reward == 1:
-                self.score_mult += 5
+                self.score_mult += MAGNITUDES.RANDOM_MULT
                 self._spawn_block_particle(
-                    block, self._particle_amount_text(5), BLUE)
+                    block, self._particle_amount_text(MAGNITUDES.RANDOM_MULT), BLUE)
             else:
-                factor = 1.3  # +0.3 xMult
+                factor = 1 + MAGNITUDES.RANDOM_XMULT
                 amount = self._apply_xmult(factor)
                 self._spawn_block_particle(
                     block, self._particle_amount_text(amount), RED)
@@ -9152,12 +9238,14 @@ class Game:
             # _roll_run_random_outputs), so a retry replays the same outcome.
             result = self._run_random_result(block, Scorer.LUCKY)
             if result["chips"]:
-                self.score_chips += 130
-                self._spawn_block_particle(block, self._particle_amount_text(130), GREEN)
+                self.score_chips += MAGNITUDES.LUCKY_CHIPS
+                self._spawn_block_particle(
+                    block,
+                    self._particle_amount_text(MAGNITUDES.LUCKY_CHIPS), GREEN)
             if result["cash"]:
-                self.cash += 40
-                self.run_cash_gained += 40
-                self._spawn_block_particle(block, "$40", YELLOW)
+                self.cash += MAGNITUDES.LUCKY_CASH
+                self.run_cash_gained += MAGNITUDES.LUCKY_CASH
+                self._spawn_block_particle(block, f"${MAGNITUDES.LUCKY_CASH}", YELLOW)
             return True
         if block.scorer == Scorer.ROOMY:
             # Roomy: +scorer_amount chips for each currently-unlocked board
@@ -9265,7 +9353,7 @@ class Game:
             return True
         if block.scorer == Scorer.GILDED:
             # Gilded: +1/6 of the current chips as mult.
-            gained = self.score_chips / 6.0
+            gained = self.score_chips / MAGNITUDES.GILDED_DIVISOR
             if gained > 0:
                 self.score_mult += gained
                 self._spawn_block_particle(

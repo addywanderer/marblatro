@@ -7,8 +7,9 @@ is described and priced:
   identified by an integer ID — the class constant itself (e.g.
   ``Shape.PIPE == 6``, ``Effect.ROTATE == 7``, ``Scorer.CHIPS_ADD == 1``).
 - Each component's display name (``*.NAMES``).
-- Each scorer's color (``Scorer.COLORS``) and default amount
-  (``Scorer.DEFAULT_AMOUNT``).
+- Each scorer's color (``Scorer.COLORS``).
+- Every effect, scorer and card magnitude, in one place: the ``MAGNITUDES``
+  section (which binds ``Effect.MAGNITUDE`` and ``Scorer.DEFAULT_AMOUNT``).
 - The one-line descriptions (``shape_description`` / ``effect_description`` /
   ``scorer_description``).
 - The ``Component`` purchase piece (kind, value/id, amount, price, name).
@@ -171,26 +172,16 @@ class Effect:
                                        SLIPPERY, FRAGILE, GROWING, SHRINKING, STICKY, REPULSOR,
                                        CONVEYOR, ZIPPER, PHASE, SPLITTER, GONDOLA]
     # The effects whose strength is a NUMBER: each block rolls its own value
-    # around the average below (see main.roll_magnitude). Magnitudes roll with
-    # the same 1/(x^2+1) distribution scorers use, one step at a time, where a
-    # step is 10% of the average — so a piston is usually 1500 px/s of launch,
-    # often 1350 or 1650, and once in a while a wild 900 or 2100.
+    # around the average in MAGNITUDES.EFFECTS (see the MAGNITUDES section
+    # below; that table is bound back onto this class as MAGNITUDE, so every
+    # Effect.MAGNITUDE read keeps working). Magnitudes roll with the same
+    # 1/(x^2+1) distribution scorers use, one step at a time, where a step is
+    # 10% of the average — so a piston is usually 1500 px/s of launch, often
+    # 1350 or 1650, and once in a while a wild 900 or 2100.
     #
     # On/off effects have no magnitude: Fragile, Portal, Slippery, Zipper,
     # Growing, Shrinking and Splitter either do their thing or don't, and
     # Gravity's strength is the world's gravity, not its own.
-    MAGNITUDE: ClassVar[dict[int, float]] = {
-        PISTON: 1500,       # px/s launch speed
-        ACCELERATOR: 20000,  # px/s^2 of push along its arrow
-        BLACK_HOLE: 3000,    # px/s^2 of pull at the edge of its range
-        REPULSOR: 3000,      # px/s^2 of push at the edge of its range
-        CONVEYOR: 300,       # px/s the belt carries a marble along at
-        ROTATE: 900,         # deg/s the shape spins at
-        BOUNCY: 100,         # % of the impact speed kept when bouncing
-        STICKY: 0.4,         # seconds the marble is held against it
-        PHASE: 1.0,          # seconds of phasing a touch grants
-        GONDOLA: 60,         # px/s the cable car slides along its lane
-    }
     # The unit each magnitude is spoken in (used by the descriptions).
     MAGNITUDE_UNIT: ClassVar[dict[int, str]] = {
         PISTON: "px/s", ACCELERATOR: "px/s^2", BLACK_HOLE: "px/s^2",
@@ -254,43 +245,10 @@ class Scorer:
     UNDERTAKER = 33  # +15 mult per block destroyed this run
     DEBT = 34  # +60 chips, but the run pays no interest afterwards
 
-    DEFAULT_AMOUNT: ClassVar[dict[int, float]] = {
-        NONE: 0,
-        CHIPS_ADD: 30,
-        MULT_ADD: 4,
-        MULT_MUL: 1.5,  # xMult now multiplies the multiplier by 1.5
-        START: 0,
-        FINISH: 0,
-        QUICK: 0,  # speed-based: chips scale with the marble's speed (QUICK_SCALE)
-        CASH: 15,  # $15 per trigger
-        SHARP: 3,  # 3x mult per trigger
-        PARTS: 1,  # 1 component per trigger
-        SHREDS: 1,  # banks a third of a shred point a trigger (RESOURCE_RATE)
-        RUBBLE: 1,  # banks half a rubble point a trigger
-        IDEAS: 1,  # banks half an idea point a trigger
-        RANDOM: 0,  # picks among fixed rewards; no single amount
-        EFFECTIVE: 2.0,  # multiplies the multiplier by 2 when it fires (+1 xMult)
-        FRESH: 1,  # 1 free reroll per trigger
-        PICKY: 1,  # banks half an option point a trigger
-        VOYAGER: 0.01,  # mult per PIXEL the marble traveled before the touch
-        SATANIC: 6.66,  # multiplies the multiplier by 6.66 when touched
-        SUMMIT: 0.75,  # +0.75 mult per row above the bottom row
-        AIRBALL: 8,  # +8 mult per second of air time before the touch
-        SEED: 3,  # +3 mult per Seed block on the board
-        DRILL: 2,  # two locked board squares unlocked after the run
-        LUCKY: 0,  # rolls fixed rewards (130 chips / $40); no single amount
-        ROOMY: 2,  # +2 chips per unlocked board unit
-        RALLY: 1,  # +1 mult per fresh touch before it
-        ECHO: 0,  # copies the previous block's scorer
-        POWERLINE: 25,  # +25 chips per block in its row
-        FRONTIER: 3,  # +3 mult per locked unit / board border orthogonally adjacent
-        GILDED: 0,  # 1/6 of current chips as mult
-        BOMB: 0,  # detonates after the run (unlock radius, then destroyed)
-        CLUSTER: 4,  # +4 mult per block orthogonally adjacent to it
-        COLOSSUS: 0.1,  # +0.1 xMult per px of radius above the base radius
-        UNDERTAKER: 15,  # +15 mult per block destroyed this run
-        DEBT: 60,  # 60 chips per trigger
-    }
+    # Each scorer's AVERAGE magnitude lives in MAGNITUDES.SCORERS (see the
+    # MAGNITUDES section below), which is bound back onto this class as
+    # DEFAULT_AMOUNT, so every Scorer.DEFAULT_AMOUNT read keeps working. An item
+    # rolls its own amount around that average (see main.roll_scorer_amount).
     NAMES: ClassVar[dict[int, str]] = {
         NONE: "None",
         CHIPS_ADD: "+Chips",
@@ -403,9 +361,9 @@ class Scorer:
     # banks whole components rather than points and Fresh grants its reroll
     # immediately; neither appears here.
     RESOURCE_RATE: ClassVar[dict[int, float]] = {
-        SHREDS: 1.0 / 3.0,
-        RUBBLE: 0.5,
-        IDEAS: 0.5,
+        SHREDS: 1,
+        RUBBLE: 1,
+        IDEAS: 1,
         PICKY: 0.5,
     }
 
@@ -1410,77 +1368,10 @@ class Card:
         SHOWMAN: Rarity.LEGENDARY, ESSENCE: Rarity.LEGENDARY,
         INFERNO: Rarity.LEGENDARY, INFINITY: Rarity.LEGENDARY,
     }
-    # --- The measured whole cards' effects: id -> (phase, scorer, ratio, measure) ---
-    # Each card fires ONCE per run (or once per fragile break) and pays a
-    # fixed amount: the canonical pairing it had as a named condition, at the
-    # magnitude model every card in the game used then. ``scorer`` and ``ratio``
-    # together give the payoff through components.magnitude_payoff(scorer, ratio,
-    # units) — the standard bases are +30 chips / +4 mult / +0.25 xMult per unit,
-    # scaled by the ratio — and ``measure`` names the per-run number the card
-    # scales by (see cards._named_card_units). A whole card has no scorer half to
-    # roll, so ``units`` is all that varies: the numbers below are the canonical
-    # ones, e.g. Joker 1 unit x ratio 1.0 = +4 mult, Plane ratio 0.5 = +15 chips
-    # an air second, Pillar ratio 0.25 = +1 mult a column block, Banker ratio
-    # 1/30 = +1 chip per $10, Ripped Card 4.0 = +120 chips, Cozy 3.0 = +90 chips,
-    # Painting 0.1 = +3 chips a dollar, Synthesizer 0.75 = +3 mult a card and
-    # Island 2.0 = +0.5 xMult a group (1 + 0.25 x 2 x groups).
-    #   phase   "start"  -> cards.apply_cards, at the start of every run
-    #           "end"    -> cards.apply_cards_on_finish, once the run is over
-    #           "fragile"-> cards.on_fragile_broken, each fragile break
-    NAMED: ClassVar[dict[int, tuple]] = {
-        JOKER: ("start", Scorer.MULT_ADD, 1.0, "start"),
-        EXPLORER: ("end", Scorer.MULT_MUL, 1.0, "visited_units"),
-        ASTRONAUT: ("end", Scorer.MULT_ADD, 1.0, "black_hole"),
-        PLANE: ("end", Scorer.CHIPS_ADD, 0.5, "air_time"),
-        PILLAR: ("start", Scorer.MULT_ADD, 0.25, "fullest_column"),
-        BANKER: ("start", Scorer.CHIPS_ADD, 1.0 / 30.0, "cash_held"),
-        WRECKING_BALL: ("fragile", Scorer.MULT_ADD, 0.75, "fragile_breaks"),
-        SKATER: ("end", Scorer.MULT_MUL, 0.8, "slippery"),
-        GLITCH: ("start", Scorer.MULT_ADD, 1.0, "random"),
-        RIPPED_CARD: ("start", Scorer.CHIPS_ADD, 4.0, "few_blocks"),
-        COZY: ("start", Scorer.CHIPS_ADD, 3.0, "cozy"),
-        PAINTING: ("start", Scorer.CHIPS_ADD, 0.1, "painting"),
-        SYNTHESIZER: ("start", Scorer.MULT_ADD, 0.75, "synthesizer"),
-        # Island is an xMult card, and xMult is a run-end calculation: it pays
-        # with the other end cards rather than at the start of the run.
-        ISLAND: ("end", Scorer.MULT_MUL, 2.0, "island"),
-        # The first card in this table that was never a named condition: it
-        # measures a run the same way the rest of them do, so it plays through
-        # the same start/end machinery. Its ratio is exactly 1.0, which is what
-        # makes one unit +0.25 xMult (see the standard bases above).
-        FOUNTAIN: ("end", Scorer.MULT_MUL, 1.0, "pipe_streak"),
-        # Intangible pays +0.5 mult an inside second, which is a ratio of 0.125
-        # (4 x 0.125 = 0.5, exactly as Plane's 0.5 is 15 chips and Banker's 1/30
-        # is 1 chip per $10). Its second clause pays 30x that rate, and the
-        # measure it reads is weighted to match: one second inside a locked
-        # board unit counts as 30 ordinary seconds, so the single ratio serves
-        # both (+0.5 mult a block second, +15 a locked-unit second — see
-        # cards._named_card_units). "Inside" is any overlap of the marble with a
-        # block's hitbox, so both clauses are positions only a phasing marble can
-        # be in (see Game._count_inside_time). It fires at the END of the run,
-        # because both measures are only final once the marbles have stopped.
-        INTANGIBLE: ("end", Scorer.MULT_ADD, 0.125, "inside_time"),
-        # Swashbuckler pays 1/5 of the cards' sell value as mult: 4 x (1/20) x
-        # dollars = a fifth of the dollars, and the mult stays fractional (only
-        # the chips base rounds). Stencil is the xMult shape of the same idea:
-        # 1 + 0.25 x 4.0 x slots = 1 + one xMult a slot, so five empty slots
-        # multiply the multiplier by 5.
-        SWASHBUCKLER: ("start", Scorer.MULT_ADD, 1.0 / 20.0, "card_sell_total"),
-        STENCIL: ("start", Scorer.MULT_MUL, 4.0, "stencil_slots"),
-        # Claustrophobia is the first measured card that counts the BOARD's own
-        # furniture rather than something the run did: 4 x 0.75 x walls = +3
-        # mult a plain wall, which is the ratio that makes one unit three
-        # quarters of a wheel instead of a whole one (see "plain_rects" in
-        # cards._named_card_units).
-        CLAUSTROPHOBIA: ("start", Scorer.MULT_ADD, 3.0 / 4.0, "plain_rects"),
-        # Matrix is the locked-unit clause of Intangible's measure on its own,
-        # paying chips instead of mult: the chips base is 30, so ratio 1.5 is
-        # the +45 chips a second the card asks for, and the measure counts only
-        # the seconds the marble was NOT phasing (see
-        # Game._count_locked_no_phase_time), because the phase effect is the
-        # one thing that makes being inside a locked unit trivial.
-        MATRIX: ("end", Scorer.CHIPS_ADD, 1.5, "inside_locked_no_phase"),
-    }
+    # The measured whole cards' effects (id -> phase, scorer, ratio, measure)
+    # live in the MAGNITUDES section below, where the ratio is the card's own
+    # magnitude: see MAGNITUDES.CARD_RATIOS and the Card.NAMED table bound
+    # there. Nothing about a card magnitude is written here.
 
     @classmethod
     def name(cls, card):
@@ -1544,6 +1435,217 @@ class Card:
         card's own odds (compare main.random_card_option_value).
         """
         return Rarity.weight(cls.rarity(card))
+
+
+# =============================================================================
+# MAGNITUDES: the one place every effect, scorer and card magnitude is set
+# =============================================================================
+# Every NUMBER an item rolls, pays or scales by is defined here and nowhere
+# else. A reference anywhere in the codebase reads one of these tables; nothing
+# re-types a magnitude. The price tables deliberately do NOT read them: a roll
+# changes what an item DOES, never what it costs (see scorer_component_price).
+#
+#   Effect.MAGNITUDE      <- MAGNITUDES.EFFECTS     (bound below)
+#   Scorer.DEFAULT_AMOUNT <- MAGNITUDES.SCORERS     (bound below)
+#   Card.NAMED            <- MAGNITUDES.CARD_RATIOS (used by the table below)
+class MAGNITUDES:
+    # --- Effect magnitudes ---------------------------------------------------
+    # The average each block rolls its own strength around (see
+    # main.roll_effect_magnitude). On/off effects have no entry: Fragile,
+    # Portal, Slippery, Zipper, Growing, Shrinking and Splitter either do their
+    # thing or don't, and Gravity's strength is the world's gravity, not its own.
+    EFFECTS: ClassVar[dict[int, float]] = {
+        Effect.PISTON: 1500,        # px/s launch speed
+        Effect.ACCELERATOR: 20000,  # px/s^2 of push along its arrow
+        Effect.BLACK_HOLE: 3000,    # px/s^2 of pull at the edge of its range
+        Effect.REPULSOR: 1500,      # px/s^2 of push at the edge of its range
+        Effect.CONVEYOR: 300,       # px/s the belt carries a marble along at
+        Effect.ROTATE: 900,         # deg/s the shape spins at
+        Effect.BOUNCY: 100,         # % of the impact speed kept when bouncing
+        Effect.STICKY: 0.4,         # seconds the marble is held against it
+        Effect.PHASE: 1.0,          # seconds of phasing a touch grants
+        Effect.GONDOLA: 100,         # px/s the cable car slides along its lane
+    }
+
+    # --- Scorer magnitudes ---------------------------------------------------
+    # The average each item rolls its own amount around (see
+    # main.roll_scorer_amount). A scorer that pays a FIXED reward rather than a
+    # rolled amount (Quick, Random, Lucky, Gilded, Glitch) has 0 here; its
+    # magnitude is the matching constant further down this class.
+    SCORERS: ClassVar[dict[int, float]] = {
+        Scorer.NONE: 0,
+        Scorer.CHIPS_ADD: 30,
+        Scorer.MULT_ADD: 4,
+        Scorer.MULT_MUL: 1.5,  # xMult multiplies the multiplier by this
+        Scorer.START: 0,
+        Scorer.FINISH: 0,
+        Scorer.QUICK: 0,  # speed-based: see QUICK_CHIPS_PER_SPEED
+        Scorer.CASH: 15,  # $15 per trigger
+        Scorer.SHARP: 2,  # 2x mult per trigger
+        Scorer.PARTS: 1,  # 1 component per trigger
+        Scorer.SHREDS: 1,  # banks a third of a shred point a trigger (RESOURCE_RATE)
+        Scorer.RUBBLE: 1,  # banks half a rubble point a trigger
+        Scorer.IDEAS: 1,  # banks half an idea point a trigger
+        Scorer.RANDOM: 0,  # picks among fixed rewards; no single amount
+        Scorer.EFFECTIVE: 2.5,  # multiplies the multiplier by 2 (+1 xMult)
+        Scorer.FRESH: 1,  # 1 free reroll per trigger
+        Scorer.PICKY: 0.5,  # banks half an option point a trigger
+        Scorer.VOYAGER: 0.01,  # mult per PIXEL the marble traveled before the touch
+        Scorer.SATANIC: 6.66,  # multiplies the multiplier by 6.66 when touched
+        Scorer.SUMMIT: 0.75,  # +0.75 mult per row above the bottom row
+        Scorer.AIRBALL: 8,  # +8 mult per second of air time before the touch
+        Scorer.SEED: 4,  # +4 mult per Seed block on the board
+        Scorer.DRILL: 2,  # two locked board squares unlocked after the run
+        Scorer.LUCKY: 0,  # rolls fixed rewards; no single amount
+        Scorer.ROOMY: 2,  # +2 chips per unlocked board unit
+        Scorer.RALLY: 1,  # +1 mult per fresh touch before it
+        Scorer.ECHO: 0,  # copies the previous block's scorer
+        Scorer.POWERLINE: 25,  # +25 chips per block in its row
+        Scorer.FRONTIER: 3,  # +3 mult per locked unit / border orthogonally adjacent
+        Scorer.GILDED: 0,  # 1/GILDED_DIVISOR of current chips as mult
+        Scorer.BOMB: 0,  # detonates after the run (unlock radius, then destroyed)
+        Scorer.CLUSTER: 3,  # +3 mult per block orthogonally adjacent to it
+        Scorer.COLOSSUS: 0.04,  # +0.1 xMult per px of radius above the base
+        Scorer.UNDERTAKER: 30,  # +30 mult per block destroyed this run
+        Scorer.DEBT: 60,  # 60 chips per trigger
+    }
+
+    # --- Card magnitudes -----------------------------------------------------
+    # The measured whole cards' per-unit ratio. Each card fires once per run (or
+    # once per fragile break) and pays a fixed amount, built by
+    # components.magnitude_payoff(scorer, ratio, units): the standard bases below
+    # (+30 chips / +4 mult / +0.25 xMult per unit) scaled by the ratio, times the
+    # per-run number ``measure`` names (see cards._named_card_units). A whole
+    # card has no scorer half to roll, so ``units`` is all that varies: Joker's
+    # ratio 1.0 is +4 mult, Plane's 0.5 is +15 chips an air second, Pillar's 0.25
+    # is +1 mult a column block, Banker's 1/30 is +1 chip per $10, Ripped Card's
+    # 4.0 is +120 chips, Cozy's 3.0 is +90 chips, Painting's 0.1 is +3 chips a
+    # dollar, Synthesizer's 0.75 is +3 mult a card and Island's 2.0 is +0.5 xMult
+    # a group (1 + 0.25 x 2 x groups). A match-group card has no ratio here: it
+    # pays one standard unit per matching collision and carries its scorer's
+    # rolled magnitude instead.
+    CARD_RATIOS: ClassVar[dict[int, float]] = {
+        Card.JOKER: 1.0,
+        Card.EXPLORER: 1.0,
+        Card.ASTRONAUT: 1.0,
+        Card.PLANE: 0.5,
+        Card.PILLAR: 0.25,
+        Card.BANKER: 1.0 / 30.0,
+        Card.WRECKING_BALL: 0.75,
+        Card.SKATER: 0.8,
+        Card.GLITCH: 1.0,
+        Card.RIPPED_CARD: 4.0,
+        Card.COZY: 3.0,
+        Card.PAINTING: 0.1,
+        Card.SYNTHESIZER: 0.75,
+        Card.ISLAND: 0.5,
+        Card.FOUNTAIN: 1.0,
+        Card.INTANGIBLE: 0.125,
+        Card.SWASHBUCKLER: 1.0 / 20.0,
+        Card.STENCIL: 4.0,
+        Card.CLAUSTROPHOBIA: 0.75,
+        Card.MATRIX: 1.5,
+    }
+
+    # --- Shared card payoff bases --------------------------------------------
+    # What one card unit is worth before a card's ratio scales it.
+    CHIPS_PER_UNIT = 30
+    MULT_PER_UNIT = 4
+    XMULT_PER_UNIT = 0.25
+
+    # --- Fixed scorer rewards ------------------------------------------------
+    # The scorers that pick among fixed payoffs rather than a rolled amount
+    # (their SCORERS entry is 0). Both the block version (main.py) and the card
+    # version (cards.py) of each read these.
+    QUICK_CHIPS_PER_SPEED = 0.05  # Quick: chips per px/s of the marble's speed
+    RANDOM_CHIPS = 35  # Random: one of +chips / +mult / +xMult
+    RANDOM_MULT = 5
+    RANDOM_XMULT = 0.3
+    LUCKY_CHIPS = 130  # Lucky: a 1/3 chance of this many chips ...
+    LUCKY_CASH = 40  # ... and a 1/9 chance of this much cash
+    GILDED_DIVISOR = 6  # Gilded: 1/6 of the current chips as mult
+    GLITCH_MAX_UNITS = 6.0  # Glitch: a random 0..this many units
+
+    # --- Fixed whole-card payoffs --------------------------------------------
+    # Cards whose payoff is one fixed number, read where their mechanic lives.
+    GATE_PASS_CHIPS = 30  # Gate: per pass through a lock whose key was collected
+    ESSENCE_RUN_CASH = 10  # Essence: at the end of every run
+    TESSERACT_REROLL_XMULT = 0.1  # Tesseract: permanent xMult per shop reroll
+    INFERNO_EXPONENT_BONUS = 0.07  # Inferno: added to the total-score exponent
+    ODYSSEY_CASH_FRACTION = 0.5  # Odyssey: fraction of a banked item's sell price
+
+
+# Bind the two average tables back onto the classes they describe, so every
+# existing Effect.MAGNITUDE / Scorer.DEFAULT_AMOUNT read comes from the single
+# section above.
+Effect.MAGNITUDE = MAGNITUDES.EFFECTS
+Scorer.DEFAULT_AMOUNT = MAGNITUDES.SCORERS
+
+
+# The measured whole cards' effects: id -> (phase, scorer, ratio, measure).
+#   phase   "start"  -> cards.apply_cards, at the start of every run
+#           "end"    -> cards.apply_cards_on_finish, once the run is over
+#           "fragile"-> cards.on_fragile_broken, each fragile break
+# The ratio is the card's own magnitude and comes from MAGNITUDES.CARD_RATIOS;
+# nothing here re-types it.
+Card.NAMED = {
+    Card.JOKER: ("start", Scorer.MULT_ADD,
+                 MAGNITUDES.CARD_RATIOS[Card.JOKER], "start"),
+    Card.EXPLORER: ("end", Scorer.MULT_MUL,
+                    MAGNITUDES.CARD_RATIOS[Card.EXPLORER], "visited_units"),
+    Card.ASTRONAUT: ("end", Scorer.MULT_ADD,
+                     MAGNITUDES.CARD_RATIOS[Card.ASTRONAUT], "black_hole"),
+    Card.PLANE: ("end", Scorer.CHIPS_ADD,
+                 MAGNITUDES.CARD_RATIOS[Card.PLANE], "air_time"),
+    Card.PILLAR: ("start", Scorer.MULT_ADD,
+                  MAGNITUDES.CARD_RATIOS[Card.PILLAR], "fullest_column"),
+    Card.BANKER: ("start", Scorer.CHIPS_ADD,
+                  MAGNITUDES.CARD_RATIOS[Card.BANKER], "cash_held"),
+    Card.WRECKING_BALL: ("fragile", Scorer.MULT_ADD,
+                         MAGNITUDES.CARD_RATIOS[Card.WRECKING_BALL],
+                         "fragile_breaks"),
+    Card.SKATER: ("end", Scorer.MULT_MUL,
+                  MAGNITUDES.CARD_RATIOS[Card.SKATER], "slippery"),
+    Card.GLITCH: ("start", Scorer.MULT_ADD,
+                  MAGNITUDES.CARD_RATIOS[Card.GLITCH], "random"),
+    Card.RIPPED_CARD: ("start", Scorer.CHIPS_ADD,
+                       MAGNITUDES.CARD_RATIOS[Card.RIPPED_CARD], "few_blocks"),
+    Card.COZY: ("start", Scorer.CHIPS_ADD,
+                MAGNITUDES.CARD_RATIOS[Card.COZY], "cozy"),
+    Card.PAINTING: ("start", Scorer.CHIPS_ADD,
+                    MAGNITUDES.CARD_RATIOS[Card.PAINTING], "painting"),
+    Card.SYNTHESIZER: ("start", Scorer.MULT_ADD,
+                       MAGNITUDES.CARD_RATIOS[Card.SYNTHESIZER], "synthesizer"),
+    # Island is an xMult card, and xMult is a run-end calculation: it pays with
+    # the other end cards rather than at the start of the run.
+    Card.ISLAND: ("end", Scorer.MULT_MUL,
+                  MAGNITUDES.CARD_RATIOS[Card.ISLAND], "island"),
+    # The first card here that was never a named condition: its ratio is exactly
+    # 1.0, which is what makes one unit +0.25 xMult.
+    Card.FOUNTAIN: ("end", Scorer.MULT_MUL,
+                    MAGNITUDES.CARD_RATIOS[Card.FOUNTAIN], "pipe_streak"),
+    # Intangible pays +0.5 mult an inside second (ratio 0.125 = 4 x 0.125), with
+    # a second clause 30x that rate, and the measure it reads is weighted to
+    # match: one second inside a locked unit counts as 30 ordinary seconds, so
+    # the single ratio serves both (see cards._named_card_units).
+    Card.INTANGIBLE: ("end", Scorer.MULT_ADD,
+                      MAGNITUDES.CARD_RATIOS[Card.INTANGIBLE], "inside_time"),
+    # Swashbuckler pays 1/5 of the cards' sell value as mult (4 x 1/20 x
+    # dollars).
+    Card.SWASHBUCKLER: ("start", Scorer.MULT_ADD,
+                        MAGNITUDES.CARD_RATIOS[Card.SWASHBUCKLER],
+                        "card_sell_total"),
+    Card.STENCIL: ("start", Scorer.MULT_MUL,
+                   MAGNITUDES.CARD_RATIOS[Card.STENCIL], "stencil_slots"),
+    Card.CLAUSTROPHOBIA: ("start", Scorer.MULT_ADD,
+                          MAGNITUDES.CARD_RATIOS[Card.CLAUSTROPHOBIA],
+                          "plain_rects"),
+    # Matrix is Intangible's locked-unit clause on its own, paying chips: ratio
+    # 1.5 x 30 = the +45 chips a second the card asks for, counting only the
+    # seconds the marble was NOT phasing (see Game._count_locked_no_phase_time).
+    Card.MATRIX: ("end", Scorer.CHIPS_ADD,
+                  MAGNITUDES.CARD_RATIOS[Card.MATRIX], "inside_locked_no_phase"),
+}
 
 
 # The named cards, in catalogue order — the list the tests and the collection
@@ -2386,7 +2488,9 @@ def scorer_description(scorer, amount=None):
         Scorer.IDEAS: f"Gives {points_text(resource_points_for(Scorer.IDEAS, amount))} "
                       f"idea point{_plural_points(resource_points_for(Scorer.IDEAS, amount))}"
                       f"{pdev}. 1 point converts into a random action",
-        Scorer.RANDOM: "When touched, gives +35 chips, +5 mult, or +0.3 xMult at random.",
+        Scorer.RANDOM: f"When touched, gives +{MAGNITUDES.RANDOM_CHIPS} chips, "
+                       f"+{MAGNITUDES.RANDOM_MULT:g} mult, or "
+                       f"+{MAGNITUDES.RANDOM_XMULT:g} xMult at random.",
         Scorer.EFFECTIVE: f"Gives +{amount - 1:g} xMult{dev} when touched if its block "
                           "has 2 or more effects",
         Scorer.FRESH: f"Gives {amount:g} free reroll{_plural(amount)}{dev} when touched",
@@ -2401,13 +2505,14 @@ def scorer_description(scorer, amount=None):
         Scorer.SEED: f"Gives +{amount:g} mult{dev} for each Seed block on the board when touched",
         Scorer.DRILL: f"When touched, drills out {amount:g} locked board square{_plural(amount)}"
                       f"{dev} next to unlocked ones — they unlock after the run",
-        Scorer.LUCKY: "When touched, has a 1/3 chance to give 130 chips and a 1/9 chance to give $40 (both can land).",
+        Scorer.LUCKY: f"When touched, has a 1/3 chance to give {MAGNITUDES.LUCKY_CHIPS} chips "
+                      f"and a 1/9 chance to give ${MAGNITUDES.LUCKY_CASH} (both can land).",
         Scorer.ROOMY: f"Gives +{amount:g} chips{dev} for each unlocked board unit when touched",
         Scorer.RALLY: f"Gives +{amount:g} mult{dev} for each fresh block touch this run before it — re-touches count, its own touch doesn't",
         Scorer.ECHO: "Re-fires the scoring effect of the block the marble touched right before it.",
         Scorer.POWERLINE: f"Gives +{amount:g} chips{dev} for each block in its row (including itself)",
         Scorer.FRONTIER: f"Gives +{amount:g} mult{dev} for each locked unit or board border adjacent to it (not diagonal)",
-        Scorer.GILDED: "Gives 1/6 of your current chips as mult when touched.",
+        Scorer.GILDED: f"Gives 1/{MAGNITUDES.GILDED_DIVISOR:g} of your current chips as mult when touched.",
         Scorer.BOMB: "When touched, unlocks every board unit within 1 cell (including diagonally) after a run, then destroys itself.",
         Scorer.CLUSTER: f"Gives +{amount:g} mult{dev} for each block adjacent to it (up/down/left/right, not diagonally)",
         Scorer.COLOSSUS: f"Gives +{amount:g} xMult{dev} for each pixel the marble's radius is above its "
@@ -3116,11 +3221,11 @@ def magnitude_payoff(scorer, ratio, units, scale=1.0):
     a composed card pays for the magnitude it carries.
     """
     if scorer == Scorer.CHIPS_ADD:
-        per_unit = int(30 * scale * ratio + 0.5)
+        per_unit = int(MAGNITUDES.CHIPS_PER_UNIT * scale * ratio + 0.5)
         return (round(per_unit * units), 0, 1.0)
     if scorer == Scorer.MULT_ADD:
-        return (0, 4 * scale * ratio * units, 1.0)
-    return (0, 0, 1 + 0.25 * scale * ratio * units)
+        return (0, MAGNITUDES.MULT_PER_UNIT * scale * ratio * units, 1.0)
+    return (0, 0, 1 + MAGNITUDES.XMULT_PER_UNIT * scale * ratio * units)
 
 
 def _format_amount(scorer, ratio, scale=1.0, dev=""):
@@ -3131,13 +3236,13 @@ def _format_amount(scorer, ratio, scale=1.0, dev=""):
     "(+2)" token that follows the magnitude.
     """
     if scorer == Scorer.CHIPS_ADD:
-        n = int(30 * scale * ratio + 0.5)
+        n = int(MAGNITUDES.CHIPS_PER_UNIT * scale * ratio + 0.5)
         return f"+{n} chips{dev}" if n != 1 else f"+1 chip{dev}"
     if scorer == Scorer.MULT_ADD:
-        n = 4 * scale * ratio
+        n = MAGNITUDES.MULT_PER_UNIT * scale * ratio
         s = f"{n:.3f}".rstrip("0").rstrip(".")
         return f"+{s} mult{dev}"
-    factor = 1 + 0.25 * scale * ratio
+    factor = 1 + MAGNITUDES.XMULT_PER_UNIT * scale * ratio
     s = f"{factor:.3f}".rstrip("0").rstrip(".")
     return f"x{s} mult{dev}"
 
@@ -3365,11 +3470,14 @@ for _cond in CONDITION_ORDER:
 # _generic_effect_phrase instead.
 _GENERIC_SCORER_EFFECT = {
     Scorer.QUICK: "chips from the speed of the next block hit",
-    Scorer.RANDOM: "+35 chips, +5 mult, or +0.3 xMult at random",
+    Scorer.RANDOM: f"+{MAGNITUDES.RANDOM_CHIPS} chips, "
+                   f"+{MAGNITUDES.RANDOM_MULT:g} mult, or "
+                   f"+{MAGNITUDES.RANDOM_XMULT:g} xMult at random",
     Scorer.ECHO: "another trigger of the same block's own scorer",
-    Scorer.GILDED: "1/6 of your current chips as mult",
+    Scorer.GILDED: f"1/{MAGNITUDES.GILDED_DIVISOR:g} of your current chips as mult",
     Scorer.BOMB: "a bomb on that block, unlocking the units around it after a run",
-    Scorer.LUCKY: "a 1/3 chance of 130 chips and a 1/9 chance of $40",
+    Scorer.LUCKY: f"a 1/3 chance of {MAGNITUDES.LUCKY_CHIPS} chips and a 1/9 "
+                  f"chance of ${MAGNITUDES.LUCKY_CASH}",
 }
 
 # ---------------------------------------------------------------------------
@@ -3721,7 +3829,7 @@ def _match_group_description(group, scorer, amount=None):
         return f"Gives {_format_amount(scorer, 1.0, scale, dev)} {trigger}"
     if scorer == Scorer.SUMMIT:
         # Summit measures the row the collided block sits on.
-        gain = amount or Scorer.DEFAULT_AMOUNT.get(Scorer.SUMMIT, 0.75)
+        gain = amount or Scorer.DEFAULT_AMOUNT.get(Scorer.SUMMIT, 0)
         return (f"Gives {gain:g} mult{dev} for each row above the bottom row "
                 f"that {COLLISION_REFERENCE} sits on, {trigger}")
     if scorer == Scorer.SATANIC:

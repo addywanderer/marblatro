@@ -180,6 +180,37 @@ class ToolboxTests(GameTestCase):
         self.assertNotIn((2, 3), self.game.grid)  # right-click erases
 
 
+    def test_right_click_erasing_the_selected_block_deselects_it(self):
+        # Picking a placed block up arms it for placement (a MOVE, see
+        # _select_placed_block). Erasing that block must drop the selection with
+        # it: _refund_block puts the block back in the toolbox, so leaving it
+        # armed would let the player place it again while the refunded copy
+        # still sits in the inventory — the same block twice.
+        block = main.Block(2, 3, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        self.game.grid[(2, 3)] = block
+        self.game.toolbox.items.clear()
+        self.game._select_placed_block(block)
+        self.assertTrue(self.game.has_selected)
+        self.assertIs(self.game.selected_toolbox_item, block)
+
+        event = mock.Mock()
+        event.type = main.pygame.MOUSEBUTTONDOWN
+        event.button = 3
+        with mock.patch("main.pygame.mouse.get_pos", return_value=self._grid_pos(2, 3)), \
+             mock.patch("main.pygame.event.get", return_value=[event]):
+            self.game.handle_events()
+
+        self.assertNotIn((2, 3), self.game.grid)
+        self.assertFalse(self.game.has_selected)
+        self.assertIsNone(self.game.selected_toolbox_item)
+        # It came back as exactly one inventory item, and with nothing armed it
+        # cannot be fielded a second time.
+        self.assertEqual(len(self.game.toolbox.items), 1)
+        self.assertFalse(self.game._place_block_at(4, 4))
+        self.assertNotIn((4, 4), self.game.grid)
+        self.assertEqual(len(self.game.toolbox.items), 1)
+
+
     def test_clicking_two_cards_swaps_their_order(self):
         # Select one card, then click another to swap their order in the card
         # area (Blueprint copies the card to its left, so order matters).
@@ -256,11 +287,18 @@ class ToolboxTests(GameTestCase):
     def test_toolbox_index_at_resolves_cell(self):
         self.game.toolbox.items.clear()
         filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE, main.Scorer.NONE, 0, 5, "f")
-        while len(self.game.toolbox.items) < 13:
-            self.game.toolbox.add(filler)
         box = self.game.toolbox
-        pos = (box.rect.x + 2 * main.GRID_SIZE + 5, box.rect.y + main.GRID_SIZE + 5)
-        self.assertEqual(box.index_at(pos), 12)  # col 2, row 1
+        # The cell to probe is the 13th one where the panel has that many (the
+        # one a box three columns wide wraps onto its second row for), and the
+        # last cell the panel HAS where it is smaller: a box that holds fewer
+        # than 13 items can never fill a 13th, so asking for one would fill the
+        # box and then loop for ever.
+        index = min(13, box.cols * box.rows) - 1
+        while len(box.items) < index + 1:
+            box.add(filler)
+        pos = (box.rect.x + (index % box.cols) * main.GRID_SIZE + 5,
+               box.rect.y + (index // box.cols) * main.GRID_SIZE + 5)
+        self.assertEqual(box.index_at(pos), index)
         self.assertIsNone(box.index_at((box.rect.x - 5, box.rect.y - 5)))
 
 

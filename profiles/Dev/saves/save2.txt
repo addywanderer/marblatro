@@ -5,6 +5,7 @@
   "round_index": 1,
   "run_in_round": 0,
   "required_score": 800,
+  "target_forced": false,
   "required_scores": [
     100,
     200,
@@ -23,7 +24,6 @@
     "trial": 11
   },
   "difficulty": 4,
-  "final_boss": null,
   "cards": [
     {
       "kind": "card",
@@ -345,6 +345,8 @@
       "random_rolls": null
     }
   ],
+  "open_pack": null,
+  "pending_pack_action": null,
   "shop_locked": [],
   "component_purchases": [
     [
@@ -390,6 +392,11 @@
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
+  "inaction_used": 0,
+  "card_slots_won": 0,
+  "action_slots_won": 0,
+  "action_slots_unlimited": false,
+  "inaccessible": [],
   "resource_gain_mult": 1.0,
   "resource_gain_bonus": 1.0,
   "reroll_discount": 1.0,

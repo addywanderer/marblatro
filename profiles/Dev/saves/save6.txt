@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "cash": 5797,
-  "run_number": 33,
+  "cash": 6205,
+  "run_number": 35,
   "round_index": 11,
-  "run_in_round": 0,
-  "required_score": 858993459200,
+  "run_in_round": 2,
+  "required_score": 3435973836800,
   "target_forced": false,
   "required_scores": [
     100,
@@ -40,7 +40,9 @@
     107374182400,
     214748364800,
     429496729600,
-    858993459200
+    858993459200,
+    1717986918400,
+    3435973836800
   ],
   "run_results": [
     true,
@@ -75,16 +77,37 @@
     false,
     false,
     false,
+    false,
+    false,
     false
   ],
   "runs_cleared": 1,
-  "failed_runs": 32,
-  "current_trial": 2,
-  "trial_decision": {
-    "trial": 2
-  },
+  "failed_runs": 34,
+  "current_trial": 5,
+  "trial_decision": null,
   "difficulty": 4,
-  "cards": [],
+  "cards": [
+    {
+      "kind": "card",
+      "value": 17,
+      "price": 46,
+      "amount": 0,
+      "col": 4,
+      "row": 3,
+      "name": "Stencil",
+      "random_rolls": null
+    },
+    {
+      "kind": "card",
+      "value": 89,
+      "price": 28,
+      "amount": 0,
+      "col": 5,
+      "row": 1,
+      "name": "Mineshaft",
+      "random_rolls": null
+    }
+  ],
   "actions": [
     {
       "kind": "action",
@@ -94,15 +117,6 @@
       "col": 5,
       "row": 3,
       "name": "Cleansweep"
-    },
-    {
-      "kind": "action",
-      "value": 8,
-      "price": 25,
-      "version": 1,
-      "col": 5,
-      "row": 3,
-      "name": "Brainstorm"
     },
     {
       "kind": "action",
@@ -139,73 +153,56 @@
       "col": 5,
       "row": 3,
       "name": "Expansion"
+    },
+    {
+      "kind": "action",
+      "value": 7,
+      "price": 25,
+      "version": 1,
+      "col": 0,
+      "row": 0,
+      "name": "Expansion"
     }
   ],
   "toolbox": [
     {
-      "kind": "block",
-      "placed": false,
-      "col": 7,
-      "row": 3,
-      "shape": 0,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 34,
-      "scorer_amount": 52.12,
-      "price": 22,
-      "name": "Rect Debt",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null
+      "kind": "shape",
+      "value": 20,
+      "amount": 0,
+      "price": 8,
+      "name": "Key",
+      "col": 0,
+      "row": 0
+    },
+    {
+      "kind": "scorer",
+      "value": 8,
+      "amount": 1.687,
+      "price": 24,
+      "name": "Sharp",
+      "col": 0,
+      "row": 0
     },
     {
       "kind": "block",
       "placed": false,
-      "col": 7,
-      "row": 3,
-      "shape": 0,
+      "col": 0,
+      "row": 0,
+      "shape": 11,
       "effects": [
-        0
+        4
       ],
       "effect_amounts": {},
-      "scorer": 34,
-      "scorer_amount": 52.12,
-      "price": 22,
-      "name": "Rect Debt",
+      "scorer": 12,
+      "scorer_amount": 1.117,
+      "price": 34,
+      "name": "Curved Slope Line Ideas",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null
-    },
-    {
-      "kind": "block",
-      "placed": false,
-      "col": 7,
-      "row": 3,
-      "shape": 0,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 34,
-      "scorer_amount": 52.12,
-      "price": 22,
-      "name": "Rect Debt",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
+      "angle": 0,
+      "triggers_left": 1,
       "random_rolls": null
     },
     {
@@ -229,30 +226,8 @@
       "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null
-    },
-    {
-      "kind": "block",
-      "placed": false,
-      "col": 0,
-      "row": 0,
-      "shape": 8,
-      "effects": [
-        0
-      ],
-      "effect_amounts": {},
-      "scorer": 12,
-      "scorer_amount": 1.323,
-      "price": 19,
-      "name": "Pipe Bend Ideas",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
+      "angle": 0,
+      "triggers_left": 1,
       "random_rolls": null
     },
     {
@@ -278,30 +253,8 @@
       "key_number": 0,
       "trigger_limit": 1,
       "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null
-    },
-    {
-      "kind": "block",
-      "placed": false,
-      "col": 0,
-      "row": 0,
-      "shape": 11,
-      "effects": [
-        4
-      ],
-      "effect_amounts": {},
-      "scorer": 12,
-      "scorer_amount": 1.117,
-      "price": 34,
-      "name": "Curved Slope Line Ideas",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
+      "angle": 0,
+      "triggers_left": 1,
       "random_rolls": null
     }
   ],
@@ -310,6 +263,416 @@
       "kind": "block",
       "placed": true,
       "x": 4,
+      "y": 10,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 25,
+      "scorer_amount": 0.835,
+      "angle": 180,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 18,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 3,
+      "y": 11,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 3,
+      "y": 12,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 12,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 11,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 6,
+      "y": 11,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 6,
+      "y": 12,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 12,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 13,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 13,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 6,
+      "y": 13,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 3,
+      "y": 13,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 11,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.0667,
+      "angle": 180,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 14,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 26,
+      "scorer_amount": 0.0,
+      "angle": 180,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 25,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 7,
+      "shape": 8,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 12,
+      "scorer_amount": 1.323,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 19,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 8,
+      "shape": 0,
+      "effects": [
+        12
+      ],
+      "effect_amounts": {
+        "12": 0.351
+      },
+      "scorer": 0,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 16,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 6,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "angle": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 53,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
       "y": 7,
       "shape": 0,
       "effects": [
@@ -333,16 +696,16 @@
     {
       "kind": "block",
       "placed": true,
-      "x": 4,
-      "y": 8,
+      "x": 5,
+      "y": 10,
       "shape": 0,
       "effects": [
         0
       ],
       "effect_amounts": {},
-      "scorer": 5,
-      "scorer_amount": 0.0,
-      "angle": 0,
+      "scorer": 25,
+      "scorer_amount": 0.835,
+      "angle": 180,
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -351,137 +714,118 @@
       "triggers_left": 1,
       "portal_uses_left": 0,
       "fragile_shape": null,
-      "resale_price": 53,
+      "resale_price": 18,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 5,
+      "y": 9,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 25,
+      "scorer_amount": 0.835,
+      "angle": 180,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 18,
+      "random_rolls": null
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 4,
+      "y": 9,
+      "shape": 8,
+      "effects": [
+        1
+      ],
+      "effect_amounts": {
+        "1": 104.1
+      },
+      "scorer": 26,
+      "scorer_amount": 0.0,
+      "angle": 180,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 55,
       "random_rolls": null
     }
   ],
   "shop": [
     {
-      "kind": "shape",
-      "value": 20,
-      "amount": 0,
-      "price": 8,
-      "name": "Key",
+      "kind": "action",
+      "value": 11,
+      "price": 24,
+      "version": 1,
       "col": 1,
-      "row": 1
+      "row": 1,
+      "name": "Inaction"
     },
     {
-      "kind": "shape",
-      "value": 17,
-      "amount": 0,
-      "price": 11,
-      "name": "Sawtooth",
+      "kind": "block",
+      "placed": false,
       "col": 2,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 7,
-      "amount": 1581.1,
-      "price": 16,
-      "name": "Rotate",
-      "col": 3,
-      "row": 1
-    },
-    {
-      "kind": "effect",
-      "value": 6,
-      "amount": 0,
-      "price": 31,
-      "name": "Portal",
-      "col": 4,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 9,
-      "amount": 0.863,
-      "price": 11,
-      "name": "Parts",
-      "col": 5,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 22,
-      "amount": 2.342,
-      "price": 24,
-      "name": "Drill",
-      "col": 6,
-      "row": 1
-    },
-    {
-      "kind": "scorer",
-      "value": 25,
-      "amount": 0.835,
-      "price": 24,
-      "name": "Rally",
-      "col": 7,
-      "row": 1
-    },
-    {
-      "kind": "card",
-      "value": 92,
-      "price": 21,
-      "amount": 0,
-      "col": 1,
-      "row": 3,
-      "name": "Painting",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 79,
+      "row": 1,
+      "shape": 16,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 8,
+      "scorer_amount": 2.443,
       "price": 23,
-      "amount": 0,
-      "col": 2,
-      "row": 3,
-      "name": "Cozy",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 90,
-      "price": 26,
-      "amount": 0,
-      "col": 3,
-      "row": 3,
-      "name": "Market",
-      "random_rolls": null
-    },
-    {
-      "kind": "card",
-      "value": 17,
-      "price": 46,
-      "amount": 0,
-      "col": 4,
-      "row": 3,
-      "name": "Stencil",
+      "name": "Peg Sharp",
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": null,
+      "triggers_left": null,
       "random_rolls": null
     },
     {
       "kind": "action",
-      "value": 2,
+      "value": 4,
       "price": 28,
       "version": 1,
-      "col": 6,
-      "row": 3,
-      "name": "Deja Vu"
+      "col": 3,
+      "row": 1,
+      "name": "Strength"
     },
     {
       "kind": "block",
       "placed": false,
-      "col": 7,
-      "row": 3,
-      "shape": 9,
+      "col": 4,
+      "row": 1,
+      "shape": 4,
       "effects": [
-        4
+        7,
+        15
       ],
-      "effect_amounts": {},
+      "effect_amounts": {
+        "7": 702.8
+      },
       "scorer": 0,
       "scorer_amount": 0.0,
-      "price": 25,
-      "name": "Convex Slope None",
+      "price": 39,
+      "name": "Circle None",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -491,28 +835,154 @@
       "random_rolls": null
     },
     {
-      "kind": "block",
-      "placed": false,
-      "col": 8,
+      "kind": "scorer",
+      "value": 29,
+      "amount": 0,
+      "price": 30,
+      "name": "Gilded",
+      "col": 5,
+      "row": 1
+    },
+    {
+      "kind": "pack",
+      "pack_type": 7,
+      "size": 3,
+      "keep": 2,
+      "kept": 0,
+      "price": 168,
+      "col": 1,
       "row": 3,
-      "shape": 0,
-      "effects": [
-        6
-      ],
-      "effect_amounts": {},
-      "scorer": 0,
-      "scorer_amount": 0.0,
-      "price": 32,
-      "name": "Rect None",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null
+      "name": "Mega Resource Pack",
+      "options": [
+        {
+          "kind": "resource",
+          "scorer": 11,
+          "amount": 1.774,
+          "points": 3.548,
+          "name": "3.548 rubble points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 12,
+          "amount": 0.768,
+          "points": 1.536,
+          "name": "1.536 idea points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 10,
+          "amount": 1.028,
+          "points": 2.056,
+          "name": "2.056 shred points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 16,
+          "amount": 0.6547,
+          "points": 0.6547,
+          "name": "0.655 option points"
+        },
+        {
+          "kind": "resource",
+          "scorer": 12,
+          "amount": 1.317,
+          "points": 2.634,
+          "name": "2.634 idea points"
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 0,
+      "size": 0,
+      "keep": 1,
+      "kept": 0,
+      "price": 9,
+      "col": 2,
+      "row": 3,
+      "name": "Normal Shape Pack",
+      "options": [
+        {
+          "kind": "shape",
+          "value": 2,
+          "amount": 0,
+          "price": 12,
+          "name": "Line",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 15,
+          "amount": 0,
+          "price": 9,
+          "name": "Corner",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 17,
+          "amount": 0,
+          "price": 11,
+          "name": "Sawtooth",
+          "col": 0,
+          "row": 0
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 0,
+      "size": 1,
+      "keep": 1,
+      "kept": 0,
+      "price": 13,
+      "col": 3,
+      "row": 3,
+      "name": "Big Shape Pack",
+      "options": [
+        {
+          "kind": "shape",
+          "value": 3,
+          "amount": 0,
+          "price": 10,
+          "name": "None",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 19,
+          "amount": 0,
+          "price": 9,
+          "name": "Bump",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 14,
+          "amount": 0,
+          "price": 8,
+          "name": "Platform",
+          "col": 0,
+          "row": 0
+        },
+        {
+          "kind": "shape",
+          "value": 12,
+          "amount": 0,
+          "price": 12,
+          "name": "Half Pipe",
+          "col": 0,
+          "row": 0
+        }
+      ]
     }
   ],
+  "open_pack": null,
+  "pending_pack_action": null,
   "shop_locked": [],
   "component_purchases": [
     [
@@ -524,6 +994,46 @@
       "scorer",
       34,
       3
+    ],
+    [
+      "scorer",
+      25,
+      3
+    ],
+    [
+      "scorer",
+      26,
+      1
+    ],
+    [
+      "scorer",
+      32,
+      12
+    ],
+    [
+      "effect",
+      11,
+      1
+    ],
+    [
+      "shape",
+      4,
+      1
+    ],
+    [
+      "shape",
+      20,
+      1
+    ],
+    [
+      "scorer",
+      8,
+      1
+    ],
+    [
+      "effect",
+      12,
+      1
     ]
   ],
   "wrecking_bonus": [
@@ -662,8 +1172,8 @@
     }
   ],
   "shred_points": 0,
-  "rubble_points": 0,
-  "idea_points": 0,
+  "rubble_points": 1.142,
+  "idea_points": 0.32299999999999995,
   "free_rerolls": 0,
   "option_points": 0,
   "bonus_slots": 0,
@@ -674,7 +1184,7 @@
   "inaccessible": [],
   "resource_gain_mult": 1.0,
   "resource_gain_bonus": 1.0,
-  "reroll_discount": 1.0,
+  "reroll_discount": 0.5,
   "run_xmult_bonus": 0.0,
   "marble_type": 2,
   "upgrades_enabled": true,
@@ -684,20 +1194,52 @@
   "continue_past_game_over": true,
   "score_chips": 63.41,
   "score_mult": 4,
-  "last_run_cash_gained": 0,
-  "last_run_cash_breakdown": {},
+  "last_run_cash_gained": 599,
+  "last_run_cash_breakdown": {
+    "base": 20,
+    "interest": 539,
+    "score": 0,
+    "cards": 0,
+    "scorers": 40,
+    "essence": 0,
+    "debt": false
+  },
   "unlocked_cells": [
     [
-      5,
-      8
+      6,
+      12
+    ],
+    [
+      4,
+      9
     ],
     [
       4,
       6
     ],
     [
+      4,
+      12
+    ],
+    [
       5,
       7
+    ],
+    [
+      5,
+      13
+    ],
+    [
+      3,
+      13
+    ],
+    [
+      5,
+      10
+    ],
+    [
+      6,
+      11
     ],
     [
       5,
@@ -712,8 +1254,52 @@
       14
     ],
     [
+      3,
+      12
+    ],
+    [
+      5,
+      9
+    ],
+    [
+      4,
+      11
+    ],
+    [
+      5,
+      12
+    ],
+    [
+      6,
+      13
+    ],
+    [
       4,
       7
+    ],
+    [
+      3,
+      11
+    ],
+    [
+      4,
+      10
+    ],
+    [
+      5,
+      11
+    ],
+    [
+      4,
+      13
+    ],
+    [
+      5,
+      8
+    ],
+    [
+      5,
+      14
     ]
   ],
   "board_units": 0

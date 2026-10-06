@@ -658,11 +658,20 @@ def _load_save_data(game, data, slot):
     game.shop.items = [_deserialize_item(d) for d in data.get("shop", [])]
     game.cards = [_deserialize_item(d) for d in data.get("cards", [])]
     game.actions = [_deserialize_item(d) for d in data.get("actions", [])]
+    # The shelf's CELLS belong to the layout rather than to the save: re-seat the
+    # offers the save hands back, so a save written under a different shelf — an
+    # older one, or one whose offers all sat in a single row — cannot bring
+    # offers back in cells this layout does not have, drawn over the cash header
+    # or past the panel's edge (see Shop.reseat).
+    reseated = game.shop.reseat()
     # The Hoard card's held shop offers come back with the shop: a save written
     # before the card existed holds nothing, and the holds are clipped once the
     # cards are back, so a hold can never outlive the Hoard that pays for it
-    # (see Game.shop_lock_cap).
-    game.shop.locked = [tuple(slot) for slot in data.get("shop_locked", [])]
+    # (see Game.shop_lock_cap). A hold follows the offer it holds to that offer's
+    # new cell, so the reroll it was pinned against still finds it.
+    held = [(int(slot[0]), int(slot[1]))
+            for slot in data.get("shop_locked", [])]
+    game.shop.locked = [reseated.get(cell, cell) for cell in held]
     game._clip_shop_locks()
     # A pack the player was choosing from comes back open, with the options it
     # had left, and the action an action pack armed comes back armed (both are

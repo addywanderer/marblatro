@@ -14,6 +14,7 @@ the rest of the code and the tests call them as before.
 import sys
 
 from components import (
+    MAGNITUDES,
     UNIT_CARD_SCORERS,
     magnitude_payoff,
     match_group_card_meta,
@@ -195,7 +196,7 @@ def _named_card_units(game, measure):
         # Glitch's 0..6 units come from the RUN's own RNG (see Game.run_rng),
         # so replaying the run pays the same amount instead of rerolling until
         # it lands high.
-        return game.run_rng.uniform(0, 6.0)
+        return game.run_rng.uniform(0, MAGNITUDES.GLITCH_MAX_UNITS)
     if measure == "fragile_breaks":
         return 1.0
     if measure == "few_blocks":
@@ -256,15 +257,15 @@ def _apply_named_card(game, card, value, fx=None, fy=None, units=None):
     # time, Astronaut's black-hole seconds, Explorer's visited units) keeps its
     # fractional payoff: nothing is rounded internally, only the particle text.
     if scorer == Scorer.CHIPS_ADD:
-        gained = int(30 * ratio + 0.5) * units
+        gained = int(MAGNITUDES.CHIPS_PER_UNIT * ratio + 0.5) * units
         text, color = game._particle_amount_text(gained), GREEN
         game.score_chips += gained
     elif scorer == Scorer.MULT_ADD:
-        gained = 4 * ratio * units
+        gained = MAGNITUDES.MULT_PER_UNIT * ratio * units
         text, color = game._particle_amount_text(gained), BLUE
         game.score_mult += gained
     else:  # Scorer.MULT_MUL
-        factor = 1 + 0.25 * ratio * units
+        factor = 1 + MAGNITUDES.XMULT_PER_UNIT * ratio * units
         text, color = game._particle_amount_text(factor), RED
         game._apply_xmult(factor)
     if fx is None:
@@ -477,7 +478,7 @@ def _apply_unit_card(game, card, value, scorer, fx, fy, units=None, amount=None)
     ratio = 1.0
     scale = scorer_magnitude_scale(scorer, amount)
     if scorer == Scorer.CHIPS_ADD:
-        per_unit = int(30 * scale * ratio + 0.5)
+        per_unit = int(MAGNITUDES.CHIPS_PER_UNIT * scale * ratio + 0.5)
         # The per-unit chip count is whole, but a fractional unit count (e.g.
         # air time) keeps its fractional chips: nothing is rounded internally.
         gained = per_unit * units
@@ -487,14 +488,14 @@ def _apply_unit_card(game, card, value, scorer, fx, fy, units=None, amount=None)
         text = game._particle_amount_text(gained)
         color = GREEN
     elif scorer == Scorer.MULT_ADD:
-        gained = 4 * scale * ratio * units
+        gained = MAGNITUDES.MULT_PER_UNIT * scale * ratio * units
         if not gained:
             return
         game.score_mult += gained
         text = game._particle_amount_text(gained)
         color = BLUE
     else:  # Scorer.MULT_MUL
-        factor = 1 + 0.25 * scale * ratio * units
+        factor = 1 + MAGNITUDES.XMULT_PER_UNIT * scale * ratio * units
         if factor == 1.0:
             return
         # Every xMult trigger multiplies, so a card that fires on several
@@ -570,13 +571,15 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         # replays it.
         reward = game._run_random_result(card, Scorer.RANDOM)["reward"]
         if reward == 0:
-            game.score_chips += 35
-            text, color = game._particle_amount_text(35), GREEN
+            game.score_chips += MAGNITUDES.RANDOM_CHIPS
+            text, color = game._particle_amount_text(
+                MAGNITUDES.RANDOM_CHIPS), GREEN
         elif reward == 1:
-            game.score_mult += 5
-            text, color = game._particle_amount_text(5), BLUE
+            game.score_mult += MAGNITUDES.RANDOM_MULT
+            text, color = game._particle_amount_text(
+                MAGNITUDES.RANDOM_MULT), BLUE
         else:
-            factor = 1.3  # +0.3 xMult
+            factor = 1 + MAGNITUDES.RANDOM_XMULT
             text, color = game._particle_amount_text(game._apply_xmult(factor)), RED
     elif scorer == Scorer.VOYAGER:
         # Voyager cards add their own rolled rate per pixel the run's marbles
@@ -636,7 +639,7 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         text, color = game._particle_amount_text(gained), BLUE
     elif scorer == Scorer.GILDED:
         # Gilded: 1/6 of the current chips as mult.
-        gained = game.score_chips / 6.0
+        gained = game.score_chips / MAGNITUDES.GILDED_DIVISOR
         if gained <= 0:
             return
         game.score_mult += gained
@@ -652,18 +655,20 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         # chosen before the run like a Lucky block's rolls.
         result = game._run_random_result(card, Scorer.LUCKY)
         if result["chips"]:
-            game.score_chips += 130
-            text, color = game._particle_amount_text(130), GREEN
+            game.score_chips += MAGNITUDES.LUCKY_CHIPS
+            text, color = game._particle_amount_text(
+                MAGNITUDES.LUCKY_CHIPS), GREEN
             if fx is None:
                 game._spawn_card_particle(card, text, color)
             else:
                 game._spawn_score_particle(fx, fy, text, color)
         if result["cash"]:
-            game.card_cash_run_gain += 40
+            game.card_cash_run_gain += MAGNITUDES.LUCKY_CASH
+            cash_text = f"${MAGNITUDES.LUCKY_CASH}"
             if fx is None:
-                game._spawn_card_particle(card, "$40", YELLOW)
+                game._spawn_card_particle(card, cash_text, YELLOW)
             else:
-                game._spawn_score_particle(fx, fy, "$40", YELLOW)
+                game._spawn_score_particle(fx, fy, cash_text, YELLOW)
         return
     else:
         return
@@ -826,7 +831,7 @@ def _fire_effective(game, card, block, fx=None, fy=None, amount=None):
     """
     if _real_effect_count(block) < 2:
         return
-    factor = amount or 2.0  # +1 xMult at the average
+    factor = amount or Scorer.DEFAULT_AMOUNT.get(Scorer.EFFECTIVE, 0)  # +1 xMult at the average
     text = game._particle_amount_text(game._apply_xmult(factor))
     color = RED
     if fx is None:
@@ -853,7 +858,8 @@ def _fire_summit(game, card, block, fx=None, fy=None, amount=None):
     block (a matching collision hit, a fragile break, the run's first block for
     a Start-condition card, or the run's last block for an End-condition card).
     """
-    gained = (amount or 0.75) * _summit_rows(block)
+    gained = (amount or Scorer.DEFAULT_AMOUNT.get(Scorer.SUMMIT, 0)) \
+        * _summit_rows(block)
     if gained <= 0:
         return
     game.score_mult += gained
@@ -875,7 +881,7 @@ def _fire_airball(game, card, air_streak, fx=None, fy=None, block=None, amount=N
     average). A 0-streak (the marble just touched something else) grants
     nothing and pops no particle.
     """
-    gained = (amount or Scorer.DEFAULT_AMOUNT.get(Scorer.AIRBALL, 8)) \
+    gained = (amount or Scorer.DEFAULT_AMOUNT.get(Scorer.AIRBALL, 0)) \
         * max(0.0, air_streak)
     if gained <= 0:
         return

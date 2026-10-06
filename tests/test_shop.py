@@ -1702,6 +1702,60 @@ class ShopTests(GameTestCase):
         self.assertFalse(hasattr(main.Component, "CONDITION"))
 
 
+    def test_reseating_a_shelf_seats_offers_and_packs_in_the_layouts_cells(self):
+        # The cells belong to the layout, not to the save: offers are seated in
+        # the "any item" row, packs in the pack row beside the Board Unit, and
+        # anything past those two rows fills the rows below them — so whatever a
+        # save hands back, every offer lands in a cell this shelf HAS (see
+        # Shop.reseat).
+        shop = self.game.shop
+        shop.items = ([main.Component.shape_component(main.Shape.PIPE)
+                       for _ in range(main.SHOP_ITEM_SLOTS + 2)]
+                      + [shop._roll_pack(main.Pack.SHAPE,
+                                         random.choice(main.Pack.SIZE_ORDER))
+                         for _ in range(main.SHOP_PACK_SLOTS + 1)])
+        shop.reseat()
+
+        offers = [i for i in shop.items if i.kind != "pack"]
+        packs = [i for i in shop.items if i.kind == "pack"]
+        bonus = shop._bonus_cells()
+        self.assertEqual([(i.col, i.row) for i in offers],
+                         [(1 + n, main.SHOP_ITEM_ROW)
+                          for n in range(main.SHOP_ITEM_SLOTS)] + bonus[:2])
+        self.assertEqual([(i.col, i.row) for i in packs],
+                         [(1 + n, main.SHOP_PACK_ROW)
+                          for n in range(main.SHOP_PACK_SLOTS)] + bonus[2:3])
+        for item in shop.items:
+            cell = pygame.Rect(shop.rect.x + item.col * main.GRID_SIZE,
+                               shop.rect.y + item.row * main.GRID_SIZE,
+                               main.GRID_SIZE, main.GRID_SIZE)
+            self.assertTrue(shop.rect.contains(cell), (item.col, item.row))
+            self.assertIs(shop.item_at(cell.center), item)
+
+
+    def test_a_shelf_with_more_offers_than_the_panel_can_hold_keeps_only_what_fits(self):
+        # An older save can hold more offers than this shelf has cells for, and
+        # Picky can bank more bonus slots than it has room for: the shelf keeps
+        # the ones it can draw and drops the rest, rather than keeping offers in
+        # cells outside the panel where nothing could see or click them.
+        shop = self.game.shop
+        shop.items = [main.CardItem(main.Card.GARDEN, 36)
+                      for _ in range(3 * shop.cols * shop.rows)]
+        shop.reseat()
+
+        self.assertEqual(len(shop.items),
+                         main.SHOP_ITEM_SLOTS + len(shop._bonus_cells()))
+        cells = [(i.col, i.row) for i in shop.items]
+        self.assertEqual(len(set(cells)), len(cells))
+        self.assertTrue(all(0 < col < shop.cols and 0 <= row < shop.rows
+                            for col, row in cells))
+        self.assertTrue(all(shop.item_at(
+            pygame.Rect(shop.rect.x + col * main.GRID_SIZE,
+                        shop.rect.y + row * main.GRID_SIZE,
+                        main.GRID_SIZE, main.GRID_SIZE).center) is item
+            for item, (col, row) in zip(shop.items, cells)))
+
+
     def test_shop_never_offers_the_free_default_parts(self):
         # The Rect shape, None effect, and None scorer are assembly defaults,
         # so they are never sold as loose components (blocks may still use
