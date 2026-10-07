@@ -594,6 +594,79 @@ class BlocksTests(GameTestCase):
         self.assertEqual(self.game.fire_intensity, 0.0)
 
 
+    def _finish_a_run_short_of_its_target(self, banked_xmult=0.0):
+        """Finish a run that is short of its target; return the score it had.
+
+        The run is short of its required score as it plays and only the xMult
+        BANKED during it (``banked_xmult``, the product the xMult cards and
+        tokens leave behind — Stencil's x5 lands there at the start of the run
+        and is applied when the run settles) can push it over. A scorer's xMult
+        needs no bank: it is already in the multiplier the run played with (see
+        Game._apply_xmult_now).
+        """
+        self.game.marbles = []
+        marble = self._add_marble()
+        marble.finished = True
+        self.game.run_active = True
+        self.game.run_complete = False
+        self.game.run_time = main.TIME_IDEAL
+        self.game.score_chips = 30
+        self.game.score_mult = 4
+        playing_total = self.game._compute_total_score()
+        self.game.required_score = int(playing_total) + 1
+        self.game.run_xmult_pending = 1.0 + banked_xmult
+        self.game.fire_intensity = 0.0
+        self.game._handle_block_contacts([])
+        return playing_total
+
+
+    def test_fire_lights_for_a_run_cleared_by_an_end_of_run_payoff(self):
+        # A run can beat its required score only when the xMult it banked lands
+        # as the run settles (Stencil's x5, an end-of-run card's measured
+        # factor, a multiplier token) — and that landing is the same moment the
+        # run stops being active, so no frame of the run itself could have lit
+        # the fire. The board still burns for the run the player just won.
+        playing_total = self._finish_a_run_short_of_its_target(banked_xmult=4.0)
+        self.assertLess(playing_total, self.game.required_score)
+        self.assertTrue(self.game.run_cleared)
+        self.assertGreater(self.game.score_total, self.game.required_score)
+        self.assertGreater(self.game.fire_intensity, 0.0)
+        # The run is over, so from here the fire only dies down.
+        self.assertEqual(self.game._fire_target(), 0.0)
+        for _ in range(180):
+            self.game._update_fire(main.DT)     # three seconds of decay
+        self.assertEqual(self.game.fire_intensity, 0.0)
+
+
+    def test_fire_stays_out_when_the_end_of_run_payoff_still_misses(self):
+        # The other half: a run the end-of-run payoffs cannot clear either
+        # lights nothing.
+        playing_total = self._finish_a_run_short_of_its_target(banked_xmult=0.0)
+        self.assertLess(playing_total, self.game.required_score)
+        self.assertFalse(self.game.run_cleared)
+        self.assertLess(self.game.score_total, self.game.required_score)
+        self.assertEqual(self.game.fire_intensity, 0.0)
+
+
+    def test_the_finish_path_never_lowers_a_burning_fire(self):
+        # A run that passed while playing is already burning when it finishes:
+        # the seed only ever raises the fire, so the finish path cannot take
+        # back a level the run earned on the board.
+        self.game.marbles = []
+        marble = self._add_marble()
+        marble.finished = True
+        self.game.run_active = True
+        self.game.run_complete = False
+        self.game.run_time = main.TIME_IDEAL
+        self.game.score_chips = 30
+        self.game.score_mult = 4
+        self.game.required_score = 1
+        self.game.fire_intensity = main.FIRE_MAX_INTENSITY
+        self.game._handle_block_contacts([])
+        self.assertTrue(self.game.run_cleared)
+        self.assertEqual(self.game.fire_intensity, main.FIRE_MAX_INTENSITY)
+
+
     def test_non_scoring_block_has_no_trigger_row(self):
         block = main.Block(2, 3, shape=main.Shape.RECT, scorer=main.Scorer.START)
         labels = [label for label, _ in self.game._describe_item(block)]
@@ -1227,38 +1300,39 @@ class BlocksTests(GameTestCase):
 
     def test_same_block_xmult_triggers_multiply(self):
         # A Sharp block (x3) with trigger limit 2 fires twice, and BOTH factors
-        # bank: an item's own triggers still compound into one product
-        # (3 x 3 = 9), which lands as the run settles (see Game._apply_xmult).
+        # land where they fire: a scorer pays its xMult on the touch (see
+        # Game._apply_xmult_now), so the second trigger still compounds into
+        # 3 x 3 = 9.
         self.game.score_mult = 1
         self.game.run_active = True
         block = main.Block(0, 0, scorer=main.Scorer.SHARP, trigger_limit=2)
+        factor = block.scorer_amount
         self.assertEqual(block.triggers_left, 2)
         for _ in range(2):
             self.game.marbles = []
             marble = self._add_marble()
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
+            self.assertEqual(self.game.run_xmult_pending, 1.0)   # never banked
         self.assertEqual(block.triggers_left, 0)
-        self.assertAlmostEqual(self.game.score_mult, 1)          # banked
-        self.assertAlmostEqual(self.game.run_xmult_pending, 9)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 9)
+        self.assertAlmostEqual(self.game.score_mult, factor ** 2)
 
 
     def test_different_blocks_xmult_apply_separately(self):
-        # Two different Sharp blocks each bank their own x3, so the product
-        # compounds across them (9) and lands in one go at the run's end.
+        # Two different Sharp blocks each pay their own factor where they are
+        # touched, so the multiplier compounds across them.
         self.game.score_mult = 1
         self.game.run_active = True
+        factor = None
         for _ in range(2):
             self.game.marbles = []
             block = main.Block(0, 0, scorer=main.Scorer.SHARP)
+            factor = block.scorer_amount
             marble = self._add_marble()
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
-        self.assertAlmostEqual(self.game.run_xmult_pending, 9)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 9)
+        self.assertAlmostEqual(self.game.score_mult, factor ** 2)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
@@ -1501,7 +1575,7 @@ class BlocksTests(GameTestCase):
 
 
     def test_upgrade_trigger_limit_only_for_blocks(self):
-        comp = next(i for i in self.game.shop.items if i.kind == main.Component.SHAPE)
+        comp = self._place_shop_offer(main.Component.SHAPE)
         self.game.selected_toolbox_item = comp
         self.game.cash = 1000
 
@@ -1637,10 +1711,10 @@ class BlocksTests(GameTestCase):
         placed = self.game.grid[(4, 5)]
         self.assertFalse(getattr(placed, "random_rolls", None))
         self.game.score_mult = 1
-        self._touch_block(placed, random_value=0.9)    # 0.9 -> +0.3 xMult
-        self.assertAlmostEqual(self.game.run_xmult_pending, 1.3)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 1.3)
+        self._touch_block(placed, random_value=0.9)    # 0.9 -> the xMult reward
+        self.assertAlmostEqual(self.game.score_mult,
+                               1 + main.MAGNITUDES.RANDOM_XMULT)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
 
 
     def test_a_carried_roll_does_not_survive_into_the_next_run(self):

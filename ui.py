@@ -66,7 +66,6 @@ SCREEN_HEIGHT = _ui_source.SCREEN_HEIGHT
 SCREEN_WIDTH = _ui_source.SCREEN_WIDTH
 SHOP_REFRESH_COST = _ui_source.SHOP_REFRESH_COST
 TOTAL_RUNS = _ui_source.TOTAL_RUNS
-TOKEN_COORDS = _ui_source.TOKEN_COORDS
 TRAIL_LIFE = _ui_source.TRAIL_LIFE
 TRAIL_RADIUS_SCALE = _ui_source.TRAIL_RADIUS_SCALE
 TRAIL_SPACING = _ui_source.TRAIL_SPACING
@@ -415,6 +414,25 @@ def draw_resource_option(screen, option, rect):
     screen.blit(label, label.get_rect(center=(rect.centerx, rect.top + 9)))
 
 
+def draw_pack_bundle(screen, pack_type, rect):
+    """Draw a pack's sealed bundle: the box, its band and the type's glyph.
+
+    What a pack LOOKS like before its contents are known — the type's colour
+    and letter, and no size at all (see draw_pack for the size pips and the option
+    count, and ui.draw_collection_icon for the codex entry, which is about the
+    TYPE rather than any one size). Returns the band rect, which is where the
+    size's pips go.
+    """
+    colour = Pack.color(pack_type)
+    screen.fill((38, 38, 44), rect)
+    pygame.draw.rect(screen, colour, rect, 3)
+    band = pygame.Rect(rect.x + 2, rect.centery - 3, rect.width - 4, 7)
+    screen.fill(colour, band)
+    glyph = font("tile").render(Pack.glyph(pack_type), True, WHITE)
+    screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.top + 11)))
+    return band
+
+
 def draw_pack(screen, pack, rect):
     """Draw a pack: a sealed bundle in its type's colour, in the cell's box.
 
@@ -424,19 +442,12 @@ def draw_pack(screen, pack, rect):
     (mid-choice) draws the same bundle, so the shop slot still reads as the
     pack it holds.
     """
-    colour = Pack.color(pack.pack_type)
-    screen.fill((38, 38, 44), rect)
-    pygame.draw.rect(screen, colour, rect, 3)
-    # The band across the bundle, with the size's pip on it.
-    band = pygame.Rect(rect.x + 2, rect.centery - 3, rect.width - 4, 7)
-    screen.fill(colour, band)
+    band = draw_pack_bundle(screen, pack.pack_type, rect)
     keep_big = pack.keep > 1
     pips = pack.keep
     for index in range(pips):
         cx = rect.centerx + (index - (pips - 1) / 2) * 9
         pygame.draw.circle(screen, (30, 30, 34), (int(cx), band.centery), 2)
-    glyph = font("tile").render(Pack.glyph(pack.pack_type), True, WHITE)
-    screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.top + 11)))
     size = font("tiny").render(
         f"{Pack.options(pack.size)}", True, (235, 235, 235) if not keep_big
         else (255, 215, 0))
@@ -2022,8 +2033,12 @@ def draw_card_back(screen, rect):
     Both trays use it — an action slot is the same slot as a card slot, so an
     empty slot looks the same wherever it is — and its corners are SQUARE: a
     slot is a cell of the tray panel (see draw_marble_box), not a card face.
+
+    The slot's own background is BLACK (the tray panels are black too, see
+    draw_cards / draw_action_area), so the empty slots read as black cells with
+    the back's border and dot pattern on them, matching the trays they sit in.
     """
-    pygame.draw.rect(screen, (70, 60, 100), rect)
+    pygame.draw.rect(screen, BLACK, rect)
     pygame.draw.rect(screen, (130, 120, 170), rect, 2)
     for gx in range(rect.left + 7, rect.right - 4, 8):
         for gy in range(rect.top + 7, rect.bottom - 4, 8):
@@ -3304,7 +3319,9 @@ def draw_fire(game):
     Flames rise from the top edge of the marble box, sized by the current fire
     intensity (which grows with how much the score beat the required score and
     dies down after the run). Each flame flickers so the fire dances, and the
-    marbles inside the box burn along with it (see draw_marble).
+    marbles inside the box burn along with it (see draw_marble). The flames are
+    kept inside the box's width, so a strong fire burns along its top edge
+    rather than over the sides.
     """
     if game.fire_intensity <= 0.01:
         return
@@ -3313,13 +3330,19 @@ def draw_fire(game):
     width = MARBLE_BOX_COORDS[2]
     now = pygame.time.get_ticks() / 1000.0
     scale = min(intensity, FIRE_VISUAL_CAP)
+    base = 8 + 10 * scale  # half a flame's base at this strength
     flames = 16
     for i in range(flames):
         cx = x0 + (i + 0.5) / flames * width + math.sin(now * 8 + i * 2.1) * 2
         flick = 0.7 + 0.3 * math.sin(now * 11 + i * 1.7)
         outer_h = (5 + 30 * scale) * flick
         inner_h = outer_h * 0.55
-        w = 8 + 10 * scale
+        # A strong fire's flames are as wide as they are tall, so the flames at
+        # the two ends are narrowed to the room they actually have: the fire
+        # hugs the box's top edge instead of burning over its left and right
+        # sides. The box's own pixels span x0 .. x0 + width - 1, so the base
+        # stops on the last of them.
+        w = max(0.0, min(base, cx - x0, x0 + width - 1 - cx))
         # Outer orange flame with a smaller yellow core (the fire's palette,
         # shared with the marbles' own fire — see FIRE_BODY_COLOR).
         pygame.draw.polygon(game.screen, FIRE_BODY_COLOR,
@@ -3472,17 +3495,25 @@ def draw_run_dots(game):
 
 
 def draw_toolbox(game):
-    """Draw the toolbox panel: its grid, title, and green selection borders."""
-    box = game.toolbox
-    draw_marble_box(game.screen, box.rect.x, box.rect.y, box.cols, box.rows,
-                    fill=panel_fill(game))
+    """Draw the inventory panel: its grid, title, and green selection borders.
 
-    # The inventory title sits at the bottom-left of the panel. It hides
-    # while the mouse is over the inventory so it never sits under the
-    # cursor while the player clicks items.
-    if game._show_toolbox_title():
-        title = game.font.render("INVENTORY", True, WHITE)
-        game.screen.blit(title, (box.rect.x + 8, box.rect.bottom - 26))
+    The panel is drawn large enough to hold everything the inventory carries:
+    the items, and the Spirit tokens in the cells right after them (see
+    Game._token_rect / Game.inventory_grid_rows) — so a token always reads as
+    part of the inventory rather than something sitting beside it.
+    """
+    box = game.toolbox
+    draw_marble_box(game.screen, box.rect.x, box.rect.y, box.cols,
+                    game.inventory_grid_rows(), fill=panel_fill(game))
+
+    # The inventory title sits left of the panel's TOP edge, the way the card
+    # and action areas label the rows above them (CARDS / ACTIONS), and it
+    # STAYS there while the mouse is over the inventory: the label is part of
+    # the panel's own furniture rather than a hint that has to get out of the
+    # cursor's way (only the board's title does that — see
+    # Game._show_marble_box_title).
+    title = game.small_font.render("INVENTORY", True, WHITE)
+    game.screen.blit(title, (box.rect.x + 8, box.rect.y - 14))
 
     # Green border cells: the currently selected item (block or component)
     # plus each assigned component. Index-based, so a duplicated component
@@ -3515,9 +3546,7 @@ def draw_toolbox(game):
                 pass
 
     for index, item in enumerate(box.items):
-        col = index % box.cols
-        row = index // box.cols
-        rect = pygame.Rect(box.rect.x + col * GRID_SIZE, box.rect.y + row * GRID_SIZE, GRID_SIZE, GRID_SIZE)
+        rect = box.cell_rect(index)
         draw_shop_item(game.screen, item, rect)
         if index in green_indexes:
             pygame.draw.rect(game.screen, GREEN, rect, 3)
@@ -3536,10 +3565,14 @@ def draw_cards(game):
     The card currently selected for selling gets a green outline. The area is
     one slot smaller while the Essence card is owned (see Game.max_cards), so
     the tray and the slots both follow the game's own size.
+
+    The tray's own background is BLACK (rather than the marble-box colour the
+    other panels use), and so are the empty slots' backs (see draw_card_back),
+    so nothing but the cards and the back design shows in the area.
     """
     x, y = CARD_AREA_COORDS[0], CARD_AREA_COORDS[1]
     slots = game.max_cards
-    draw_marble_box(game.screen, x, y, slots, 1)
+    draw_marble_box(game.screen, x, y, slots, 1, fill=BLACK)
     title = game.small_font.render("CARDS", True, WHITE)
     game.screen.blit(title, (x + 8, y - 14))
     for i in range(slots):
@@ -3600,23 +3633,18 @@ def _token_visual(token, rect):
 
 
 def draw_tokens(game):
-    """Draw the Spirit tokens in a column right of the inventory.
+    """Draw the Spirit tokens, in the inventory cells after the items.
 
-    One block per token (see ScorerToken) — the block the token kept, drawn as
-    it was on the board. Each fires once per run it covers, as if the marble had
-    collided with it: the payoffs that belong to the run's start fire then, and
-    an xMult block fires as the run settles. The column is a panel in the same
-    style as the other areas, and nothing is drawn when the player owns no
-    tokens.
+    A token is part of the inventory rather than an area of its own (see
+    Game._token_rect), so each is drawn in its own cell of the inventory grid,
+    which draw_toolbox has already drawn the panel for. One block per token
+    (see ScorerToken) — the block the token kept, drawn as it was on the
+    board. Each fires once per run it covers, as if the marble had collided
+    with it: the payoffs that belong to the run's start fire then, and a
+    multiplier block is held for the run's END instead (see ScorerToken).
     """
-    if not game.tokens:
-        return
-    x, y = TOKEN_COORDS[0], TOKEN_COORDS[1]
-    draw_marble_box(game.screen, x, y, 1, len(game.tokens))
     for i, token in enumerate(game.tokens):
         draw_token(game.screen, token, game._token_rect(i))
-    label = game.small_font.render("TOKENS", True, WHITE)
-    game.screen.blit(label, (x, y + len(game.tokens) * GRID_SIZE + 4))
 
 
 def draw_inaccessible(game):
@@ -3654,11 +3682,15 @@ def draw_action_area(game):
     button, see ACTION_BAND_SLOTS — the last slot is a PAGER instead of an
     action, which keeps a widened or unlimited action area usable (see
     Game.action_row_window).
+
+    The row's own background is BLACK, the same as the card tray's (see
+    draw_cards), so the two trays read as one black panel column behind their
+    cards and slot backs.
     """
     x, y = game.action_area_x(), ACTION_AREA_COORDS[1]
     slots = game.action_slots_shown()
     start, count, paging = game.action_row_window()
-    draw_marble_box(game.screen, x, y, slots, 1)
+    draw_marble_box(game.screen, x, y, slots, 1, fill=BLACK)
     title = game.small_font.render("ACTIONS", True, WHITE)
     game.screen.blit(title, (x + 8, y - 14))
     for i in range(slots):
@@ -3813,11 +3845,13 @@ def draw_shop(game):
     draw_marble_box(game.screen, shop.rect.x, shop.rect.y, shop.cols, shop.rows,
                     fill=panel_fill(game))
 
-    # The shop title sits at the bottom-left of the panel. It hides while the
-    # mouse is over the shop so it never sits under the cursor.
-    if game._show_shop_title():
-        title = game.font.render("SHOP", True, WHITE)
-        game.screen.blit(title, (shop.rect.x + 8, shop.rect.bottom - 26))
+    # The shop title sits at the bottom-left of the panel, and STAYS there
+    # while the mouse is over the shop: the label is part of the panel's own
+    # furniture rather than a hint that has to get out of the cursor's way
+    # (unlike the board's and the inventory's, whose panels are the ones the
+    # player picks things up from).
+    title = game.font.render("SHOP", True, WHITE)
+    game.screen.blit(title, (shop.rect.x + 8, shop.rect.bottom - 26))
 
     # Cash header along the shop's (empty) top row: the total cash sits at the
     # top-left and the most recent run's cash gain at the top-right (hovering
@@ -3872,7 +3906,7 @@ def draw_shop(game):
                         GRID_SIZE, GRID_SIZE)
     pygame.draw.rect(game.screen, (45, 95, 55), bcell)
     pygame.draw.rect(game.screen, WHITE, bcell, 2)
-    # A plus icon reads as "expand the board" (mini 2x3 grid hint).
+    # A plus icon reads as "expand the board" (mini 2x2 grid hint).
     pygame.draw.rect(game.screen, (255, 255, 255), (bcell.x + 9, bcell.y + 7, 22, 26), 1)
     pygame.draw.line(game.screen, (255, 255, 255), (bcell.centerx, bcell.y + 10),
                      (bcell.centerx, bcell.y + 30), 2)
@@ -3911,11 +3945,13 @@ def draw_sidebar(game):
 def info_layout(game, item, source):
     """Measure an item's info box content.
 
-    Returns (width, height, name_lines, desc_lines, hint). width/height are
-    the box's content size (before padding), based on the length of the item's
-    description: lines are word-wrapped at a maximum width and the box grows to
-    fit the widest line and the total number of lines. desc_lines are (text,
-    kind) pairs where kind is "label" or "body".
+    Returns (width, height, name_lines, desc_lines, hint_lines). width/height
+    are the box's content size (before padding), based on the length of the
+    item's description: lines are word-wrapped at a maximum width and the box
+    grows to fit the widest line and the total number of lines. desc_lines are
+    (text, kind) pairs where kind is "label" or "body"; hint_lines is the yellow
+    suggestion under them, wrapped the same way so a long hint runs onto the
+    next line instead of past the box's edge.
     """
     max_text_width = 240  # a line wider than this wraps onto the next
     name_lines = game._wrap_text(game._item_name(item), game.font, max_text_width)
@@ -3925,7 +3961,8 @@ def info_layout(game, item, source):
         desc_lines.append((label, "label"))
         desc_lines.extend((line, "body")
                           for line in game._wrap_text(text, game.small_font, max_text_width))
-    hint = game._action_hint(item, source)
+    hint_lines = game._wrap_text(game._action_hint(item, source),
+                                 game.small_font, max_text_width)
 
     width = max([game.font.size(line)[0] for line in name_lines] or [0])
     width = max(width, max([game.small_font.size(line)[0] for line, _ in desc_lines] or [0]))
@@ -3934,8 +3971,9 @@ def info_layout(game, item, source):
         total = game._total_price(item)
         if total is not None:
             width = max(width, game.small_font.size(f"TOTAL ${total}")[0])
-    if hint:
-        width = max(width, game.small_font.size(hint)[0])
+    if hint_lines:
+        width = max(width, max(game.small_font.size(line)[0]
+                               for line in hint_lines))
     width = min(width, max_text_width)
 
     height = len(name_lines) * 26
@@ -3946,9 +3984,8 @@ def info_layout(game, item, source):
         if game._total_price(item) is not None:
             height += 20
     height += len(desc_lines) * 17 + len(rows) * 6  # row text + gaps
-    if hint:
-        height += 17
-    return width + 12, height, name_lines, desc_lines, hint
+    height += len(hint_lines) * 17
+    return width + 12, height, name_lines, desc_lines, hint_lines
 
 
 def info_box_rect(game, item, source, mouse_pos):
@@ -3978,7 +4015,7 @@ def draw_item_info(game, item, source, mouse_pos):
     and outlined in black.
     """
     rect = info_box_rect(game, item, source, mouse_pos)
-    _, _, name_lines, desc_lines, hint = info_layout(game, item, source)
+    _, _, name_lines, desc_lines, hint_lines = info_layout(game, item, source)
     pygame.draw.rect(game.screen, panel_fill(game), rect)
     pygame.draw.rect(game.screen, BLACK, rect, 5)
     x = rect.x + 12
@@ -4017,9 +4054,13 @@ def draw_item_info(game, item, source, mouse_pos):
         _draw_description_line(game, line, color, x + indent, y)
         y += 17
 
-    if hint:
-        hint_surf = game.small_font.render(hint, True, YELLOW)
-        game.screen.blit(hint_surf, (x, y))
+    if hint_lines:
+        # Wrapped like the description above it, so a long hint (a right-click
+        # rule, a pack's remaining picks) reads on as many lines as it needs.
+        for line in hint_lines:
+            hint_surf = game.small_font.render(line, True, YELLOW)
+            game.screen.blit(hint_surf, (x, y))
+            y += 17
 
 
 def _deviation_color(word):
@@ -4166,7 +4207,8 @@ def draw_upgrades(game):
     game.screen.blit(text, text.get_rect(center=back.center))
 def draw_collection_icon(game, kind, value, rect):
     """Draw an entry's icon (a mini card, a shape outline, an effect icon, a
-    scorer tile, or a trial's or final boss's own tile) into the given rect."""
+    scorer tile, a pack bundle, or a trial's or final boss's own tile) into the
+    given rect."""
     if kind in _TILE_SOURCES:
         # A trial's or a final boss's icon is its tile: the same square the
         # screen is covered in while that modifier is in play (see _build_tile).
@@ -4175,6 +4217,12 @@ def draw_collection_icon(game, kind, value, rect):
         return
     if kind == "card":
         draw_card(game.screen, CardItem(value, 0), rect)
+        return
+    if kind == "pack":
+        # A pack's icon is its sealed bundle, in its type's colour with the
+        # type's glyph: the codex entry is about the TYPE, so no size is drawn
+        # (see draw_pack_bundle).
+        draw_pack_bundle(game.screen, value, rect)
         return
     if kind == "action":
         draw_action(game.screen, ActionItem(value, 0), rect)
@@ -4237,10 +4285,10 @@ COLLECTION_DESC_WIDTH = COLLECTION_CARD_W - 62
 
 
 def draw_collection(game):
-    """Draw the COLLECTION tab: every card, component, and trial the player can
-    encounter. Entries are revealed only once bought (cards and components) or
-    beaten (trials); the rest show \"???\" with a black question-mark icon.
-    Scrollable with the mouse wheel."""
+    """Draw the COLLECTION tab: every card, component, pack and trial the player
+    can encounter. Entries are revealed only once bought (cards, components and
+    packs) or beaten (trials); the rest show \"???\" with a black question-mark
+    icon. Scrollable with the mouse wheel."""
     game.screen.fill(BG_COLOR)
     entries = game._collection_entries()
     cols = 5
@@ -4313,7 +4361,7 @@ def draw_collection(game):
     heading = game.main_title_font.render("COLLECTION", True, (255, 215, 0))
     game.screen.blit(heading, heading.get_rect(center=(SCREEN_WIDTH // 2, 46)))
     hint = game.tiny_font.render(
-        "Buy a card/action/component or beat a run with a trial to reveal it  •  scroll to browse",
+        "Buy a card/action/component/pack or beat a run with a trial to reveal it  •  scroll to browse",
         True, (180, 180, 180))
     game.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 92)))
     back = COLLECTION_BACK_BUTTON_RECT
@@ -4350,7 +4398,7 @@ def profile_name_panel_rects():
     entry = pygame.Rect(box.left + 70, box.top + 86, box.width - 140, 46)
     cancel = pygame.Rect(box.right - 160, box.bottom - 52, 130, 38)
     delete = pygame.Rect(box.left + 22, box.bottom - 52, 150, 38)
-    unlock = pygame.Rect(box.left + 186, box.bottom - 52, 210, 38)
+    unlock = pygame.Rect(box.left + 181, box.bottom - 52, 210, 38)
     return box, entry, cancel, delete, unlock
 
 

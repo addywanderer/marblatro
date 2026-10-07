@@ -329,7 +329,7 @@ class ActionsTests(GameTestCase):
         return self.game._apply_action(), item
 
     def test_expansion_unlocks_four_squares(self):
-        # A brand-new game's board is the centered 2x3 region; the four squares
+        # A brand-new game's board is the centered 2x2 region; the four squares
         # come off the frontier next to it (see _grant_locked_units).
         self.game._reset_board_to_start()
         before = len(self.game.unlocked_cells)

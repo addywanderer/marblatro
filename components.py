@@ -16,8 +16,8 @@ is described and priced:
 - The fixed price table (``COMPONENT_PRICES``) and block pricing
   (``block_price_for``).
 
-Game logic (``Block``, ``Marble``, the shop, the toolbox, the assembler, etc.)
-lives in ``main.py`` and imports these names from here.
+Game logic (``Block``, ``Marble``, the shop, the toolbox, etc.) lives in
+``main.py`` and imports these names from here.
 """
 
 import math
@@ -225,7 +225,7 @@ class Scorer:
     RANDOM = 13  # random payoff: +35 chips, +5 mult, or +0.3 xMult
     EFFECTIVE = 14  # +1 xMult when the block has 2+ effects
     FRESH = 15  # 1 free shop reroll when touched
-    PICKY = 16  # 1 option point; every 2 add a random shop slot
+    PICKY = 16  # 1 unit: banks half an option point a trigger; 1 point = a shop slot
     VOYAGER = 17  # +0.01 mult per px the marble traveled before the touch (rolled)
     SATANIC = 18  # x6.66 mult; a block dies once a marble leaves, a card after a run
     SUMMIT = 19  # +0.75 mult per unit (row) above the bottom row it sits on
@@ -244,6 +244,7 @@ class Scorer:
     COLOSSUS = 32  # +0.1 xMult per px of marble radius above the base size
     UNDERTAKER = 33  # +15 mult per block destroyed this run
     DEBT = 34  # +60 chips, but the run pays no interest afterwards
+    PACKED = 35  # when touched, +2 inventory slots (permanent, saved)
 
     # Each scorer's AVERAGE magnitude lives in MAGNITUDES.SCORERS (see the
     # MAGNITUDES section below), which is bound back onto this class as
@@ -285,6 +286,7 @@ class Scorer:
         COLOSSUS: "Colossus",
         UNDERTAKER: "Undertaker",
         DEBT: "Debt",
+        PACKED: "Packed",
     }
     COLORS: ClassVar[dict[int, tuple]] = {
         # Every scorer's color is chosen to be clearly different from every
@@ -328,13 +330,14 @@ class Scorer:
         COLOSSUS: (75, 95, 60),  # moss stone (a growing mass)
         UNDERTAKER: (105, 90, 115),  # dusty violet grey (a grave)
         DEBT: (200, 30, 90),  # deep crimson (owed money)
+        PACKED: (30, 60, 140),  # navy (a strapped crate)
     }
     ORDER: ClassVar[list[int]] = [NONE, CHIPS_ADD, MULT_ADD, MULT_MUL, START, FINISH,
                                   QUICK, CASH, SHARP, PARTS, SHREDS, RUBBLE, IDEAS,
                                   RANDOM, EFFECTIVE, FRESH, PICKY, VOYAGER, SATANIC,
                                   SUMMIT, AIRBALL, SEED, DRILL, LUCKY, ROOMY,
                                   RALLY, ECHO, POWERLINE, FRONTIER, GILDED, BOMB,
-                                  CLUSTER, COLOSSUS, UNDERTAKER, DEBT]
+                                  CLUSTER, COLOSSUS, UNDERTAKER, DEBT, PACKED]
     # Scorers the shop can offer. START and FINISH are run roles, but they are
     # sold like anything else: the shop offers them as plain Rect blocks (see
     # main.role_block_parts / Shop._scorer_offer) rather than as scorer
@@ -346,7 +349,7 @@ class Scorer:
                                        RANDOM, EFFECTIVE, FRESH, PICKY, VOYAGER,
                                        SATANIC, SUMMIT, AIRBALL, SEED, DRILL, LUCKY, ROOMY,
                                        RALLY, ECHO, POWERLINE, FRONTIER, GILDED, BOMB, CLUSTER,
-                                       COLOSSUS, UNDERTAKER, DEBT]
+                                       COLOSSUS, UNDERTAKER, DEBT, PACKED]
     # The scorers whose magnitude is a MULTIPLIER of the score (xMult, Sharp,
     # Satanic, Effective). Their magnitude is never rolled below 1: a factor
     # under 1 would turn the block into a penalty instead of a weak payoff.
@@ -563,7 +566,8 @@ class Trial(TileArt):
                    "upgrades, and disassembly.",
         EMPTY_POCKETS: "The end-of-run cash award skips its score-based bonus "
                        "(the flat $20, interest, and Cash-card payouts stay).",
-        DEAL_BREAKER: "Blocks never score until you sell a card.",
+        DEAL_BREAKER: "Blocks never score until you sell a card — one sale is "
+                      "enough.",
         X_RAY: "You can't see the marble or its trail.",
         PHANTOM: "The marble starts phasing: it passes through every block for "
                  "the first second of the run.",
@@ -1350,7 +1354,7 @@ class Card:
         # is Brain Loop ($40), an action engine that needs sticky blocks.
         SWASHBUCKLER: Rarity.RARE, BRAIN_LOOP: Rarity.RARE,
         # Claustrophobia ($40) is the second Rare engine: it pays for walls,
-        # and a wall is the one thing the assembler builds for free. Odyssey
+        # and a wall is the one thing an assembled block is free to be. Odyssey
         # ($40) is Rare too: it is an income card that costs a card slot and
         # ties up an item for a run. Earthquake ($38) and Challenger ($28) are
         # utilities, so they sit in the tiers their prices put them in.
@@ -1489,7 +1493,7 @@ class MAGNITUDES:
         Scorer.RANDOM: 0,  # picks among fixed rewards; no single amount
         Scorer.EFFECTIVE: 2.5,  # multiplies the multiplier by 2 (+1 xMult)
         Scorer.FRESH: 1,  # 1 free reroll per trigger
-        Scorer.PICKY: 0.5,  # banks half an option point a trigger
+        Scorer.PICKY: 1,  # 1 unit; banks PICKY's half an option point a trigger
         Scorer.VOYAGER: 0.01,  # mult per PIXEL the marble traveled before the touch
         Scorer.SATANIC: 6.66,  # multiplies the multiplier by 6.66 when touched
         Scorer.SUMMIT: 0.75,  # +0.75 mult per row above the bottom row
@@ -1508,6 +1512,7 @@ class MAGNITUDES:
         Scorer.COLOSSUS: 0.04,  # +0.1 xMult per px of radius above the base
         Scorer.UNDERTAKER: 30,  # +30 mult per block destroyed this run
         Scorer.DEBT: 60,  # 60 chips per trigger
+        Scorer.PACKED: 2,  # 2 inventory slots per touch
     }
 
     # --- Card magnitudes -----------------------------------------------------
@@ -2127,6 +2132,23 @@ class Pack:
                                        ACTION, RESOURCE)
     PART_SOURCES: ClassVar[tuple] = (SHAPE, EFFECT, SCORER)
 
+    # How often a SHOP SHELF slot offers each kind of goods, as relative
+    # weights (they sum to 100, so each is also the percentage): a card offer
+    # 23% of the time, an action 15%, a shape 8%, an effect 12%, a scorer 22%
+    # and a ready-made block 20%. The slots are the shop's "any item" offers
+    # (see main.SHELF_OFFER_TYPES, which these weights are read through) and a
+    # Picky bonus slot draws the same way; what a pack HOLDS is not weighted by
+    # this (see RANDOM_SOURCES / PART_SOURCES). Resource points are not a shelf
+    # item — they are only ever dealt inside a pack — so they carry no weight.
+    SHELF_WEIGHTS: ClassVar[dict[int, float]] = {
+        CARD: 23,
+        ACTION: 15,
+        SHAPE: 8,
+        EFFECT: 12,
+        SCORER: 22,
+        BLOCK: 20,
+    }
+
     @classmethod
     def name(cls, pack_type):
         return cls.NAMES.get(pack_type, "Unknown Pack")
@@ -2161,6 +2183,11 @@ class Pack:
     @classmethod
     def glyph(cls, pack_type):
         return cls.GLYPHS.get(pack_type, "?")
+
+    @classmethod
+    def shelf_weight(cls, pack_type):
+        """How often a shelf slot offers this kind of goods (SHELF_WEIGHTS)."""
+        return cls.SHELF_WEIGHTS.get(pack_type, 0.0)
 
 
 # --- Magnitudes -------------------------------------------------------------
@@ -2505,6 +2532,8 @@ def scorer_description(scorer, amount=None):
         Scorer.SEED: f"Gives +{amount:g} mult{dev} for each Seed block on the board when touched",
         Scorer.DRILL: f"When touched, drills out {amount:g} locked board square{_plural(amount)}"
                       f"{dev} next to unlocked ones — they unlock after the run",
+        Scorer.PACKED: f"When touched, gives {amount:g} inventory slot{_plural(amount)}"
+                       f"{dev} to carry more items, for good",
         Scorer.LUCKY: f"When touched, has a 1/3 chance to give {MAGNITUDES.LUCKY_CHIPS} chips "
                       f"and a 1/9 chance to give ${MAGNITUDES.LUCKY_CASH} (both can land).",
         Scorer.ROOMY: f"Gives +{amount:g} chips{dev} for each unlocked board unit when touched",
@@ -2714,6 +2743,7 @@ COMPONENT_PRICES = {
     (Component.SCORER, Scorer.COLOSSUS): 26,
     (Component.SCORER, Scorer.UNDERTAKER): 26,
     (Component.SCORER, Scorer.DEBT): 24,
+    (Component.SCORER, Scorer.PACKED): 24,
     # COMMENTED OUT with the conditions: the condition component prices, which
     # were also the collision conditions' rarity axis. A match group is not a
     # component and is priced by match_group_price instead.
@@ -2943,6 +2973,11 @@ def pack_base_price(pack_type):
     return 0.0
 
 
+# What a pack of any type OTHER than a shape pack multiplies its price by: the
+# shape pack is the one type sold at what its options are worth (see pack_price).
+NON_SHAPE_PACK_PRICE_FACTOR = 0.5
+
+
 def pack_price(pack_type, size):
     """A pack's price: one option's value x the size's multiplier (see Pack).
 
@@ -2950,8 +2985,13 @@ def pack_price(pack_type, size):
     pack actually rolled: two jumbo shape packs cost the same however well or
     badly their five shapes landed, exactly as a component's own roll never
     changes its price (see scorer_component_price).
+
+    A SHAPE pack is the one type sold at par; every other pack goes for
+    NON_SHAPE_PACK_PRICE_FACTOR of what its options are worth.
     """
     base = pack_base_price(pack_type) * Pack.SIZE_PRICE_FACTORS.get(size, 1.0)
+    if pack_type != Pack.SHAPE:
+        base *= NON_SHAPE_PACK_PRICE_FACTOR
     return max(1, int(base))
 
 
@@ -3180,7 +3220,7 @@ NAMED_CONDITION_RATIO = {
     # Island is 2x the base, so its canonical xMult pairing multiplies by 1.5
     # per island — "+0.5 xMult for each unconnected group of unlocked board
     # units" (+Chips pays 60 a group, +Mult 8). The count is of GROUPS, not
-    # units, so it is the same 1 on the starter 2x3 board as on a board that
+    # units, so it is the same 1 on the starter 2x2 board as on a board that
     # has been unlocked into one big continent: what it rewards is a board left
     # broken into separate islands.
     Condition.ISLAND: 2.0,
@@ -3226,6 +3266,19 @@ def magnitude_payoff(scorer, ratio, units, scale=1.0):
     if scorer == Scorer.MULT_ADD:
         return (0, MAGNITUDES.MULT_PER_UNIT * scale * ratio * units, 1.0)
     return (0, 0, 1 + MAGNITUDES.XMULT_PER_UNIT * scale * ratio * units)
+
+
+def payoff_text(chips, mult, factor):
+    """A payoff tuple (see magnitude_payoff) as text: "+80 chips", "+12 mult",
+    "x5 mult" — or "nothing" when the measure came to nothing at all (a card
+    whose gate is shut pays no units, so it pays nothing)."""
+    if chips:
+        return f"+{chips:g} chip{_plural(chips)}"
+    if mult:
+        return f"+{mult:g} mult"
+    if factor == 1:
+        return "nothing"
+    return f"x{factor:g} mult"
 
 
 def _format_amount(scorer, ratio, scale=1.0, dev=""):
@@ -3362,6 +3415,9 @@ def _generic_effect_phrase(scorer, amount=None, dev="", block_phrase=None):
     if scorer == Scorer.DRILL:
         return (f"{amount:g} locked board square{_plural(amount)}{dev} unlocked "
                 "after the run")
+    if scorer == Scorer.PACKED:
+        return (f"{amount:g} inventory slot{_plural(amount)}{dev} when touched, "
+                "kept for good")
     if scorer == Scorer.UNDERTAKER:
         return f"{amount:g} mult{dev} for each block destroyed this run"
     if scorer == Scorer.DEBT:

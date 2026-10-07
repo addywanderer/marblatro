@@ -20,8 +20,10 @@ class CardRarityTests(GameTestCase):
 
     def test_every_card_has_a_rarity(self):
         cards = list(main.Card.ORDER) + components.match_group_card_values()
-        # 47 whole cards (the 20 measured ones among them) + 864 group cards.
-        self.assertEqual(len(cards), 911)
+        # Every whole card, plus one group card per (match group x scorer).
+        self.assertEqual(len(cards),
+                         len(main.Card.ORDER)
+                         + len(components.MATCH_GROUPS) * len(components.CARD_SCORERS))
         for value in cards:
             self.assertIn(value, main.Card.RARITIES, main.Card.name(value))
             self.assertIn(main.Card.rarity(value), components.Rarity.ORDER,

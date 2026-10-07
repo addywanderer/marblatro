@@ -1,10 +1,12 @@
-"""Collection codex: the cards, actions, components, and trials the player has seen.
+"""Collection codex: the cards, actions, components, packs and trials the player
+has seen.
 
-A card, action, or component is discovered the first time the player buys it;
-a trial is discovered the first time a run with it is beaten. Discoveries are
-persisted per profile in ``collection.json`` inside the active profile's folder
-(see ``profiles``), not per save slot. In the collection tab, undiscovered
-entries show "???" instead of their name/description/icon.
+A card, action, component or pack is discovered the first time the player buys
+it (a pack by its TYPE: its size is not a separate entry); a trial is discovered
+the first time a run with it is beaten. Discoveries are persisted per profile in
+``collection.json`` inside the active profile's folder (see ``profiles``), not
+per save slot. In the collection tab, undiscovered entries show "???" instead of
+their name/description/icon.
 """
 
 import json
@@ -27,7 +29,7 @@ ALWAYS_DISCOVERED_COMPONENTS = frozenset({
     (components.Component.SCORER, components.Scorer.FINISH),
 })
 
-_DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "match_groups": set, "trials": set}
+_DATA = None  # {"cards": set, "actions": set, "components": set of (kind, value), "match_groups": set, "packs": set, "trials": set}
 
 
 def _load():
@@ -36,7 +38,7 @@ def _load():
     if _DATA is not None:
         return
     _DATA = {"cards": set(), "actions": set(), "components": set(),
-             "match_groups": set(), "trials": set()}
+             "match_groups": set(), "packs": set(), "trials": set()}
     try:
         with open(FILE_PATH, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -44,6 +46,7 @@ def _load():
         _DATA["actions"] = set(data.get("actions", []))
         _DATA["components"] = {(k, v) for k, v in data.get("components", [])}
         _DATA["match_groups"] = set(data.get("match_groups", []))
+        _DATA["packs"] = set(data.get("packs", []))
         _DATA["trials"] = set(data.get("trials", []))
     except (OSError, ValueError):
         pass
@@ -58,6 +61,7 @@ def _save():
             "actions": sorted(_DATA["actions"]),
             "components": sorted([list(c) for c in _DATA["components"]]),
             "match_groups": sorted(_DATA["match_groups"]),
+            "packs": sorted(_DATA["packs"]),
             "trials": sorted(_DATA["trials"]),
         }, f)
 
@@ -126,6 +130,21 @@ def discover_match_group(index):
 #     return True
 
 
+def discover_pack(value):
+    """Record a bought pack TYPE (see components.Pack); returns True if new.
+
+    Only the type is recorded, never the size: the codex lists the kinds of pack
+    the shop can deal ("Card Pack"), and a big card pack and a giga card pack
+    reveal the same entry.
+    """
+    _load()
+    if value in _DATA["packs"]:
+        return False
+    _DATA["packs"].add(value)
+    _save()
+    return True
+
+
 def discover_trial(value):
     """Record a trial beaten in a cleared run; returns True if new."""
     _load()
@@ -162,6 +181,11 @@ def is_match_group_discovered(index):
 # def is_condition_discovered(value):
 #     _load()
 #     return value in _DATA["conditions"]
+
+
+def is_pack_discovered(value):
+    _load()
+    return value in _DATA["packs"]
 
 
 def is_trial_discovered(value):

@@ -8,7 +8,7 @@ from tests.game_test_case import *  # noqa: F401,F403
 
 
 class BoardTests(unittest.TestCase):
-    """The dynamic board: a new game starts with a centered 2x3 unlocked region,
+    """The dynamic board: a new game starts with a centered 2x2 unlocked region,
     locked squares are solid walls, and Board Units bought in the shop
     (BOARD_UNIT_PRICE) unlock any square. The unlocked state resets when a NEW
     game starts but
@@ -53,7 +53,7 @@ class BoardTests(unittest.TestCase):
             self.game.handle_events()
 
     def _start_locked_game(self):
-        """A brand-new game whose board is locked to the centered 2x3 region."""
+        """A brand-new game whose board is locked to the centered 2x2 region."""
         # Mirrors save_system.start_new_game_in_slot (no files are written).
         self.game.title_screen = False
         self.game.trials_enabled = False
@@ -63,12 +63,25 @@ class BoardTests(unittest.TestCase):
         return self.game
 
     def _start_region(self):
-        """The centered starting 2x3 region (BOARD_START_WIDTH x BOARD_START_HEIGHT)."""
+        """The centered starting region: BOARD_START_WIDTH x BOARD_START_HEIGHT."""
         x0 = (main.GRID_WIDTH - main.BOARD_START_WIDTH) // 2
         y0 = (main.GRID_HEIGHT - main.BOARD_START_HEIGHT) // 2
         return {(x0 + dx, y0 + dy)
                 for dx in range(main.BOARD_START_WIDTH)
                 for dy in range(main.BOARD_START_HEIGHT)}
+
+    def _start_cell(self):
+        """A square of the starting region — the top-left one.
+
+        The board's own size decides where the region sits, so a test that needs
+        a PLAYABLE square asks for one rather than naming a cell.
+        """
+        return ((main.GRID_WIDTH - main.BOARD_START_WIDTH) // 2,
+                (main.GRID_HEIGHT - main.BOARD_START_HEIGHT) // 2)
+
+    def _far_corner(self):
+        """The board's bottom-right square (always locked at the start)."""
+        return (main.GRID_WIDTH - 1, main.GRID_HEIGHT - 1)
 
     def _cell_center(self, gx, gy):
         return (main.MARBLE_BOX_COORDS[0] + gx * main.GRID_SIZE + main.GRID_SIZE // 2,
@@ -79,28 +92,41 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(len(g.unlocked_cells), main.GRID_WIDTH * main.GRID_HEIGHT)
         self.assertFalse(g.board_locked())
         self.assertFalse(g.is_cell_locked(0, 0))
-        self.assertFalse(g.is_cell_locked(9, 14))
+        self.assertFalse(g.is_cell_locked(*self._far_corner()))
 
-    def test_new_game_locks_board_to_centered_2x3(self):
+    def test_new_game_locks_board_to_centered_2x2(self):
         g = self._start_locked_game()
+        self.assertEqual(main.BOARD_START_WIDTH, 2)
+        self.assertEqual(main.BOARD_START_HEIGHT, 2)
         self.assertEqual(g.unlocked_cells, self._start_region())
         self.assertTrue(g.board_locked())
         self.assertEqual(g.board_units, 0)
-        # The 2x3 region is centered: cols 4-5, rows 6-8.
-        self.assertFalse(g.is_cell_locked(4, 6))
-        self.assertFalse(g.is_cell_locked(5, 8))
-        self.assertTrue(g.is_cell_locked(0, 0))
-        self.assertTrue(g.is_cell_locked(9, 14))
-        self.assertTrue(g.is_cell_locked(4, 5))  # just above the region
+        # Every square of the region is playable, and the squares all around it
+        # are still locked.
+        x0, y0 = self._start_cell()
+        for cell in self._start_region():
+            self.assertFalse(g.is_cell_locked(*cell))
+        self.assertTrue(g.is_cell_locked(x0 - 1, y0))
+        self.assertTrue(g.is_cell_locked(x0 + main.BOARD_START_WIDTH, y0))
+        self.assertTrue(g.is_cell_locked(x0, y0 - 1))
+        self.assertTrue(g.is_cell_locked(x0, y0 + main.BOARD_START_HEIGHT))
+        self.assertTrue(g.is_cell_locked(*self._far_corner()))
+        # It is centered: the locked margin above/below (and left/right) is the
+        # same, bar the odd square the board cannot split in two.
+        self.assertLessEqual(
+            abs(y0 - (main.GRID_HEIGHT - main.BOARD_START_HEIGHT - y0)), 1)
+        self.assertLessEqual(
+            abs(x0 - (main.GRID_WIDTH - main.BOARD_START_WIDTH - x0)), 1)
 
     def test_unlock_cell_works_on_any_square_and_rebuilds_walls(self):
         g = self._start_locked_game()
         # A far corner square is unlockable even though it is not adjacent.
-        self.assertTrue(g.is_cell_locked(9, 14))
-        self.assertTrue(g._unlock_cell(9, 14))
-        self.assertFalse(g.is_cell_locked(9, 14))
+        far = self._far_corner()
+        self.assertTrue(g.is_cell_locked(*far))
+        self.assertTrue(g._unlock_cell(*far))
+        self.assertFalse(g.is_cell_locked(*far))
         # Unlocking an already-unlocked square reports False.
-        self.assertFalse(g._unlock_cell(9, 14))
+        self.assertFalse(g._unlock_cell(*far))
         # The wall cache now covers every still-locked square (and none of the
         # unlocked ones).
         walls = g._board_wall_blocks()
@@ -150,7 +176,7 @@ class BoardTests(unittest.TestCase):
         g = self._start_locked_game()
         g.shop.refresh()
         # The top row is the shelf's "any item" slots: five of them, from the
-        # second column, each one offer of a uniformly chosen kind.
+        # second column, each one offer of a drawn kind (see Pack.SHELF_WEIGHTS).
         items = [i for i in g.shop.items if i.row == main.SHOP_ITEM_ROW]
         self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
         self.assertTrue(all(
@@ -205,17 +231,18 @@ class BoardTests(unittest.TestCase):
         self.assertNotIn((0, 0), g.grid)
         self.assertTrue(g.has_selected)
         # Clicking an unlocked square places it normally.
-        self._click(self._cell_center(4, 6))
-        self.assertIn((4, 6), g.grid)
-        self.assertEqual(g.grid[(4, 6)].shape, main.Shape.RECT)
+        cell = self._start_cell()
+        self._click(self._cell_center(*cell))
+        self.assertIn(cell, g.grid)
+        self.assertEqual(g.grid[cell].shape, main.Shape.RECT)
 
     def test_locked_board_resets_each_new_game(self):
         g = self._start_locked_game()
         g._unlock_cell(0, 0)
-        g._unlock_cell(9, 14)
+        g._unlock_cell(*self._far_corner())
         g.board_units = 3
-        self.assertEqual(len(g.unlocked_cells), 8)
-        # Starting a NEW game returns the board to the centered 2x3 (units and
+        self.assertEqual(len(g.unlocked_cells), len(self._start_region()) + 2)
+        # Starting a NEW game returns the board to the centered 2x2 (units and
         # expansions reset here; they only persist when the game is saved and
         # its slot loaded).
         save_system.start_new_game_in_slot(g, 1)
@@ -228,9 +255,10 @@ class BoardTests(unittest.TestCase):
         g.grid.clear()
         # A Start in the top row of the starting region; no Finish, so the
         # marble just falls and must come to rest on the locked floor.
-        g.grid[(4, 6)] = main.Block(4, 6, shape=main.Shape.RECT,
-                                    effect=main.Effect.NONE,
-                                    scorer=main.Scorer.START, scorer_amount=0)
+        cell = self._start_cell()
+        g.grid[cell] = main.Block(*cell, shape=main.Shape.RECT,
+                                  effect=main.Effect.NONE,
+                                  scorer=main.Scorer.START, scorer_amount=0)
         self.assertTrue(g.reset_run(False))
         self.assertTrue(g.run_active)
         # Simulate several seconds: after every resolved frame the marble's
@@ -245,20 +273,22 @@ class BoardTests(unittest.TestCase):
                 self.assertFalse(
                     g.is_cell_locked(gx, gy),
                     f"marble escaped into locked square ({gx}, {gy})")
-        # It should have come to rest well above the locked row 9 wall.
+        # It should have come to rest well above the wall under the region.
+        floor = cell[1] + main.BOARD_START_HEIGHT
         for marble in g.marbles:
             self.assertLess(
                 marble.position[1],
-                main.MARBLE_BOX_COORDS[1] + 9 * main.GRID_SIZE)
+                main.MARBLE_BOX_COORDS[1] + floor * main.GRID_SIZE)
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_cozy_magnitude_card_fires_3x_base_on_a_small_board(self):
         g = self._start_locked_game()
-        # The 2x3 start is 6 unlocked units (10 or fewer), so a Cozy +Mult card
+        # The 2x2 start is 4 unlocked units (10 or fewer), so a Cozy +Mult card
         # fires at the start of the run with its 3x base (+12 mult).
         value = main.condition_scorer_card(main.Condition.COZY, main.Scorer.MULT_ADD)
         g.cards.append(main.CardItem(value, 50))
-        g.grid[(4, 6)] = main.Block(4, 6, scorer=main.Scorer.START)
+        g.grid[self._start_cell()] = main.Block(*self._start_cell(),
+                                                scorer=main.Scorer.START)
         self.assertTrue(g.reset_run(False))
         self.assertAlmostEqual(g.score_mult, 1 + 12)  # 3x the +4 mult base
 
@@ -267,7 +297,8 @@ class BoardTests(unittest.TestCase):
         g = self._start_locked_game()
         value = main.condition_scorer_card(main.Condition.COZY, main.Scorer.MULT_ADD)
         g.cards.append(main.CardItem(value, 50))
-        g.grid[(4, 6)] = main.Block(4, 6, scorer=main.Scorer.START)
+        g.grid[self._start_cell()] = main.Block(*self._start_cell(),
+                                                scorer=main.Scorer.START)
         # Expand the board past 10 unlocked units; Cozy no longer fires.
         for x, y in ((0, 0), (0, 1), (0, 2), (0, 3), (0, 4)):
             g._unlock_cell(x, y)
@@ -278,7 +309,7 @@ class BoardTests(unittest.TestCase):
     def test_locked_adjacent_cells_are_the_reachable_frontier(self):
         g = self._start_locked_game()
         frontier = g._locked_adjacent_cells()
-        self.assertTrue(frontier)  # the 2x3 region has locked neighbors
+        self.assertTrue(frontier)  # the 2x2 region has locked neighbors
         for x, y in frontier:
             self.assertTrue(g.is_cell_locked(x, y))
             # Each candidate shares an edge with an unlocked square.
@@ -309,7 +340,7 @@ class BoardTests(unittest.TestCase):
         # run; the Conquistador card adds 4 more after each run. (Board stays
         # locked, so the grants expand the frontier.)
         g = self._start_locked_game()
-        before = len(g.unlocked_cells)  # the 6-cell 2x3 start
+        before = len(g.unlocked_cells)  # the 4-cell 2x2 start
         g.drill_run_units = 2
         g.cards.append(main.CardItem(main.Card.CONQUISTADOR, 56))
         g.run_complete = True
@@ -451,14 +482,23 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.shop_message,
                          "Board expanded 4 squares (4 from Conquistador)")
 
-        # The bomb's radius around (5, 7) opens its three locked neighbours.
+        # The bomb's blast (Chebyshev radius 1, so diagonals count) opens the
+        # locked squares around it — however many of the eight are still
+        # locked.
         g = self._start_locked_game()
-        bomb = (5, 7)
+        bomb = self._start_cell()
         g.bomb_cells = {bomb}
         g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
+        blasted = sum(
+            1 for dx in (-1, 0, 1) for dy in (-1, 0, 1)
+            if (dx or dy)
+            and 0 <= bomb[0] + dx < main.GRID_WIDTH
+            and 0 <= bomb[1] + dy < main.GRID_HEIGHT
+            and g.is_cell_locked(bomb[0] + dx, bomb[1] + dy))
         run_end(g)
         self.assertEqual(g.shop_message,
-                         "Board expanded 3 squares (3 from the bomb blast)")
+                         f"Board expanded {blasted} squares "
+                         f"({blasted} from the bomb blast)")
 
         # Both at once: the counts are listed side by side.
         g = self._start_locked_game()
@@ -468,7 +508,8 @@ class BoardTests(unittest.TestCase):
         run_end(g)
         self.assertEqual(
             g.shop_message,
-            "Board expanded 5 squares (3 from the bomb blast, 2 from the drill)")
+            f"Board expanded {blasted + 2} squares "
+            f"({blasted} from the bomb blast, 2 from the drill)")
 
         # Nothing unlocked by the run end leaves the message alone, and one
         # square still reads in the singular.
@@ -489,14 +530,16 @@ class BoardTests(unittest.TestCase):
         # With no trial there is no tile colour to match: locked square (0,0)
         # falls back to the void, exactly as it always has.
         self.assertEqual(g.screen.get_at(self._cell_center(0, 0))[:3], main.BG_COLOR)
-        # Unlocked square (4,7) keeps the normal board fill.
-        self.assertEqual(g.screen.get_at(self._cell_center(4, 7))[:3],
+        # An unlocked square of the start region keeps the normal board fill.
+        cell = self._start_cell()
+        self.assertEqual(g.screen.get_at(self._cell_center(*cell))[:3],
                          main.MARBLE_BOX_COLOR)
         # The grid overlay stays across locked squares so the player can see
-        # the unit boundaries: the vertical line between locked col 3 and
-        # unlocked col 4 is the thin grid-line color.
-        line_x = main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE
-        self.assertEqual(g.screen.get_at((line_x, self._cell_center(4, 7)[1]))[:3],
+        # the unit boundaries: the vertical line between the locked column left
+        # of the region and the region itself is the thin grid-line color.
+        line_x = main.MARBLE_BOX_COORDS[0] + cell[0] * main.GRID_SIZE
+        self.assertEqual(g.screen.get_at((line_x,
+                                          self._cell_center(*cell)[1]))[:3],
                          (30, 30, 30))
 
     def test_locked_squares_take_the_trials_colour_a_step_darker(self):
@@ -509,6 +552,7 @@ class BoardTests(unittest.TestCase):
         # why the locked shade is derived from the panel and not from the tile).
         g = self._start_locked_game()
         g.trials_enabled = True
+        cell = self._start_cell()
         for trial in main.Trial.ORDER:
             g.current_trial = trial
             panel = components.Trial.panel_color(trial)
@@ -519,8 +563,8 @@ class BoardTests(unittest.TestCase):
             main.ui.draw_board(g)
             self.assertEqual(g.screen.get_at(self._cell_center(0, 0))[:3], locked,
                              trial)
-            self.assertEqual(g.screen.get_at(self._cell_center(4, 7))[:3], panel,
-                             trial)
+            self.assertEqual(
+                g.screen.get_at(self._cell_center(*cell))[:3], panel, trial)
 
     def test_draw_board_borders_the_playable_region_thickly(self):
         # Every side of an unlocked square that faces a LOCKED one gets the
@@ -584,8 +628,9 @@ class BoardTests(unittest.TestCase):
         # outside the start region's top-left corner is border.
         g = self._start_locked_game()
         main.ui.draw_board(g)
-        left = main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE
-        top = main.MARBLE_BOX_COORDS[1] + 6 * main.GRID_SIZE
+        cell_x, cell_y = self._start_cell()
+        left = main.MARBLE_BOX_COORDS[0] + cell_x * main.GRID_SIZE
+        top = main.MARBLE_BOX_COORDS[1] + cell_y * main.GRID_SIZE
         for dx in range(1, main.BORD_WIDTH + 1):
             for dy in range(1, main.BORD_WIDTH + 1):
                 self.assertEqual(g.screen.get_at((left - dx, top - dy))[:3],
@@ -600,12 +645,14 @@ class BoardTests(unittest.TestCase):
         g = self._start_locked_game()
         finish = main.Scorer.color(main.Scorer.FINISH)
         main.ui.draw_board(g, finish)
-        x0, y0 = main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1]
-        self.assertEqual(g.screen.get_at((x0 + 20, y0 - main.BORD_WIDTH // 2))[:3],
-                         finish)
-        left = x0 + 4 * main.GRID_SIZE
-        right = x0 + 6 * main.GRID_SIZE
-        cy = y0 + 6 * main.GRID_SIZE + 20
+        box_x, box_y = main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1]
+        self.assertEqual(
+            g.screen.get_at((box_x + 20, box_y - main.BORD_WIDTH // 2))[:3],
+            finish)
+        cell_x, cell_y = self._start_cell()
+        left = box_x + cell_x * main.GRID_SIZE
+        right = left + main.BOARD_START_WIDTH * main.GRID_SIZE
+        cy = box_y + cell_y * main.GRID_SIZE + 20
         self.assertEqual(g.screen.get_at((left - 1, cy))[:3], (30, 30, 30))
         self.assertEqual(g.screen.get_at((right + 1, cy))[:3], (30, 30, 30))
         self.assertEqual(g.screen.get_at((left + 1, cy))[:3],
@@ -616,6 +663,6 @@ class BoardTests(unittest.TestCase):
         main.ui.draw_board(g)
         self.assertEqual(g.screen.get_at(self._cell_center(0, 0))[:3],
                          main.MARBLE_BOX_COLOR)
-        self.assertEqual(g.screen.get_at(self._cell_center(9, 14))[:3],
-                         main.MARBLE_BOX_COLOR)
+        far = self._cell_center(*self._far_corner())
+        self.assertEqual(g.screen.get_at(far)[:3], main.MARBLE_BOX_COLOR)
         self.assertFalse(g.board_locked())

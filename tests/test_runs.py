@@ -674,22 +674,23 @@ class RunsTests(GameTestCase):
         self.assertEqual(ui._fmt_tenth(0.26), "0.3")
 
 
-    def test_a_runs_banked_xmult_lands_when_the_run_ends(self):
-        # Every xMult a run earns is banked and multiplied into the multiplier
-        # once, by the run's OWN finish path (see _flush_run_xmult) — so a run
-        # that touched a Sharp block still ends with its x3, and the total is
-        # worked out from the settled multiplier.
+    def test_a_scorers_xmult_lands_with_the_touch(self):
+        # A scorer pays its xMult where the marble collides with it (see
+        # _apply_xmult_now), so a run that touched a Sharp block PLAYS with that
+        # factor already in its multiplier — nothing is left for the run to
+        # settle.
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.SHARP)
         self.game.run_active = True
         self.game.score_chips = 100
         self.game.score_mult = 1
         block = self.game.grid[(0, 0)]
+        factor = block.scorer_amount
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
-        self.assertEqual(self.game.score_mult, 1)              # banked
-        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
-        banked_only = self.game._compute_total_score()
+        self.assertAlmostEqual(self.game.score_mult, factor)    # already paid
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
+        playing_total = self.game._compute_total_score()
 
         self.game.marbles = [marble]
         marble.finished = True
@@ -697,33 +698,45 @@ class RunsTests(GameTestCase):
         self.game._handle_block_contacts([])
 
         self.assertTrue(self.game.run_complete)
-        self.assertAlmostEqual(self.game.score_mult, 3)         # settled
+        self.assertAlmostEqual(self.game.score_mult, factor)    # untouched
         self.assertEqual(self.game.run_xmult_pending, 1.0)
-        # The total is built from the SETTLED multiplier, so the run scores
-        # more than it would have with the xMult still sitting in the bank.
-        self.assertGreater(self.game.score_total, banked_only)
+        # The run scored its factor while it played, so the total it settles on
+        # is the one it was already showing.
+        self.assertAlmostEqual(self.game.score_total, playing_total)
 
 
     def test_the_xmult_bank_resets_with_the_run(self):
+        # (START first: reset_run refuses to start a run without one.)
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
-        self.game.run_active = True
+        self.game.upgrades_enabled = False
+        _base_chips, base_mult = self._start_run_base()
+
         block = main.Block(1, 1, scorer=main.Scorer.SHARP)
         self.game.grid[(1, 1)] = block
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
-        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
+        self.assertAlmostEqual(self.game.score_mult,
+                               base_mult * block.scorer_amount)
+        self.game._apply_xmult(2.0)                  # a card banks for the end
+        self.assertAlmostEqual(self.game.run_xmult_pending, 2.0)
 
         self.assertTrue(self.game.reset_run())
 
-        # A restarted run banks nothing from the one it replaced.
+        # A restarted run carries nothing over from the one it replaced: not
+        # the card xMult still sitting in the bank, and not the factor the
+        # replaced run's Sharp block had already paid into its multiplier.
         self.assertEqual(self.game.run_xmult_pending, 1.0)
+        self.assertAlmostEqual(self.game.score_mult, base_mult)
 
 
-    def test_xmult_rewards_always_multiply(self):        # xMult is a run-end calculation: _apply_xmult BANKS the factor (and
-        # returns it, the figure the particle shows) and the run's finish path
-        # multiplies the multiplier by the whole banked product once, so a
-        # run's factors compound no matter how many there were.
+    def test_xmult_rewards_always_multiply(self):
+        # A CARD's xMult (and every other run-END payoff) goes through
+        # _apply_xmult: it BANKS the factor (and returns it, the figure the
+        # particle shows) and the run's finish path multiplies the multiplier by
+        # the whole banked product once, so a run's card factors compound no
+        # matter how many there were. A SCORER's xMult never takes this path —
+        # it lands with the touch (see _apply_xmult_now).
         self.game.score_mult = 2
 
         self.assertEqual(self.game._apply_xmult(1.25), 1.25)

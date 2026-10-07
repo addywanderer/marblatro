@@ -419,13 +419,13 @@ class SaveSystemTests(unittest.TestCase):
 
 
     def test_board_unlock_state_saves_and_loads(self):
-        # A new game locks the board to the centered 2x3; squares unlocked in
+        # A new game locks the board to the centered 2x2; squares unlocked in
         # the shop and Board Units still in hand persist through a save/load
         # instead of snapping back to a fully-unlocked board.
         save_system.start_new_game_in_slot(self.game, 4)
         self.assertTrue(self.game.is_cell_locked(0, 0))
         self.game._unlock_cell(0, 0)
-        self.game._unlock_cell(9, 14)
+        self.game._unlock_cell(main.GRID_WIDTH - 1, main.GRID_HEIGHT - 1)
         self.game.board_units = 2
         save_system.save_game(self.game)
         data = save_system._read_slot(4)
@@ -438,9 +438,9 @@ class SaveSystemTests(unittest.TestCase):
         save_system.load_slot(fresh, 4)
 
         # The partially-unlocked board (and the units in hand) come back intact.
+        corner = (main.GRID_WIDTH - 1, main.GRID_HEIGHT - 1)
         self.assertFalse(fresh.is_cell_locked(0, 0))
-        self.assertFalse(fresh.is_cell_locked(9, 14))
-        self.assertTrue(fresh.is_cell_locked(4, 5))  # still locked after load
+        self.assertFalse(fresh.is_cell_locked(*corner))
         self.assertTrue(fresh.is_cell_locked(0, 1))  # never unlocked, still locked
         self.assertEqual(fresh.unlocked_cells, self.game.unlocked_cells)
         self.assertEqual(fresh.board_units, 2)
@@ -448,7 +448,7 @@ class SaveSystemTests(unittest.TestCase):
         fresh._board_walls_dirty = True
         wall_cells = {(w.x, w.y) for w in fresh._board_wall_blocks()}
         self.assertNotIn((0, 0), wall_cells)
-        self.assertIn((4, 5), wall_cells)
+        self.assertNotIn(corner, wall_cells)
 
     def test_a_loaded_save_keeps_its_pairing_numbers_out_of_new_pairs(self):
         # A pairing number is handed out by a counter that lives in the running
@@ -2038,6 +2038,64 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(main.Game().card_slots_won, 0)
         self.assertEqual(main.Game().action_slots_won, 0)
         self.assertFalse(main.Game().action_slots_unlimited)
+
+    def test_inventory_slots_won_survive_a_save_and_load(self):
+        # Packed's slots are permanent for the game, so the loaded game keeps
+        # them (and the wider inventory they buy).
+        self.game.save_slot = 2
+        self.game._grant_inventory_slots(3)
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 2)
+
+        self.assertEqual(fresh.inventory_slots_won, 3)
+        self.assertEqual(fresh.inventory_slots_run_gain, 0)
+        self.assertEqual(fresh.toolbox.slot_bonus, 3)
+        self.assertEqual(fresh.toolbox.capacity(),
+                         self.game.toolbox.capacity())
+        # An old save with none of the keys reads as an untouched game.
+        self.assertEqual(main.Game().inventory_slots_won, 0)
+        self.assertEqual(main.Game().toolbox.slot_bonus, 0)
+
+    def test_a_sold_card_survives_a_save_and_load(self):
+        # Selling a card is a fact about the PLAYER, not about the run, so the
+        # save keeps it: it is what lifts the Deal breaker trial's gag for good
+        # (see main.Game._deal_breaker_gags), and a reload that forgot it would
+        # gag a board the player has already freed.
+        self.game.save_slot = 3
+        self.game.card_sold = True
+        save_system.save_game(self.game)
+
+        fresh = main.Game()
+        fresh.title_screen = False
+        fresh.trials_enabled = False
+        save_system.load_slot(fresh, 3)
+
+        self.assertTrue(fresh.card_sold)
+        # ...and with the sale kept, no Deal breaker run of that loaded game is
+        # gagged, while a save that never sold a card still is.
+        fresh.trials_enabled = True
+        fresh.current_trial = main.Trial.DEAL_BREAKER
+        fresh._apply_trial()
+        self.assertFalse(fresh._deal_breaker_gags())
+        gaggable = main.Game()
+        gaggable.title_screen = False
+        gaggable.trials_enabled = True
+        gaggable.current_trial = main.Trial.DEAL_BREAKER
+        gaggable._apply_trial()
+        self.assertFalse(gaggable.card_sold)
+        self.assertTrue(gaggable._deal_breaker_gags())
+        # A save written before the record existed reads as "never sold".
+        data = save_system._save_data(self.game)
+        data.pop("card_sold")
+        old = main.Game()
+        old.title_screen = False
+        old.trials_enabled = False
+        save_system._load_save_data(old, data, 3)
+        self.assertFalse(old.card_sold)
 
     def test_an_unlimited_action_area_survives_a_save_and_load(self):
         self.game.save_slot = 6

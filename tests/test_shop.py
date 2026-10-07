@@ -198,8 +198,8 @@ class ShopTests(GameTestCase):
 
 
     def test_bonus_slots_add_extra_random_shop_offers(self):
-        # Each banked slot adds one extra offer to the shop, of a uniformly
-        # chosen kind (shape/effect/scorer/block/card/action).
+        # Each banked slot adds one extra offer to the shop, of a kind drawn at
+        # the same odds a shelf slot's is (see Pack.SHELF_WEIGHTS).
         self.game.bonus_slots = 3
         self.game.shop.bonus_slots = 3
         self.game.shop.refresh()
@@ -795,7 +795,7 @@ class ShopTests(GameTestCase):
         self.assertGreater(len(scorers), 2)
 
 
-    def test_selling_essence_stops_at_a_full_token_column(self):
+    def test_selling_essence_stops_at_a_full_token_area(self):
         # Only the tokens that fit are distilled, and the sale says so.
         self.game.tokens = [_token(main.Scorer.CASH, 15, runs_left=None)
                             for _ in range(main.MAX_TOKENS - 1)]
@@ -806,7 +806,8 @@ class ShopTests(GameTestCase):
 
         self.assertEqual(len(self.game.tokens), main.MAX_TOKENS)
         self.assertIn("1 permanent Spirit token", self.game.shop_message)
-        # A completely full column has no room at all, and the sale still works.
+        # A completely full inventory of tokens has no room at all, and the
+        # sale still works.
         self.game.cards = [main.CardItem(main.Card.ESSENCE, 48)]
         self.game.selected_toolbox_item = self.game.cards[0]
         self.game._sell_selected_item()
@@ -1080,14 +1081,13 @@ class ShopTests(GameTestCase):
         # roll 0.2 (< 4/13) -> +5 mult.
         trigger(0.2)
         self.assertAlmostEqual(self.game.score_mult, 7)
-        # roll 0.5 (>= 4/13) -> the favored +0.3 xMult (x1.3), banked for the
-        # end of the run like every other xMult.
+        # roll 0.5 (>= 4/13) -> the favored xMult reward, paid on the touch like
+        # the other two rewards (a scorer pays where it fires).
         self.game.score_mult = 2
         trigger(0.5)
-        self.assertAlmostEqual(self.game.score_mult, 2)
-        self.assertAlmostEqual(self.game.run_xmult_pending, 1.3)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 2 * 1.3)
+        self.assertAlmostEqual(
+            self.game.score_mult, 2 * (1 + main.MAGNITUDES.RANDOM_XMULT))
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
 
 
     def test_effective_scorer_is_defined_and_shop_available(self):
@@ -1520,7 +1520,7 @@ class ShopTests(GameTestCase):
         # plain default block: a Rect wall with no effect and no scorer.
         self.game.toolbox.items.clear()
         self.game.selected_toolbox_item = None
-        self.game.assembler.clear()
+        self.game._clear_assigned_parts()
 
         self._press(main.pygame.K_s)
 
@@ -1532,7 +1532,7 @@ class ShopTests(GameTestCase):
         self.assertEqual(blocks[0].price, 0)  # free defaults are worth nothing
 
 
-    def test_selecting_component_assigns_it_to_assembler(self):
+    def test_selecting_component_assigns_it_to_the_next_block(self):
         comp = main.Component.shape_component(main.Shape.SLOPE)
         self.game.toolbox.items.clear()
         self.game.toolbox.add(comp)
@@ -1540,7 +1540,7 @@ class ShopTests(GameTestCase):
         self.game._select_toolbox_component(comp)
 
         self.assertIs(self.game.selected_toolbox_item, comp)
-        self.assertIs(self.game.assembler.shape, comp)  # assigned on selection
+        self.assertIs(self.game.assigned_part(main.Component.SHAPE), comp)
         self.assertIn(comp, self.game.toolbox.items)  # stays in the toolbox
         self.assertFalse(self.game.has_selected)
 
@@ -1555,22 +1555,27 @@ class ShopTests(GameTestCase):
         self.game._sell_selected_item()
 
         self.assertEqual(self.game.cash, 50 + comp.price // 2)
-        self.assertIsNone(self.game.assembler.shape)  # unassigned when sold
+        self.assertIsNone(self.game.assigned_part(main.Component.SHAPE))
         self.assertIsNone(self.game.selected_toolbox_item)
         self.assertTrue(self.game.shop_message)
 
 
-    def test_assembler_has_parts_when_any_part_assigned(self):
-        self.game.assembler.clear()
-        self.assertFalse(self.game.assembler.has_parts())
-        self.game.assembler.shape = main.Component.shape_component(main.Shape.RECT)
-        self.assertTrue(self.game.assembler.has_parts())
-        self.game.assembler.clear()
-        self.game.assembler.effects = [main.Component.effect_component(main.Effect.BOUNCY)]
-        self.assertTrue(self.game.assembler.has_parts())
-        self.game.assembler.clear()
-        self.game.assembler.scorer = main.Component.scorer_component(main.Scorer.CHIPS_ADD, 10)
-        self.assertTrue(self.game.assembler.has_parts())
+    def test_a_part_is_assigned_when_any_part_is_picked(self):
+        # Any single part — a shape, an effect, or a scorer — is enough for S
+        # to assemble: the missing parts become the free defaults.
+        self.game._clear_assigned_parts()
+        self.assertFalse(self.game.has_assigned_parts())
+        self.game._use_component(
+            main.Component.shape_component(main.Shape.RECT))
+        self.assertTrue(self.game.has_assigned_parts())
+        self.game._clear_assigned_parts()
+        self.game._use_component(
+            main.Component.effect_component(main.Effect.BOUNCY))
+        self.assertTrue(self.game.has_assigned_parts())
+        self.game._clear_assigned_parts()
+        self.game._use_component(
+            main.Component.scorer_component(main.Scorer.CHIPS_ADD, 10))
+        self.assertTrue(self.game.has_assigned_parts())
 
 
     def test_buying_component_adds_to_toolbox_and_deducts_cash(self):
@@ -1652,8 +1657,8 @@ class ShopTests(GameTestCase):
 
 
     def test_shop_sells_individual_components_and_blocks(self):
-        # The shelf's five slots each deal ONE offer of a uniformly chosen kind,
-        # so a single refresh may hold no block (or no component) at all: over
+        # The shelf's five slots each deal ONE offer of a drawn kind, so a
+        # single refresh may hold no block (or no component) at all: over
         # a run of refreshes every kind turns up, and a block offer is a whole
         # block — shape, effect and scorer all set.
         kinds = set()
@@ -1675,8 +1680,8 @@ class ShopTests(GameTestCase):
         packs = [i for i in self.game.shop.items if i.row == main.SHOP_PACK_ROW]
         self.assertEqual(len(self.game.shop.items),
                          main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
-        # Five "any item" slots along the top row, one offer each of a
-        # uniformly chosen kind.
+        # Five "any item" slots along the top row, one offer each of a drawn
+        # kind (see Pack.SHELF_WEIGHTS).
         self.assertEqual(len(items), main.SHOP_ITEM_SLOTS)
         self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
         allowed = {main.Component.SHAPE, main.Component.EFFECT,
@@ -2640,19 +2645,19 @@ class ShopTests(GameTestCase):
         self.assertFalse(self.game.has_selected)
 
 
-    def test_toolbox_component_assigns_to_assembler(self):
+    def test_toolbox_component_assigns_to_the_next_block(self):
         self.game.toolbox.items.clear()
         shape_c = main.Component.shape_component(main.Shape.LINE, 0, "Line")
         self.game.toolbox.add(shape_c)
 
         self.game._use_component(shape_c)
 
-        self.assertIs(self.game.assembler.shape, shape_c)
+        self.assertIs(self.game.assigned_part(main.Component.SHAPE), shape_c)
         self.assertIn(shape_c, self.game.toolbox.items)  # stays in the toolbox
         self.assertFalse(self.game.has_selected)  # components can't be placed directly
 
 
-    def test_assembler_combines_components_into_block(self):
+    def test_the_assigned_parts_combine_into_a_block(self):
         self.game.toolbox.items.clear()
         shape_c = main.Component.shape_component(main.Shape.SLOPE, 0, "Slope")
         effect_c = main.Component.effect_component(main.Effect.BOUNCY, 0, "Bouncy")
@@ -2782,7 +2787,7 @@ class ShopTests(GameTestCase):
         # not tied to how many copies are currently owned.
         self.game.toolbox.items.clear()
         self.game.cash = 1000
-        item = next(i for i in self.game.shop.items if i.kind == main.Component.EFFECT)
+        item = self._place_shop_offer(main.Component.EFFECT)
         base = item.price
         first = self.game._buy_price(item)
         self.game._buy_shop_item(item)

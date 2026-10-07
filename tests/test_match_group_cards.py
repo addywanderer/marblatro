@@ -223,9 +223,10 @@ class MatchGroupRarityTests(GameTestCase):
             whole_entries = [entry for entry in entries if entry in main.Card.ORDER]
             share += weight / total * len(whole_entries) / len(entries)
         self.assertAlmostEqual(whole / len(draws), share, delta=0.03)
-        # ...and each of a group's 32 scorer variants is offered a 32nd as often
+        # ...and each of a group's scorer variants is offered a fraction as often
         # as the group is, because the scorer is drawn after the group.
-        self.assertEqual(len(components.CARD_SCORERS), 32)
+        self.assertEqual(len(components.CARD_SCORERS),
+                         len(main.Scorer.ORDER) - 3)   # NONE, START, FINISH
 
     def test_a_prebuilt_card_offer_is_always_a_group_card(self):
         for _ in range(50):

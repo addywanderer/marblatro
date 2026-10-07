@@ -239,7 +239,7 @@ class ToolboxTests(GameTestCase):
 
         self.game._use_component(comp)
 
-        self.assertIn(comp, self.game.assembler.effects)
+        self.assertIn(comp, self.game.assigned_effects())
         self.assertIn(comp, self.game.toolbox.items)  # kept where it is
 
 
@@ -248,11 +248,11 @@ class ToolboxTests(GameTestCase):
         self.game.toolbox.items.clear()
         self.game.toolbox.add(comp)
         self.game._select_toolbox_component(comp)
-        self.assertIn(comp, self.game.assembler.effects)
+        self.assertIn(comp, self.game.assigned_effects())
 
         self.game._select_toolbox_component(comp)
 
-        self.assertNotIn(comp, self.game.assembler.effects)
+        self.assertNotIn(comp, self.game.assigned_effects())
 
 
     def test_switching_assigned_shape_swaps_assignment(self):
@@ -265,22 +265,23 @@ class ToolboxTests(GameTestCase):
         self.game._use_component(first)
         self.game._use_component(second)
 
-        self.assertIs(self.game.assembler.shape, second)  # last one wins
+        self.assertIs(self.game.assigned_part(main.Component.SHAPE), second)
+        self.assertNotIn(first, self.game.assigned_toolbox_indexes)
         self.assertIn(first, self.game.toolbox.items)  # both kept in the toolbox
         self.assertIn(second, self.game.toolbox.items)
 
 
     def test_is_assigned_marks_assigned_components(self):
         comp = main.Component.effect_component(main.Effect.BOUNCY)
-        self.game.assembler.clear()
+        self.game._clear_assigned_parts()
         self.assertFalse(self.game._is_assigned(comp))
-        self.game.assembler.effects = [comp]
+        self.game._use_component(comp)
         self.assertTrue(self.game._is_assigned(comp))
         shape = main.Component.shape_component(main.Shape.SLOPE)
-        self.game.assembler.shape = shape
+        self.game._use_component(shape)
         self.assertTrue(self.game._is_assigned(shape))
         scorer = main.Component.scorer_component(main.Scorer.CHIPS_ADD, 10)
-        self.game.assembler.scorer = scorer
+        self.game._use_component(scorer)
         self.assertTrue(self.game._is_assigned(scorer))
 
 

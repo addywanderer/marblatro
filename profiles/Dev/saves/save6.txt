@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": 6205,
+  "cash": 6405,
   "run_number": 35,
   "round_index": 11,
   "run_in_round": 2,
@@ -1179,6 +1179,8 @@
   "bonus_slots": 0,
   "inaction_used": 0,
   "card_slots_won": 0,
+  "inventory_slots_won": 0,
+  "card_sold": false,
   "action_slots_won": 0,
   "action_slots_unlimited": true,
   "inaccessible": [],

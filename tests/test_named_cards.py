@@ -1068,6 +1068,66 @@ class StencilTests(GameTestCase):
         self._start(main.Card.STENCIL)
         self.assertEqual(self.game.score_mult, 5)
 
+    def test_its_sidebar_row_says_what_it_pays_with_the_area_as_it_is(self):
+        # The card's description states its rate (+1 xMult an empty slot); the
+        # sidebar row adds what that comes to right now — the user's second
+        # example, a Stencil alone among five slots reading x5.
+        card = main.CardItem(main.Card.STENCIL, 46)
+        self.game.cards = [card]
+        rows = dict(self.game._describe_item(card))
+        self.assertEqual(
+            rows["Now"],
+            "Pays x5 mult at the start of the run (4 free card slots)")
+        # Another card takes a slot: the row drops with it.
+        self.game.cards = [card, main.CardItem(main.Card.COUPON, 40)]
+        rows = dict(self.game._describe_item(card))
+        self.assertEqual(
+            rows["Now"],
+            "Pays x4 mult at the start of the run (3 free card slots)")
+        # A full area leaves it nothing to multiply (its gate is shut), which
+        # the row says rather than reporting x1.
+        self.game.cards = [card] + self._card_fillers(4)
+        rows = dict(self.game._describe_item(card))
+        self.assertEqual(
+            rows["Now"],
+            "Pays nothing at the start of the run (0 free card slots)")
+
+    def test_a_card_with_no_measure_of_its_own_gets_no_now_row(self):
+        # Joker's payoff is a fixed +4 mult and Wrecking Ball's a rate per
+        # break, so neither has a total to report (see _card_payoff_row).
+        for value in (main.Card.JOKER, main.Card.WRECKING_BALL):
+            with self.subTest(card=main.Card.name(value)):
+                item = main.CardItem(value, 30)
+                self.game.cards = [item]
+                labels = [label for label, _ in self.game._describe_item(item)]
+                self.assertNotIn("Now", labels)
+        # A match-group card has no measure either: it pays per collision.
+        item = main.CardItem(main.match_group_card(
+            main.match_group_for_shape(main.Shape.PIPE), main.Scorer.CHIPS_ADD), 30)
+        self.game.cards = [item]
+        labels = [label for label, _ in self.game._describe_item(item)]
+        self.assertNotIn("Now", labels)
+
+    def test_every_measured_cards_row_reports_its_own_measure(self):
+        # Each measured card reads a different thing, so each row names it: the
+        # measure's value in brackets is what the payoff was computed from.
+        self.game.unlocked_cells = {(x, y) for x in range(3) for y in range(3)}
+        cases = (
+            (main.Card.COZY, "unlocked units"),
+            (main.Card.EXPLORER, "of the board visited this run"),
+            (main.Card.SYNTHESIZER, "cards held"),
+            (main.Card.PAINTING, "of board sell value"),
+            (main.Card.ISLAND, "of unlocked units"),
+            (main.Card.PILLAR, "blocks in the fullest column"),
+        )
+        for value, wanted in cases:
+            with self.subTest(card=main.Card.name(value)):
+                row = self.game._card_payoff_row(value)
+                self.assertIsNotNone(row, f"{main.Card.name(value)} has no row")
+                self.assertIn(wanted, row)
+                self.assertIn("Pays ", row)
+                self.assertRegex(row, r"at the (start|end) of the run")
+
     def test_every_other_card_costs_it_a_whole_x_mult(self):
         self._start(main.Card.STENCIL, main.Card.COUPON)
         self.assertEqual(self.game.score_mult, 4)     # four slots, x4
@@ -1105,6 +1165,23 @@ class StencilTests(GameTestCase):
     def test_a_second_stencil_multiplies_by_the_same_number_again(self):
         self._start(main.Card.STENCIL, main.Card.STENCIL)
         self.assertEqual(self.game.score_mult, 25)    # x5 then x5
+
+    def test_the_bank_a_real_run_start_makes_survives_the_reset(self):
+        # The start-of-run cards pay into the run's xMult bank, so the bank has
+        # to be set up BEFORE they fire: setting it afterwards would silently
+        # drop everything they paid (which is what left the Stencil — the one
+        # start-phase xMult card — doing nothing in a real run while the tests
+        # above, calling _apply_cards directly, still passed).
+        self.game.cards = _own(main.Card.STENCIL)
+        self.game.grid[(5, 6)] = main.Block(5, 6, scorer=main.Scorer.START)
+        self.game.grid[(6, 7)] = main.Block(6, 7, scorer=main.Scorer.FINISH)
+
+        self.assertTrue(self.game.reset_run())
+        self.assertEqual(self.game.run_xmult_pending, 5.0)   # Stencil's x5
+
+        started_at = self.game.score_mult
+        self.game._flush_run_xmult()
+        self.assertAlmostEqual(self.game.score_mult, started_at * 5)
 
     def test_a_cut_stencil_does_nothing(self):
         # The Card cutter silences the card's effect, so no xMult lands.

@@ -163,7 +163,7 @@ class NewTrialTests(GameTestCase):
 
     def test_deal_breaker_trial_gags_the_board_until_a_card_is_sold(self):
         marble = self._run_under(main.Trial.DEAL_BREAKER)
-        self.assertFalse(self.game.deal_breaker_released)
+        self.assertFalse(self.game.card_sold)
         self.assertTrue(self.game._deal_breaker_gags())
         # Nothing the board does pays out while it is gagged, but the block's
         # trigger is still spent (exactly like a Watch-gated block).
@@ -173,13 +173,13 @@ class NewTrialTests(GameTestCase):
         self.game._handle_block_contacts([spent])
         self.assertEqual(self.game.score_chips, 0)
         self.assertEqual(spent.triggers_left, 0)
-        # Selling a card releases the board for the rest of the run, and the
-        # sale says so.
+        # Selling a card frees the board for the rest of the GAME, and the sale
+        # says so.
         card = main.CardItem(main.Card.COUPON, 40)
         self.game.cards.append(card)
         self.game.selected_toolbox_item = card
         self.game._sell_selected_item()
-        self.assertTrue(self.game.deal_breaker_released)
+        self.assertTrue(self.game.card_sold)
         self.assertFalse(self.game._deal_breaker_gags())
         self.assertIn("Deal breaker", self.game.shop_message)
         paid = main.Block(6, 5, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
@@ -187,10 +187,78 @@ class NewTrialTests(GameTestCase):
         self.game._handle_block_contacts([paid])
         self.assertEqual(self.game.score_chips, 10)
         # A new run (a restart, a retry, or the next run's start) applies the
-        # trial again, so the board is gagged once more.
+        # trial again, but the sale is the player's for the rest of the game, so
+        # the board is NOT gagged a second time.
         self.game._apply_trial()
-        self.assertFalse(self.game.deal_breaker_released)
+        self.assertTrue(self.game.card_sold)
+        self.assertFalse(self.game._deal_breaker_gags())
+
+    def test_a_sale_outside_the_trial_still_frees_the_board_for_later_runs(self):
+        # The sale is recorded whatever the trial is (it is a fact about the
+        # player, and only the trial's GAG reads it), so selling a card in an
+        # ordinary run beats every later Deal breaker run.
+        self.game.trials_enabled = True
+        self.game.current_trial = None
+        self.game._apply_trial()
+        self.assertFalse(self.game._deal_breaker_gags())
+        card = main.CardItem(main.Card.COUPON, 40)
+        self.game.cards.append(card)
+        self.game.selected_toolbox_item = card
+        self.game._sell_selected_item()
+        self.assertTrue(self.game.card_sold)
+        # No "paid off" note: the trial is not in play, so there is nothing to
+        # pay off yet.
+        self.assertNotIn("Deal breaker", self.game.shop_message)
+        self._run_under(main.Trial.DEAL_BREAKER)
+        self.assertFalse(self.game._deal_breaker_gags())
+
+    def test_the_release_rides_through_a_continue_and_a_retry(self):
+        # The two paths that rebuild a run's trial state are CONTINUE (the
+        # next run applies its own trial) and RETRY (the finished run is
+        # undone), and neither can take the sale away: it is the player's for
+        # the rest of the game.
+        marble = self._run_under(main.Trial.DEAL_BREAKER)
+        card = main.CardItem(main.Card.COUPON, 40)
+        self.game.cards.append(card)
+        self.game.selected_toolbox_item = card
+        self.game._sell_selected_item()
+        self.assertFalse(self.game._deal_breaker_gags())
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        self.game.run_results.append(True)
+        self.game.runs_cleared = 1
+        self.game.last_run_cash_gained = 0
+        with mock.patch("main.random.random", return_value=0.9):
+            self.game._continue_run()
+        self.assertTrue(self.game.card_sold)
+        # The next run drew its own trial (see _choose_trial), so pin Deal
+        # breaker back on and apply it the way a run start does: still free.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.DEAL_BREAKER
+        with mock.patch("main.random.randrange", return_value=0):
+            self.game._apply_trial()
+        self.assertFalse(self.game._deal_breaker_gags())
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        with mock.patch("main.random.random", return_value=0.9):
+            self.game._retry_run()
+        self.assertTrue(self.game.card_sold)
+        self.assertFalse(self.game._deal_breaker_gags())
+        # ...and the gag itself is untouched by either path.
+        self.game.card_sold = False
         self.assertTrue(self.game._deal_breaker_gags())
+        self.assertIsNotNone(marble)
+
+    def test_a_game_that_never_sold_a_card_is_gagged_by_every_deal_breaker_run(
+            self):
+        # The other half of the rule: while the record says no card was ever
+        # sold, applying the trial gags the board every time.
+        self.game.trials_enabled = True
+        self.game.current_trial = main.Trial.DEAL_BREAKER
+        for _ in range(3):
+            self.game._apply_trial()
+            self.assertFalse(self.game.card_sold)
+            self.assertTrue(self.game._deal_breaker_gags())
 
 
 class TrialsTests(GameTestCase):
@@ -273,9 +341,21 @@ class TrialsTests(GameTestCase):
         self.assertIn(main.Trial.ELEPHANT, main.Trial.ORDER)
         self.assertIn(main.Trial.SKY_HIGH, main.Trial.ORDER)
         self.assertIn(main.Trial.SINGULARITY, main.Trial.ORDER)
-        # The reworked Deal breaker is a board gag; its description says so.
+        # The reworked Deal breaker is a board gag; its description says so,
+        # and that one sale frees the board for good.
         self.assertEqual(main.Trial.description(main.Trial.DEAL_BREAKER),
-                         "Blocks never score until you sell a card.")
+                         "Blocks never score until you sell a card — one sale "
+                         "is enough.")
+        # The description still fits the trial display's two lines (see
+        # ui.draw_trial_display, which wraps it into the box and drops any line
+        # that will not fit).
+        box = main.TRIAL_BOX_RECT
+        desc = main.Trial.description(main.Trial.DEAL_BREAKER)
+        lines = self.game._wrap_text(desc, self.game.tiny_font, box.width - 16)
+        self.assertEqual(len(lines), 2)
+        self.assertLessEqual(
+            len(lines) * (self.game.tiny_font.get_height() + 2),
+            box.height - 31)
 
 
     def test_every_trial_has_its_own_tile_of_shapes_and_colours(self):

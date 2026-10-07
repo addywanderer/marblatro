@@ -45,8 +45,9 @@ class ScorersTests(GameTestCase):
 
 
     def test_mult_scorer_multiplies_score(self):
-        # An xMult block BANKS its factor: xMult is a run-end calculation (see
-        # _apply_xmult), so the multiplier only moves when the run settles.
+        # An xMult block PAYS its factor with the touch that fires it: a scorer
+        # pays out where the marble collides with it (see _apply_xmult_now), so
+        # the multiplier moves on the spot and the run banks nothing for it.
         block = main.Block(0, 0, scorer=main.Scorer.MULT_MUL)
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
@@ -54,11 +55,8 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertEqual(self.game.score_mult, 1)             # not yet
-        self.assertAlmostEqual(self.game.run_xmult_pending, 1.5)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 1.5)
-        self.assertEqual(self.game.run_xmult_pending, 1.0)     # spent
+        self.assertAlmostEqual(self.game.score_mult, 1.5)      # paid on the touch
+        self.assertEqual(self.game.run_xmult_pending, 1.0)     # nothing banked
         self.assertEqual(self.game.score_chips, 0)
 
 
@@ -200,7 +198,9 @@ class ScorersTests(GameTestCase):
         self.assertEqual(self.game.last_run_cash_gained, 0)
 
 
-    def test_sharp_scorer_triples_the_multiplier_as_the_run_ends(self):
+    def test_sharp_scorer_triples_the_multiplier_when_touched(self):
+        # Sharp's own factor lands with the touch (see _apply_xmult_now), so the
+        # multiplier moves during the run rather than as it settles.
         block = main.Block(0, 0, scorer=main.Scorer.SHARP)
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
@@ -208,11 +208,9 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertEqual(self.game.score_mult, 1)      # banked, not applied
-        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
+        self.assertAlmostEqual(self.game.score_mult, block.scorer_amount)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
         self.assertEqual(block.triggers_left, 0)
-        self.game._flush_run_xmult()
-        self.assertEqual(self.game.score_mult, 3)      # 1 * 3, at the end
 
 
     def test_sharp_scorer_block_destroyed_on_continue(self):
@@ -445,16 +443,14 @@ class ScorersTests(GameTestCase):
 
 
     def test_random_scorer_xmult_branch_multiplies_by_one_point_three(self):
-        # The xMult reward is an xMult like any other, so it banks for the end
-        # of the run; the chips and mult rewards land where they trigger.
+        # The xMult reward is a scorer payoff like the other two, so it lands
+        # with the touch: all three rewards pay where they trigger.
         self.game.score_chips = 100
         self.game.score_mult = 2
         self._trigger_random_block(0.9)  # last third -> +0.3 xMult (x1.3)
         self.assertEqual(self.game.score_chips, 100)
-        self.assertEqual(self.game.score_mult, 2)
-        self.assertAlmostEqual(self.game.run_xmult_pending, 1.3)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 2 * 1.3)
+        self.assertAlmostEqual(self.game.score_mult, 2 * (1 + main.MAGNITUDES.RANDOM_XMULT))
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
 
 
     def test_random_scorer_uses_all_three_rewards_over_many_triggers(self):
@@ -779,8 +775,9 @@ class ScorersTests(GameTestCase):
 
 
     def test_colossus_pays_xmult_per_pixel_above_the_base_radius(self):
-        # A marble grown to 16 px (8 px above the base 8) banks +0.8 xMult; the
-        # run multiplies by it when it settles.
+        # A marble grown to 16 px (8 px above the base 8) pays its own rate for
+        # each of those 8 pixels as xMult, and it lands with the touch (see
+        # _apply_xmult_now).
         block = main.Block(0, 0, scorer=main.Scorer.COLOSSUS)
         self.game.grid[(0, 0)] = block
         self.game.run_active = True
@@ -791,9 +788,9 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertAlmostEqual(self.game.run_xmult_pending, 1 + 0.1 * 8)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 2 * (1 + 0.1 * 8))
+        self.assertAlmostEqual(self.game.score_mult,
+                               2 * (1 + block.scorer_amount * 8))
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
         self.assertEqual(block.triggers_left, 0)
 
 
@@ -808,8 +805,8 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 1 + 0.1 * 24)
+        self.assertAlmostEqual(self.game.score_mult,
+                               1 + block.scorer_amount * 24)
 
 
     def test_colossus_gives_nothing_at_the_base_radius(self):
@@ -915,6 +912,8 @@ class ScorersTests(GameTestCase):
         self.assertIsNone(token.search(catalogue), catalogue)
 
 
+
+
     def test_a_role_scorer_component_counts_as_a_way_to_field_the_role(self):
         self.game.toolbox.items.clear()
         component = main.Component.scorer_component(main.Scorer.START)
@@ -977,10 +976,8 @@ class ScorersTests(GameTestCase):
         self.game.run_active = True
         self.game.score_mult = 2
         self.game._handle_block_contacts([block])
-        self.assertEqual(self.game.score_mult, 2)          # banked for the end
-        self.assertAlmostEqual(self.game.run_xmult_pending, 2.0)
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 2 * 2.0)  # +1 xMult
+        self.assertAlmostEqual(self.game.score_mult, 2 * block.scorer_amount)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
         self.assertEqual(block.triggers_left, 0)
 
 
@@ -1282,16 +1279,15 @@ class ScorersTests(GameTestCase):
         self.assertLess(marble.air_streak, 0.2)
 
 
-    def test_satanic_block_multiplies_mult_by_6_66_at_the_end(self):
+    def test_satanic_block_multiplies_mult_by_6_66_when_touched(self):
         block = main.Block(0, 0, scorer=main.Scorer.SATANIC)
         self.game.score_mult = 2
         self.game.run_active = True
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
-        self.assertEqual(self.game.score_mult, 2)       # banked, not applied
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 2 * 6.66)
+        self.assertAlmostEqual(self.game.score_mult, 2 * 6.66)   # paid on the touch
+        self.assertEqual(self.game.run_xmult_pending, 1.0)
         self.assertEqual(block.triggers_left, 0)
 
 
@@ -1313,11 +1309,13 @@ class ScorersTests(GameTestCase):
 
 
     def test_sharp_then_mult_then_sharp_sequence(self):
-        # A Sharp block, then a +Mult block, then another Sharp block: the two
-        # x3 factors BANK and the +4 mult lands where it triggers, so the run
-        # settles at (1 + 4) x 3 x 3 = 45 rather than tripling in between
-        # ((1 x 3) + 4) x 3 = 21. An xMult that lands late multiplies everything
-        # the run earned before it, which is what "fires at the end" means.
+        # A Sharp block, then a +Mult block, then another Sharp block: each
+        # factor lands where it fires (a scorer pays on the touch, see
+        # _apply_xmult_now), so the +4 mult goes in BETWEEN them —
+        # ((1 x f) + 4) x f — rather than multiplying the run's settled total by
+        # f x f at the end.
+        sharp = main.Block(0, 0, scorer=main.Scorer.SHARP)
+        factor = sharp.scorer_amount
         self.game.score_mult = 1
         self.game.run_active = True
 
@@ -1327,22 +1325,22 @@ class ScorersTests(GameTestCase):
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
 
-        fire(main.Block(0, 0, scorer=main.Scorer.SHARP))
-        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
+        fire(sharp)
+        self.assertAlmostEqual(self.game.score_mult, factor)
         fire(main.Block(0, 0, scorer=main.Scorer.MULT_ADD, scorer_amount=4))
-        self.assertAlmostEqual(self.game.score_mult, 5)
-        self.assertAlmostEqual(self.game.run_xmult_pending, 3)
+        self.assertAlmostEqual(self.game.score_mult, factor + 4)
         fire(main.Block(0, 0, scorer=main.Scorer.SHARP))
-        self.assertAlmostEqual(self.game.score_mult, 5)
-        self.assertAlmostEqual(self.game.run_xmult_pending, 9)
-
-        self.game._flush_run_xmult()
-        self.assertAlmostEqual(self.game.score_mult, 45)
+        self.assertAlmostEqual(self.game.score_mult, (factor + 4) * factor)
+        self.assertEqual(self.game.run_xmult_pending, 1.0)   # nothing banked
 
 
     def test_a_naturally_v2_action_is_already_maxed(self):
-        with mock.patch("main.random_action_version", return_value=2):
-            self.game.shop.refresh()
+        # The shelf's kinds are drawn at their own odds (an action only 15% of
+        # the time — see Pack.SHELF_WEIGHTS), so the shelf is pinned to actions
+        # to be sure one is on it after the refresh.
+        with mock.patch.object(main, "SHELF_OFFER_TYPES", (main.Pack.ACTION,)):
+            with mock.patch("main.random_action_version", return_value=2):
+                self.game.shop.refresh()
         action = next(i for i in self.game.shop.items if i.kind == "action")
         self.game.actions.append(action)
         self.game.selected_action = action
@@ -1353,6 +1351,105 @@ class ScorersTests(GameTestCase):
         self.assertEqual(action.version, 2)
         self.assertEqual(self.game.cash, 1000)  # nothing to pay: already v2
 
+
+    def test_state_dependent_scorers_say_what_they_pay_right_now(self):
+        # A scorer that pays for the state of the game states its RATE in its
+        # description; the sidebar adds what that rate comes to with things as
+        # they are — the user's example: 40 unlocked board units and a +2 chips
+        # Roomy reads "Gives +80 chips (2 x 40 unlocked units)".
+        self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
+                                    for y in range(main.GRID_HEIGHT)}
+        roomy = main.Component.scorer_component(main.Scorer.ROOMY, amount=2,
+                                                col=1, row=1)
+        self.game.unlocked_cells = {(x, 0) for x in range(main.GRID_WIDTH)}
+        self.game.unlocked_cells |= {(0, y) for y in range(1, 4)}
+        self.assertEqual(len(self.game.unlocked_cells), 15)
+        rows = self.game._describe_item(roomy)
+        self.assertEqual(rows[-1],
+                         ("Now", "Gives +30 chips (2 x 15 unlocked units)"))
+        # ...and the row follows the board: unlock one more unit and the number
+        # moves with it.
+        self.game.unlocked_cells.add((5, 5))
+        rows = self.game._describe_item(roomy)
+        self.assertEqual(rows[-1],
+                         ("Now", "Gives +32 chips (2 x 16 unlocked units)"))
+        # A fixed scorer needs no such row: the description already says +30.
+        flat = main.Component.scorer_component(main.Scorer.CHIPS_ADD, amount=30,
+                                               col=1, row=1)
+        labels = [label for label, _ in self.game._describe_item(flat)]
+        self.assertNotIn("Now", labels)
+
+    def test_the_board_wide_scorers_read_the_board_and_the_run(self):
+        # Roomy is not the only one: Seed counts the Seed blocks on the board,
+        # Gilded reads the chips the run has, Undertaker the blocks destroyed in
+        # it and Rally the fresh touches banked before its own.
+        seed = main.Block(1, 1, scorer=main.Scorer.SEED, scorer_amount=4)
+        self.game.grid[(1, 1)] = seed
+        self.game.grid[(2, 1)] = main.Block(2, 1, scorer=main.Scorer.SEED,
+                                            scorer_amount=4)
+        self.assertEqual(
+            self.game._scorer_payoff_row(main.Scorer.SEED, 4),
+            "Gives +8 mult (4 x 2 Seed blocks)")
+        # The Garden card doubles what each Seed pays (see the scorer branch).
+        self.game.cards.append(main.CardItem(main.Card.GARDEN, 40))
+        self.assertEqual(
+            self.game._scorer_payoff_row(main.Scorer.SEED, 4),
+            "Gives +16 mult (8 x 2 Seed blocks)")
+        self.game.score_chips = 60
+        self.assertEqual(self.game._scorer_payoff_row(main.Scorer.GILDED, 0),
+                         "Gives +10 mult (1/6 of 60 chips)")
+        self.game.run_blocks_destroyed = 3
+        self.assertEqual(
+            self.game._scorer_payoff_row(main.Scorer.UNDERTAKER, 30),
+            "Gives +90 mult (30 x 3 blocks destroyed this run)")
+        self.game.run_fresh_touches = 4
+        self.assertEqual(
+            self.game._scorer_payoff_row(main.Scorer.RALLY, 1),
+            "Gives +3 mult (1 x 3 earlier fresh touches this run)")
+
+    def test_placed_blocks_read_their_own_square_and_hand_ones_do_not(self):
+        # Summit, Powerline, Frontier and Cluster pay for WHERE the block is:
+        # a placed block has a square, so it can say what it pays there, while
+        # the same scorer in the shop or the inventory has none yet.
+        self.game.grid.clear()
+        board = {(1, 1): 0, (2, 1): 0, (3, 1): 0}     # three blocks in row 1
+        for (x, y) in board:
+            self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE,
+                                                scorer_amount=0)
+        summit = main.Block(1, 1, scorer=main.Scorer.SUMMIT, scorer_amount=0.75)
+        self.game.grid[(1, 1)] = summit
+        rows = dict(self.game._describe_item(summit))
+        self.assertEqual(rows["Now"],
+                         f"Gives +{0.75 * (main.GRID_HEIGHT - 2):g} mult "
+                         f"(0.75 x {main.GRID_HEIGHT - 2} rows above the bottom row)")
+        self.assertEqual(self.game._scorer_payoff_row(main.Scorer.POWERLINE, 25,
+                                                      block=summit),
+                         "Gives +75 chips (25 x 3 blocks in its row)")
+        cluster = main.Block(2, 1, scorer=main.Scorer.CLUSTER, scorer_amount=3)
+        self.game.grid[(2, 1)] = cluster
+        self.assertEqual(self.game._scorer_payoff_row(main.Scorer.CLUSTER, 3,
+                                                      block=cluster),
+                         "Gives +6 mult (3 x 2 adjacent blocks)")
+        # A block in hand (or a scorer component) has no square to read.
+        for item in (main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                                    main.Scorer.CLUSTER, 3, 20, "Cluster"),
+                     main.Component.scorer_component(main.Scorer.SUMMIT, amount=1,
+                                                     col=1, row=1)):
+            with self.subTest(item=item.name):
+                labels = [label for label, _ in self.game._describe_item(item)]
+                self.assertNotIn("Now", labels)
+
+    def test_scorers_that_pay_for_the_marble_get_no_now_row(self):
+        # Quick pays for the marble's speed, Airball its air time, Voyager its
+        # distance and Colossus its size: there is no settled number to report
+        # until the marble actually touches the block.
+        for scorer in (main.Scorer.QUICK, main.Scorer.AIRBALL,
+                       main.Scorer.VOYAGER, main.Scorer.COLOSSUS):
+            with self.subTest(scorer=main.Scorer.name(scorer)):
+                self.assertIsNone(self.game._scorer_payoff_row(scorer, 2))
+                self.assertIsNone(
+                    self.game._scorer_payoff_row(scorer, 2,
+                                                 block=main.Block(1, 1)))
 
     def test_scorer_descriptions_state_the_deviation_inline(self):
         # The deviation sits right after the magnitude it belongs to, as a bare
@@ -1622,3 +1719,119 @@ class ScorersTests(GameTestCase):
 
         self.assertTrue(self.game.reset_run())
         self.assertEqual(a.triggers_left, 1)  # the portal can score again next run
+
+
+    def test_a_resource_scorers_default_magnitude_banks_exactly_its_rate(self):
+        # A resource scorer's magnitude is the number of RATE units a trigger
+        # earns, so at its own default magnitude it banks exactly what
+        # RESOURCE_RATE states — the same relationship every other scorer has
+        # with its average. Picky's magnitude used to be 0.5, which made a
+        # default Picky trigger bank half of what RESOURCE_RATE promised.
+        for scorer in main.Scorer.RESOURCE_RATE:
+            with self.subTest(scorer=main.Scorer.name(scorer)):
+                default = main.Scorer.DEFAULT_AMOUNT[scorer]
+                self.assertAlmostEqual(
+                    components.resource_points_for(scorer, default),
+                    main.Scorer.RESOURCE_RATE[scorer])
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.PICKY], 1)
+        self.assertEqual(main.Scorer.RESOURCE_RATE[main.Scorer.PICKY], 0.5)
+
+
+class PackedScorerTests(GameTestCase):
+    """Packed: the inventory gains slots when it is touched."""
+
+    def test_the_scorer_data(self):
+        self.assertEqual(main.Scorer.name(main.Scorer.PACKED), "Packed")
+        self.assertIn(main.Scorer.PACKED, main.Scorer.ORDER)
+        self.assertIn(main.Scorer.PACKED, main.Scorer.SHOP_ORDER)
+        self.assertIn(main.Scorer.PACKED, components.CARD_SCORERS)
+        self.assertIn(main.Scorer.PACKED, components.FLAT_CARD_SCORERS)
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.PACKED], 2)
+        self.assertGreater(
+            main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.PACKED)], 0)
+        self.assertIn("inventory slot",
+                      main.scorer_description(main.Scorer.PACKED).lower())
+
+    def test_touching_it_gives_two_inventory_slots(self):
+        block = main.Block(0, 0, scorer=main.Scorer.PACKED)
+        before = self.game.toolbox.capacity()
+        self.assertEqual(self.game.inventory_slots_won, 0)
+
+        self._card_fire(block)
+
+        self.assertEqual(self.game.inventory_slots_won, 2)
+        self.assertEqual(self.game.inventory_slots_run_gain, 2)
+        self.assertEqual(self.game.toolbox.capacity(), before + 2)
+        self.assertIn("Inventory grew 2 slots", self.game.shop_message)
+
+    def test_the_won_slots_really_hold_more_items(self):
+        # The capacity is not decoration: the cells gate every path that fills
+        # the inventory, so an item that did not fit before fits now.
+        box = self.game.toolbox
+        box.items.clear()
+        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                                main.Scorer.NONE, 0, 5, "filler")
+        while box.add(filler):
+            pass
+        self.assertEqual(len(box.items), box.capacity())
+        self.assertFalse(box.add(filler))
+
+        self.game._grant_inventory_slots(2)
+
+        self.assertTrue(box.add(filler))
+        self.assertTrue(box.add(filler))
+        self.assertFalse(box.add(filler))
+        # ...and the panel is drawn tall enough to show them.
+        self.assertGreaterEqual(self.game.inventory_grid_rows()
+                                * box.cols, box.capacity())
+
+    def test_a_taller_magnitude_gives_more_slots(self):
+        block = main.Block(0, 0, scorer=main.Scorer.PACKED, scorer_amount=5)
+        self._card_fire(block)
+        self.assertEqual(self.game.inventory_slots_won, 5)
+
+    def test_a_retry_takes_back_the_slots_that_run_won(self):
+        # The slots a discarded run won are not the player's to keep, the rule
+        # Fresh's free rerolls follow.
+        self.game.inventory_slots_won = 4          # won by an earlier run
+        self.game.toolbox.slot_bonus = 4
+        self._card_fire(main.Block(0, 0, scorer=main.Scorer.PACKED))
+        self.assertEqual(self.game.inventory_slots_won, 6)
+
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        self.game._retry_run()
+
+        self.assertEqual(self.game.inventory_slots_won, 4)
+        self.assertEqual(self.game.inventory_slots_run_gain, 0)
+        self.assertEqual(self.game.toolbox.slot_bonus, 4)
+
+    def test_a_continued_run_keeps_the_slots(self):
+        self._card_fire(main.Block(0, 0, scorer=main.Scorer.PACKED))
+
+        self.game.run_complete = True
+        self.game.awaiting_after_run = True
+        self.game._continue_run()
+
+        self.assertEqual(self.game.inventory_slots_won, 2)
+        self.assertEqual(self.game.inventory_slots_run_gain, 0)
+        self.assertEqual(self.game.toolbox.slot_bonus, 2)
+        # The next run's reset cannot take them back either.
+        self.game.grid[(5, 6)] = main.Block(5, 6, scorer=main.Scorer.START)
+        self.assertTrue(self.game.reset_run(False))
+        self.assertEqual(self.game.inventory_slots_won, 2)
+        self.assertEqual(self.game.toolbox.capacity(),
+                         self.game.toolbox.cols * self.game.toolbox.rows + 2)
+
+    def test_the_card_gives_the_slots_when_it_fires(self):
+        # The flat (match group x Packed) card pays the same gain a block does,
+        # when the marble hits a block the card's group matches.
+        pipe = main.match_group_for_shape(main.Shape.PIPE)
+        self.game.cards = [_card_item(pipe, main.Scorer.PACKED)]
+        self.assertEqual(self.game.inventory_slots_won, 0)
+
+        self._card_fire(main.Block(0, 0, shape=main.Shape.PIPE,
+                                   scorer=main.Scorer.NONE))
+
+        self.assertEqual(self.game.inventory_slots_won,
+                         main.Scorer.DEFAULT_AMOUNT[main.Scorer.PACKED])

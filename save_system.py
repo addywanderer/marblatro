@@ -466,6 +466,12 @@ def _save_data(game):
         # removed the action limit altogether. All permanent for the game.
         "inaction_used": game.inaction_used,
         "card_slots_won": game.card_slots_won,
+        "inventory_slots_won": game.inventory_slots_won,
+        # Whether the player has ever sold a card. Not a run or trial effect:
+        # the Deal breaker trial's gag checks it (see Game._deal_breaker_gags),
+        # so keeping it in the save is what stops a reload from gagging a board
+        # the player has already freed.
+        "card_sold": game.card_sold,
         "action_slots_won": game.action_slots_won,
         "action_slots_unlimited": game.action_slots_unlimited,
         # Odyssey's banked items, as whole items (see _serialize_item), in the
@@ -600,10 +606,16 @@ def _load_save_data(game, data, slot):
     game.bonus_slots = data.get("bonus_slots", 0)
     game.shop.bonus_slots = game.bonus_slots
     # The gained slots (Inaction's uses and handed-over slots, Foresight's
-    # action slots and its unlimited flag) persist; a save written before
-    # either action existed simply has none of them.
+    # action slots and its unlimited flag, Packed's inventory slots) persist; a
+    # save written before any of them existed simply has none of them.
     game.inaction_used = data.get("inaction_used", 0)
     game.card_slots_won = data.get("card_slots_won", 0)
+    game.inventory_slots_won = data.get("inventory_slots_won", 0)
+    game.inventory_slots_run_gain = 0
+    game.toolbox.slot_bonus = game.inventory_slots_won
+    # A sale recorded before the save keeps the Deal breaker trial beaten, so a
+    # save written before the record existed just reads as "never sold".
+    game.card_sold = data.get("card_sold", False)
     game.action_slots_won = data.get("action_slots_won", 0)
     game.action_slots_unlimited = data.get("action_slots_unlimited", False)
     game.action_area_page = 0
@@ -639,7 +651,10 @@ def _load_save_data(game, data, slot):
     game.disabled_card = None
     game.trial_fragile_blocks = set()
     game.trial_marble_weight = 1.0
-    game.deal_breaker_released = False
+    # Nothing of the deal-breaker gag is cleared here on purpose: whether the
+    # player has sold a card is restored from the save (see card_sold, restored
+    # with the other permanent gains), so a load cannot re-gag a board a sale
+    # has already freed.
     game.trial_gravity_dir = None
     for card in game.cards:
         card.flipped = False
@@ -706,7 +721,6 @@ def _load_save_data(game, data, slot):
     game.run_cleared = False
     game.awaiting_after_run = False
     game.run_time = 0.0
-    game.assembler.clear()
     game.assigned_toolbox_indexes = {}
     game._clear_toolbox_selection()
 
@@ -722,9 +736,9 @@ def wipe_slot(game, slot):
 def start_new_game_in_slot(game, slot):
     """Start a fresh game assigned to the given slot (no save written yet)."""
     game.reset_game()
-    # Every new game begins with the board locked to its starting centered 2x3
+    # Every new game begins with the board locked to its starting centered 2x2
     # region; buying Board Units unlocks squares. (Starting a NEW game always
-    # resets the board to this 2x3 start — an existing game's unlocked state is
+    # resets the board to this 2x2 start — an existing game's unlocked state is
     # only restored when its slot is loaded, not when another game begins.)
     game._reset_board_to_start()
     game.save_slot = slot

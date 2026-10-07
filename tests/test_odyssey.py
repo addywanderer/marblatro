@@ -112,20 +112,20 @@ class OdysseyCardTests(GameTestCase):
         self.assertTrue(self.game._bank_selected_item())
         self.assertEqual(len(self.game.inaccessible), 2)
 
-    def test_banking_unassigns_the_item_from_the_assembler(self):
-        # The assembler works by index into the inventory, so a component on its
-        # way out cannot stay assigned to it.
+    def test_banking_unassigns_the_item_from_the_next_block(self):
+        # The assignment is tracked by inventory cell, so a component on its
+        # way out cannot stay assigned to the block S would build.
         self._own_odyssey()
         shape = main.Component.shape_component(main.Shape.CIRCLE, price=20)
         self.game.toolbox.add(shape)
         self._select(shape)
         self.game._use_component(shape)
-        self.assertIs(self.game.assembler.shape, shape)
+        self.assertIs(self.game.assigned_part(main.Component.SHAPE), shape)
 
         self.assertTrue(self.game._bank_selected_item())
 
-        self.assertIsNone(self.game.assembler.shape)
-        self.assertNotIn(shape, self.game.assembler.effects)
+        self.assertIsNone(self.game.assigned_part(main.Component.SHAPE))
+        self.assertNotIn(shape, self.game.assigned_effects())
         self.assertNotIn(shape, self.game.assigned_toolbox_indexes)
 
     def test_the_item_comes_back_and_pays_half_its_sell_price(self):
@@ -274,7 +274,7 @@ class OdysseyWiringTests(GameTestCase):
         self.assertEqual(self.game.inaccessible, [])
         self.assertIn(wall, self.game.toolbox.items)
 
-    def test_the_column_sits_right_of_the_token_column(self):
+    def test_the_column_sits_right_of_the_inventory(self):
         self._own_odyssey()
         wall = self._select_wall()
         self.assertTrue(self.game._bank_selected_item())
@@ -283,7 +283,10 @@ class OdysseyWiringTests(GameTestCase):
         second = self.game.inaccessible_rect(1)
         self.assertEqual(first.x, main.INACCESSIBLE_COORDS[0])
         self.assertEqual(first.y, main.INACCESSIBLE_COORDS[1])
-        self.assertGreater(first.x, main.TOKEN_COORDS[0])
+        # The tokens are part of the inventory itself (see Game._token_rect),
+        # so what the away column sits beside is the inventory.
+        self.assertGreaterEqual(first.x,
+                                main.TOOLBOX_COORDS[0] + main.TOOLBOX_COORDS[2])
         self.assertEqual(second.y - first.y, main.GRID_SIZE)   # one slot each
 
     def test_the_column_is_drawn_with_the_banked_item(self):

@@ -86,9 +86,26 @@ class PackPriceTests(GameTestCase):
                                   size=main.Pack.size_name(size)):
                     base = components.pack_base_price(pack_type)
                     self.assertGreater(base, 0)
+                    if pack_type != main.Pack.SHAPE:
+                        base *= components.NON_SHAPE_PACK_PRICE_FACTOR
                     self.assertEqual(
                         components.pack_price(pack_type, size),
                         max(1, int(base * main.Pack.SIZE_PRICE_FACTORS[size])))
+
+    def test_only_a_shape_pack_is_sold_at_full_price(self):
+        # A shape pack is the one type the shelf charges what its options are
+        # worth; every other pack goes for half.
+        for pack_type in main.Pack.ORDER:
+            for size in main.Pack.SIZE_ORDER:
+                with self.subTest(pack=main.Pack.name(pack_type),
+                                  size=main.Pack.size_name(size)):
+                    full = max(1, int(components.pack_base_price(pack_type)
+                                       * main.Pack.SIZE_PRICE_FACTORS[size]))
+                    price = components.pack_price(pack_type, size)
+                    if pack_type == main.Pack.SHAPE:
+                        self.assertEqual(price, full)
+                    elif full > 1:
+                        self.assertEqual(price, full // 2)
 
     def test_a_bigger_pack_costs_more_and_none_is_free(self):
         for pack_type in main.Pack.ORDER:
@@ -337,6 +354,115 @@ class PackShopTests(GameTestCase):
         self.assertIsNone(self.game.open_pack)
         self.assertEqual(self.game.cash, pack.price - 1)
         self.assertIn("Need $", self.game.shop_message)
+
+    def test_a_shelf_slot_offers_its_kind_at_the_asked_for_odds(self):
+        # The user's odds for a non-pack shop option: 23% card, 15% action,
+        # 8% shape, 12% effect, 22% scorer, 20% block (see
+        # components.Pack.SHELF_WEIGHTS — the one place the odds are set).
+        self.assertEqual(sum(main.Pack.SHELF_WEIGHTS.values()), 100)
+        self.assertEqual(
+            main.Pack.SHELF_WEIGHTS,
+            {main.Pack.CARD: 23, main.Pack.ACTION: 15, main.Pack.SHAPE: 8,
+             main.Pack.EFFECT: 12, main.Pack.SCORER: 22, main.Pack.BLOCK: 20})
+        # Every kind a shelf slot may deal has odds of its own, so none of them
+        # is drawn as a side effect of a missing weight.
+        self.assertTrue(all(main.Pack.shelf_weight(t) > 0
+                            for t in main.SHELF_OFFER_TYPES))
+        # A long run of rolls lands on those odds: what a roll DEALS is checked
+        # elsewhere, so this watches the kind drawn (an undeduped roll, which
+        # is the thing the odds belong to — see _roll_random_offer).
+        for kinds, wanted in ((main.SHELF_OFFER_TYPES, main.Pack.SHELF_WEIGHTS),
+                              # The odds are relative, so a shelf cut down to
+                              # two kinds (as some tests do) still splits those
+                              # two by their own weights: 23 : 8.
+                              ((main.Pack.CARD, main.Pack.SHAPE),
+                               {main.Pack.CARD: 23, main.Pack.SHAPE: 8})):
+            with self.subTest(kinds=[main.Pack.name(t) for t in kinds]):
+                sources = []
+                roll = main.Shop._offer_of
+
+                def spy(shop, source, col, row, parts_only=False):
+                    sources.append(source)
+                    return roll(shop, source, col, row, parts_only=parts_only)
+
+                shop = main.Shop(main.SHOP_COORDS)
+                with mock.patch.object(main, "SHELF_OFFER_TYPES", tuple(kinds)):
+                    with mock.patch.object(main.Shop, "_offer_of", spy):
+                        for _ in range(20000):
+                            shop._roll_random_offer(0, 0)
+                total = sum(wanted.values())
+                self.assertEqual(len(sources), 20000)
+                for pack_type, weight in wanted.items():
+                    share = sources.count(pack_type) / len(sources)
+                    self.assertAlmostEqual(share, weight / total,
+                                           delta=0.01, msg=main.Pack.name(pack_type))
+
+    def test_buying_a_pack_reveals_its_type_in_the_collection(self):
+        # A pack is revealed by BUYING one, by type: the size is not part of
+        # the entry (see collection.discover_pack), so a big card pack and a
+        # giga card pack reveal the same one Card Pack.
+        pack = self._place_pack(main.Pack.CARD, main.Pack.BIG)
+        self.assertFalse(collection.is_pack_discovered(main.Pack.CARD))
+        self.game._buy_shop_item(pack)
+        self.assertTrue(collection.is_pack_discovered(main.Pack.CARD))
+        self.assertTrue(any(p.title == "New pack"
+                            and p.description == "Card Pack"
+                            for p in self.game.popups))
+        # Only that type: every other pack stays hidden.
+        self.assertFalse(any(collection.is_pack_discovered(t)
+                             for t in main.Pack.ORDER
+                             if t != main.Pack.CARD))
+        # A second copy of it, at another size, is nothing new.
+        self.game.popups = []
+        self.game._buy_shop_item(self._place_pack(main.Pack.CARD,
+                                                  main.Pack.GIGA))
+        self.assertFalse(any(p.title == "New pack" for p in self.game.popups))
+        # An unaffordable pack is not bought, so it reveals nothing.
+        unaffordable = self._place_pack(main.Pack.RANDOM, main.Pack.NORMAL)
+        self.game.cash = 0
+        self.game._buy_shop_item(unaffordable)
+        self.assertFalse(collection.is_pack_discovered(main.Pack.RANDOM))
+
+    def test_a_bought_pack_type_survives_a_collection_reload(self):
+        # Discoveries live in the profile's collection.json, so a bought pack
+        # type is still revealed after the cache is dropped (a reload).
+        pack = self._place_pack(main.Pack.PART, main.Pack.NORMAL)
+        self.game._buy_shop_item(pack)
+        collection.reset()
+        self.assertTrue(collection.is_pack_discovered(main.Pack.PART))
+
+    def test_the_codex_lists_one_entry_per_pack_type(self):
+        # Every pack the shelf can deal is a codex entry of its own, hidden
+        # until one of that type is bought (see Game._collection_entries).
+        entries = self.game._collection_entries()
+        packs = [e for e in entries if e[0] == "pack"]
+        self.assertEqual([e[1] for e in packs], main.Pack.ORDER)
+        self.assertTrue(all(e[4] for e in packs))          # every one has art
+        self.assertTrue(all(e[2] == "???" and e[3] == "???" and not e[5]
+                            for e in packs))
+        collection.discover_pack(main.Pack.RANDOM)
+        entry = next(e for e in self.game._collection_entries()
+                     if e[0] == "pack" and e[1] == main.Pack.RANDOM)
+        self.assertEqual(entry[2], "Random Pack")
+        self.assertEqual(entry[3], main.Pack.description(main.Pack.RANDOM))
+        self.assertTrue(entry[5])
+        # The revealed entry draws its sealed bundle (its type's colour, band
+        # and glyph, and no size: the entry is the TYPE).
+        for pack_type in main.Pack.ORDER:
+            with self.subTest(pack=main.Pack.name(pack_type)):
+                collection.discover_pack(pack_type)
+                icon = pygame.Rect(10, 10, main.GRID_SIZE, main.GRID_SIZE)
+                main.ui.draw_collection_icon(self.game, "pack", pack_type, icon)
+                band = pygame.Rect(icon.x + 2, icon.centery - 3,
+                                   icon.width - 4, 7)
+                self.assertEqual(self.game.screen.get_at(band.center)[:3],
+                                 main.Pack.color(pack_type))
+
+    def test_unlocking_the_collection_reveals_every_pack_type(self):
+        self.game._unlock_entire_collection()
+        self.assertTrue(all(collection.is_pack_discovered(t)
+                            for t in main.Pack.ORDER))
+        self.assertTrue(all(e[5] for e in self.game._collection_entries()))
 
     def test_the_overlay_lists_one_cell_per_option(self):
         pack = self._place_pack(main.Pack.CARD, main.Pack.GIGA)

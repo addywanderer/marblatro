@@ -84,6 +84,19 @@ def _group_card(group, scorer):
     return main.match_group_card(group, scorer)
 
 
+# The shelf kind each offer kind is drawn from (see Shop._offer_of), for tests
+# that need one particular kind of shop offer on the shelf (see
+# GameTestCase._place_shop_offer).
+_SHOP_OFFER_SOURCES = {
+    main.Component.SHAPE: main.Pack.SHAPE,
+    main.Component.EFFECT: main.Pack.EFFECT,
+    main.Component.SCORER: main.Pack.SCORER,
+    "block": main.Pack.BLOCK,
+    "card": main.Pack.CARD,
+    "action": main.Pack.ACTION,
+}
+
+
 def _card_item(group, scorer, amount=None):
     """A CardItem for a (match group x scorer) card, at the AVERAGE magnitude.
 
@@ -263,10 +276,14 @@ class GameTestCase(unittest.TestCase):
 
 
     def _toolbox_title_region(self):
-        """The bottom-left region of the inventory (toolbox) where its title sits."""
+        """The top-left strip of the inventory (toolbox) where its title sits.
+
+        The inventory is labelled the way the card and action areas are (see
+        ui.draw_toolbox): the label sits just ABOVE the panel's top-left
+        corner.
+        """
         return pygame.Rect(main.TOOLBOX_COORDS[0] + 6,
-                           main.TOOLBOX_COORDS[1] + main.TOOLBOX_COORDS[3] - 28,
-                           220, 26)
+                           main.TOOLBOX_COORDS[1] - 20, 220, 20)
 
 
     def _shop_title_region(self):
@@ -483,6 +500,32 @@ class GameTestCase(unittest.TestCase):
                            effects=list(effects))
         self.game.grid[(x, y)] = block
         return block
+
+
+    # --- Shop offers: placing one particular kind on the shelf --------------
+
+    def _place_shop_offer(self, kind, cell=1):
+        """Put an offer of ``kind`` on the shelf's item row and return it.
+
+        The shelf's five slots draw their kinds at their own odds — a shape
+        offer turns up 8% of the time, an effect 12% (see
+        components.Pack.SHELF_WEIGHTS) — so a test that needs ONE particular
+        kind must place one, rather than hunt the rolled shelf for it: hunting
+        made those tests pass or fail on the roll.
+        """
+        source = _SHOP_OFFER_SOURCES[kind]
+        offer = None
+        for _ in range(main.OFFER_DUPLICATE_TRIES):
+            offer = self.game.shop._offer_of(source, cell, main.SHOP_ITEM_ROW)
+            # A run role sold as a part comes back as a ready-made block (see
+            # Shop._scorer_offer), so a scorer request re-rolls until it is
+            # really a scorer.
+            if getattr(offer, "kind", None) == kind:
+                break
+        self.game.shop.items = [i for i in self.game.shop.items
+                                if (i.col, i.row) != (cell, main.SHOP_ITEM_ROW)]
+        self.game.shop.items.append(offer)
+        return offer
 
 
     def _click(self, pos):

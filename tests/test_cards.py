@@ -996,8 +996,8 @@ class CardsTests(GameTestCase):
         self.assertEqual(main.cards.island_group_count(game), 0)
         game.unlocked_cells = {(0, 0)}
         self.assertEqual(main.cards.island_group_count(game), 1)
-        # A 2x3 starter region (and any rectangular block) is one island.
-        game.unlocked_cells = {(x, y) for x in range(2) for y in range(3)}
+        # A 2x2 starter region (and any rectangular block) is one island.
+        game.unlocked_cells = {(x, y) for x in range(2) for y in range(2)}
         self.assertEqual(main.cards.island_group_count(game), 1)
         # A corner-touching pair is TWO islands...
         game.unlocked_cells = {(0, 0), (1, 1)}

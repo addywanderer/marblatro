@@ -23,7 +23,7 @@ pip install pygame numpy
 
 | Input | What it does |
 |---|---|
-| Left-click a toolbox item | Select it (a block is armed for placement, a component goes to the assembler) |
+| Left-click a toolbox item | Select it (a block is armed for placement, a component joins the next block) |
 | Left-drag on the board | Place the armed block — it costs the item's price |
 | Right-click a block | Erase it (it goes back to the toolbox as a block) |
 | Hover anything | The sidebar describes it: shape, effects, scorer, trigger limit |

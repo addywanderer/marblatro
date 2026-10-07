@@ -74,8 +74,9 @@ def apply_cards(game):
     mult, Ripped Card, Cozy, Painting, Synthesizer) in card-area order,
     so a card's particle pops on the card that paid. End-of-run and
     fragile-break cards fire elsewhere (see apply_cards_on_finish /
-    on_fragile_broken), and every xMult a run earns is banked for the run's end
-    (see Game._apply_xmult).
+    on_fragile_broken), and an xMult a CARD pays is banked for the run's end
+    (see Game._apply_xmult) — a SCORER's xMult is paid where the marble touches
+    it instead (see Game._apply_xmult_now).
     """
     if _owns_wrecking_ball_card(game):
         _apply_wrecking_bonus(game)
@@ -169,9 +170,9 @@ def _named_card_units(game, measure):
       multiplier already has (see stencil_units), so Stencil alone in a
       five-slot area reads 4 and multiplies the multiplier by 5 (ratio 4.0).
     * plain_rects = the plain walls on the board (see plain_rect_count): a Rect
-      block with no effect at all and no scorer — the block the assembler
-      builds when every part is left out. Claustrophobia pays ratio 0.75 of it,
-      which is +3 mult a wall.
+      block with no effect at all and no scorer — the block S builds when every
+      part is left out. Claustrophobia pays ratio 0.75 of it, which is +3 mult
+      a wall.
     * inside_locked_no_phase = the seconds the marbles spent inside a LOCKED
       board unit while NOT phasing (see Game._count_locked_no_phase_time): the
       same "any point of the marble inside the unit" test as inside_time's
@@ -368,7 +369,7 @@ def island_group_count(game):
     SIDES (up/down/left/right). Two groups that only touch at a CORNER are
     different islands — the corner between them is water — so a board cut along
     a diagonal counts as two. The count is of GROUPS, not units: the starter
-    2x3 region is one island, and so is the whole board once it has been
+    2x2 region is one island, and so is the whole board once it has been
     unlocked into one continent. A board with nothing unlocked has none.
 
     Counted with a flood fill rather than by walking the board in order, so a
@@ -406,8 +407,8 @@ def plain_rect_count(game):
     """Claustrophobia's measure: how many plain walls the board holds.
 
     A "plain rect" is the cheapest thing in the game to field and the one thing
-    the assembler builds out of nothing: a RECT-shaped block with no effect at
-    all and no scorer (press S with nothing assigned and this is what lands).
+    S builds out of nothing: a RECT-shaped block with no effect at all and no
+    scorer (press S with nothing assigned and this is what lands).
     Only blocks ON the board count — the card is about a cramped marble box, so
     a wall waiting in the inventory is not crowding anything — and the locked
     squares' own walls do not count either: the game generates those around the
@@ -630,6 +631,13 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         units = max(1, round(amount))
         game.drill_run_units += units
         text, color = game._particle_amount_text(units), ORANGE
+    elif scorer == Scorer.PACKED:
+        # Packed: the inventory gains slots when the card fires, for good (see
+        # Game._grant_inventory_slots). The count this run grants is remembered
+        # so a retry takes back only what the discarded run won.
+        slots = max(1, round(amount))
+        game._grant_inventory_slots(slots)
+        text, color = f"+{slots}", ORANGE
     elif scorer == Scorer.UNDERTAKER:
         # Undertaker: mult for each block destroyed this run.
         gained = amount * game.run_blocks_destroyed
@@ -995,12 +1003,14 @@ def apply_cards_on_finish(game):
     The named cards whose phase is "end" pay here — Explorer's visited-units
     xMult, Astronaut's black-hole mult, Plane's air-time chips, Skater's
     slippery xMult, Fountain's pipe streaks, Island's groups — because their
-    measures are only final once the marbles have stopped (and, for the xMult ones, because
-    xMult is a run-end calculation: the finish path flushes the whole banked
-    product right after this, see Game._flush_run_xmult). A Blueprint copies the card to its immediate left; a card disabled
-    by the Card cutter or Deal breaker trial is skipped (and can't be copied
-    either). Their popups appear where the run ended (on the finished marble),
-    so they are visible instead of lost at the top-of-screen card area.
+    measures are only final once the marbles have stopped (and, for the xMult
+    ones, because a CARD's xMult is a run-end calculation: the finish path
+    flushes the whole banked product right after this, see
+    Game._flush_run_xmult). A Blueprint copies the card to its immediate left;
+    a card disabled by the Card cutter or Deal breaker trial is skipped (and
+    can't be copied either). Their popups appear where the run ended (on the
+    finished marble), so they are visible instead of lost at the top-of-screen
+    card area.
     """
     fx, fy = run_finish_pos(game)
     for i, card in enumerate(game.cards):
