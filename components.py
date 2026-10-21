@@ -941,7 +941,7 @@ class Card:
     # so the free ids left in the band are 12..77.
     TESSERACT = 94  # permanently +0.1 xMult for every shop reroll
     THOUSAND_HANDED = 95  # creates a random action after every run
-    PROCRASTINATION = 96  # ends the run a second late: rewinds it once and refills triggers
+    PROCRASTINATION = 96  # ends the run a second late: rewinds it once per copy and refills triggers
     ESSENCE = 97  # $10 a run, one card slot fewer, 2 permanent tokens when sold
     CONCERT = 98  # +1 trigger per run for every block that is not a plain rect
     # The two newest whole cards. Hoard takes the first free id of the 12..77
@@ -1115,7 +1115,7 @@ class Card:
         WATCH: "The run's time score factor is always at its maximum, however long the run takes",
         TESSERACT: "Every shop reroll permanently adds +0.1 xMult, applied at the start of each run",
         THOUSAND_HANDED: "Creates a random action after every run",
-        PROCRASTINATION: "Rewinds the run 1 second the first time a marble finishes, refilling every block's triggers",
+        PROCRASTINATION: "Rewinds the run 1 second each time it finishes, refilling every trigger — one rewind per copy",
         ESSENCE: "Gives $10 at the end of every run, but takes a card slot away — selling it leaves 2 random permanent Spirit tokens",
         CONCERT: "Every block that is not a plain rect and has both an effect and a scorer can score 1 more time per run",
         HOARD: "Right-click a shop option to hold it through rerolls; one held offer per copy of this card",

@@ -76,12 +76,16 @@ MAX_CARDS = 5  # Maximum owned cards the card area can hold at once
 MAX_ACTIONS = 2  # Maximum owned actions the action area can hold at once
 
 MARBLE_BOX_COORDS = (160, 160, 480, 560)  # board: 180..580 x, 150..750 y
-TOOLBOX_COORDS = (680, 400, 240, 40)  # x, y, width, height of the toolbox (the inventory)
-CARD_AREA_COORDS = (680, 240, MAX_CARDS * GRID_SIZE, GRID_SIZE)
-ACTION_AREA_COORDS = (680, 320, MAX_ACTIONS * GRID_SIZE, GRID_SIZE)
+# The inventory panel's FULL area: its grid is at most INVENTORY_MAX_COLS x
+# INVENTORY_MAX_ROWS cells, drawn from the BOTTOM of this rect up (see
+# Toolbox.rect), so a small inventory keeps the panel's bottom edge — and the
+# SELL/UPGRADE buttons under it — where they are.
+TOOLBOX_COORDS = (680, 360, 200, 80)
+CARD_AREA_COORDS = (680, 200, MAX_CARDS * GRID_SIZE, GRID_SIZE)
+ACTION_AREA_COORDS = (680, 280, MAX_ACTIONS * GRID_SIZE, GRID_SIZE)
 CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and card area
 SHOP_COORDS = (680, 480, 280, 240)  # x, y, width, height of the shop
-TRIAL_BOX_COORDS = (680, 120, 200, 80)  # trial box above the cards (top-left stack)
+TRIAL_BOX_COORDS = (680, 80, 200, 80)  # trial box above the cards (top-left stack)
 SHOP_GRID_COLS = SHOP_COORDS[2] // GRID_SIZE
 SHOP_GRID_ROWS = SHOP_COORDS[3] // GRID_SIZE
 
@@ -246,7 +250,7 @@ REQUIRED_RUNS_TO_WIN = 22  # Meet the score target in at least 22 of the 24 runs
 # Run/round dots: a transposed 8x3 grid (8 rounds across, 3 runs down) that
 # sits above the actions display, with the final (boss) run at the bottom
 # right. RUN_DOT_GRID is the center of round 1 / run 1 (the top-left dot).
-RUN_DOT_GRID = (904, 140)
+RUN_DOT_GRID = (904, 100)
 RUN_DOT_DX = 16  # Horizontal spacing between rounds (columns)
 RUN_DOT_DY = 15  # Vertical spacing between a round's runs (rows)
 RUN_DOT_RADIUS = 6
@@ -267,12 +271,14 @@ SHOP_REFRESH_BUTTON_RECT = pygame.Rect(SHOP_COORDS[0] + SHOP_COORDS[2] - 112,
 # trial and its RIGHT half buys no trial for the run (see
 # _click_trial_display); hovering it shows both prices.
 TRIAL_BOX_RECT = pygame.Rect(TRIAL_BOX_COORDS)
-SELL_OVERLAY_RECT = pygame.Rect(TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2] - GRID_SIZE,
-                                TOOLBOX_COORDS[1] + TOOLBOX_COORDS[3] - GRID_SIZE,
-                                GRID_SIZE, GRID_SIZE)
-UPGRADE_OVERLAY_RECT = pygame.Rect(TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2] - 2 * GRID_SIZE,
-                                   TOOLBOX_COORDS[1] + TOOLBOX_COORDS[3] - GRID_SIZE,
-                                   GRID_SIZE, GRID_SIZE)
+# The SELL and UPGRADE buttons hang off the inventory's bottom-right corner,
+# ONE GRID UNIT BELOW the panel (user request: they used to sit on the panel's
+# own bottom-right cells and covered the two rightmost inventory slots). They
+# are drawn only while something is selected (see ui.draw_sell_overlay /
+# draw_upgrade_overlay), which is exactly when they are clickable. The panel's
+# width follows the inventory's own size (see Toolbox.rect), so the rects are
+# Game geometry rather than constants: Game.sell_overlay_rect /
+# upgrade_overlay_rect.
 GAME_OVER_MENU_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 320, 560, 200, 48)
 GAME_OVER_NEW_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 100, 560, 200, 48)
 GAME_OVER_CONTINUE_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 120, 560, 200, 48)
@@ -342,8 +348,29 @@ CHALLENGER_COST_FACTOR = 0.5
 # because those items are put AWAY for the run rather than carried (see
 # TOOLBOX_COORDS).
 ODYSSEY_CASH_FRACTION = MAGNITUDES.ODYSSEY_CASH_FRACTION
-INACCESSIBLE_COORDS = (TOOLBOX_COORDS[0] + TOOLBOX_COORDS[2] + 20,
-                       TOOLBOX_COORDS[1], GRID_SIZE, GRID_SIZE * MAX_TOKENS)
+INACCESSIBLE_COORDS = (SHOP_COORDS[0] + SHOP_COORDS[2] + 20,
+                       TOOLBOX_COORDS[1] + TOOLBOX_COORDS[3] - GRID_SIZE,
+                       GRID_SIZE, GRID_SIZE * MAX_TOKENS)
+# The inventory holds everything the player owns, with NO size limit: its grid
+# only ever SHOWS a page of it at a time, drawn at random from the whole
+# inventory (see Toolbox.items / Toolbox.stash). The grid is at most
+# INVENTORY_MAX_COLS x INVENTORY_MAX_ROWS cells — it shrinks to the inventory's
+# own size and grows a row when the inventory outgrows one — and when even that
+# is not enough the arrow box on its right edge turns the page.
+# DISCARD_COUNT_MAX is how many items one discard may swap out at once, and
+# DISCARDS_PER_RUN how many discards a run hands out (the count comes back every
+# time a run is continued — see Game._continue_run).
+DISCARDS_PER_RUN = 2
+DISCARD_COUNT_MAX = 4
+INVENTORY_MAX_COLS = TOOLBOX_COORDS[2] // GRID_SIZE
+INVENTORY_MAX_ROWS = TOOLBOX_COORDS[3] // GRID_SIZE
+# The two 1x1 boxes attached to the RIGHT edge of the inventory panel (see
+# ui.draw_toolbox): the TOP HALF turns the page when the inventory holds more
+# than the grid can show, and the box DIRECTLY BELOW it opens the WHOLE
+# inventory in a pop-up laid out like an opened pack (see
+# ui.draw_inventory_overlay). Both follow the panel's own size, so they are
+# Game geometry rather than constants: Game.inventory_page_button_rect /
+# inventory_view_button_rect.
 # The bottom-left MAIN MENU button on the play screen: leaving the current game
 # and returning to the title screen (same action as the game-over screen's
 # MAIN MENU button). Sized to stay left of the re-centered board.
@@ -410,6 +437,14 @@ ESSENCE_RUN_CASH = MAGNITUDES.ESSENCE_RUN_CASH
 ESSENCE_TOKENS = 2
 BOARD_UNIT_ROW = SHOP_PACK_ROW  # the shelf's lower row
 BOARD_UNIT_COL = SHOP_PACK_SLOTS + 1  # right of the three pack slots
+# The inventory starts a save with only this many slots (the panel's grid has
+# room for more — see TOOLBOX_COORDS); the shop's fixed Inventory Slot tile
+# sells one more for INVENTORY_SLOT_PRICE, and the Packed scorer wins slots on
+# top of both (see main.Toolbox.capacity).
+INVENTORY_START_SLOTS = 4
+INVENTORY_SLOT_PRICE = 30
+INVENTORY_SLOT_ROW = SHOP_PACK_ROW  # beside the Board Unit tile
+INVENTORY_SLOT_COL = SHOP_PACK_SLOTS + 2
 FPS = 60
 DT = 1.0 / FPS
 # The Procrastination whole card sends a finished run back in time: when every
@@ -2412,59 +2447,337 @@ class Shop:
         return None
 
 class Toolbox:
-    """Inventory of bought blocks, styled like the marble box and shop."""
+    """Inventory of bought blocks, styled like the marble box and shop.
+
+    The inventory holds EVERYTHING the player owns, with no size limit, but only
+    a SELECTION of it is ever on display: ``items`` is what the panel's cells
+    show right now (at most ``capacity()`` of them, in cell order), and
+    ``stash`` is the rest of what the player owns, waiting to be brought out by
+    a reshuffle (every action used re-draws the selection, see
+    Game._consume_action) or by a discard (the F key, see Game._discard_items).
+
+    Everything that touches the panel — clicking, equipping, dragging, selling,
+    assembling — reads ``items``, so what is on display is the inventory as far
+    as the player's hands are concerned. ``every_item()`` is the whole thing,
+    and is what the full-inventory pop-up shows (see ui.draw_inventory_overlay).
+
+    The panel's own SIZE follows the inventory: it is as wide as the inventory
+    needs (up to INVENTORY_MAX_COLS) and takes a second row when one will not
+    do (up to INVENTORY_MAX_ROWS), anchored to the bottom of ``rect``. When the
+    inventory outgrows even that, the panel turns PAGES: the arrow box on its
+    top-right edge shows the next page of cells (see Game._turn_inventory_page).
+    """
     def __init__(self, rect):
-        self.rect = pygame.Rect(rect)
-        self.cols = rect[2] // GRID_SIZE
-        self.rows = rect[3] // GRID_SIZE
+        # The panel's FULL area. The grid drawn inside it is smaller (see rect),
+        # so this is the ceiling the size follows, not the panel itself.
+        self.rect_ceiling = pygame.Rect(rect)
         self.items = []
+        # The part of the inventory the panel is not showing (see the class
+        # docstring). It is the second half of ONE inventory: add() fills the
+        # display first and stashes the overflow.
+        self.stash = []
+        # How many cells the panel has to begin with: the grid has room for
+        # more (see TOOLBOX_COORDS), and the rest are bought from the shop (see
+        # Game.inventory_slots_bought) or won with the Packed scorer.
+        self._base_slots = INVENTORY_START_SLOTS
         # Extra cells the Packed scorer has won (see Game.inventory_slots_won,
         # which is the saved count this mirrors — the same split the shop's
-        # bonus_slots uses).
-        self.slot_bonus = 0
+        # bonus_slots uses). Setting it brings stashed items out to fill the
+        # new cells (see the property below).
+        self._slot_bonus = 0
+        # Which page of the display the panel shows (see first_shown). The game
+        # owns the arrow that changes it; this is the state behind it.
+        self.page = 0
+        # The non-item cells that share the panel: the Spirit tokens take the
+        # cells after the items (see Game._token_rect). Game points this at its
+        # own token list, so the panel's size and its page count follow tokens
+        # arriving and expiring without anything having to keep them in sync.
+        self.extra_cells = lambda: 0
+
+    @property
+    def base_slots(self):
+        """The cells the panel started the save with, plus the ones bought."""
+        return self._base_slots
+
+    @base_slots.setter
+    def base_slots(self, value):
+        grew = value > self._base_slots
+        self._base_slots = value
+        if grew:
+            self.fill()
+
+    @property
+    def slot_bonus(self):
+        """The cells the Packed scorer has won on top of the grid."""
+        return self._slot_bonus
+
+    @slot_bonus.setter
+    def slot_bonus(self, value):
+        grew = value > self._slot_bonus
+        self._slot_bonus = value
+        if grew:
+            self.fill()
 
     def capacity(self):
-        """How many items the inventory can hold: its grid, plus won slots."""
-        return self.cols * self.rows + self.slot_bonus
+        """How many items of the inventory are on display at once.
+
+        The slots the save STARTED with (INVENTORY_START_SLOTS), the ones bought
+        from the shop's Inventory Slot tile, and the ones the Packed scorer has
+        won. When the panel cannot draw them all on one page the rest wait on
+        the next (see first_shown).
+        """
+        return self.base_slots + self.slot_bonus
+
+    @property
+    def max_cols(self):
+        """The widest the panel may ever be drawn, in cells."""
+        return max(1, min(INVENTORY_MAX_COLS,
+                          self.rect_ceiling.width // GRID_SIZE))
+
+    @property
+    def max_rows(self):
+        """The tallest the panel may ever be drawn, in cells."""
+        return max(1, min(INVENTORY_MAX_ROWS,
+                          self.rect_ceiling.height // GRID_SIZE))
+
+    @property
+    def entries(self):
+        """The display entries that share the panel: the items, then the extras."""
+        return len(self.items) + self.extra_cells()
+
+    @property
+    def cols(self):
+        """How many cells wide the panel is drawn right now.
+
+        As wide as the inventory needs — its capacity, or the entries it is
+        currently showing if those are more — up to INVENTORY_MAX_COLS. A
+        four-slot inventory is a 4x1 panel; a bigger one grows column by column
+        until it is as wide as it may be.
+        """
+        return max(1, min(self.max_cols, max(self.capacity(), self.entries)))
+
+    @property
+    def rows(self):
+        """How many rows of cells the panel is drawn right now (up to the max)."""
+        needed = -(-max(self.capacity(), self.entries) // self.cols)
+        return max(1, min(self.max_rows, needed))
+
+    @property
+    def per_page(self):
+        """How many display entries one page of the panel holds."""
+        return self.cols * self.rows
+
+    @property
+    def rect(self):
+        """The panel's own rect: `cols` x `rows` cells, grown UP from the bottom.
+
+        The bottom edge stays put, so a one-row inventory sits where a two-row
+        one ends and the SELL/UPGRADE buttons under the panel never move (see
+        Game.sell_overlay_rect).
+        """
+        return pygame.Rect(self.rect_ceiling.x,
+                           self.rect_ceiling.bottom - self.rows * GRID_SIZE,
+                           self.cols * GRID_SIZE, self.rows * GRID_SIZE)
+
+    def page_count(self):
+        """How many pages the display needs (at least one)."""
+        return max(1, -(-self.entries // self.per_page))
+
+    def first_shown(self):
+        """Index of the first display entry on the page being shown.
+
+        The page is clamped here rather than on every change to the inventory,
+        so a removal or a growth can never leave the panel on a page that no
+        longer exists (see turn_page).
+        """
+        self.page %= self.page_count()
+        return self.page * self.per_page
+
+    def shown_items(self):
+        """The items on the page being shown, in cell order."""
+        first = self.first_shown()
+        return self.items[first:first + self.per_page]
+
+    def turn_page(self, step=1):
+        """Turn the panel to the next (or previous) page; returns the new page."""
+        self.first_shown()  # clamp to the pages that exist right now
+        self.page = (self.page + step) % self.page_count()
+        return self.page
+
+    def every_item(self):
+        """Every item the player owns: the ones on display, then the rest."""
+        return list(self.items) + list(self.stash)
+
+    def contains(self, item):
+        """True when the player owns this exact item (on display or stashed)."""
+        return any(item is owned for owned in self.every_item())
 
     def add(self, item):
-        """Add a bought block config; returns False if the toolbox is full."""
-        if len(self.items) >= self.capacity():
-            return False
-        self.items.append(item)
+        """Take an item into the inventory; it can never be refused.
+
+        The inventory has no size limit, so an item always fits: it joins the
+        panel's selection while there is a free cell for it, and otherwise waits
+        in the stash until a reshuffle or a discard brings it out. (The bool is
+        kept for the callers that ask whether the item was taken, which it now
+        always was.)
+        """
+        if len(self.items) < self.capacity():
+            self.items.append(item)
+        else:
+            self.stash.append(item)
         return True
 
+    def remove(self, item, refill=True):
+        """Take an item out of the inventory, display or stash.
+
+        Returns True when the player owned it. Removing by IDENTITY (``is``)
+        matters: two identical components or blocks are different items, and
+        only the one that was clicked may leave. With ``refill`` (the default)
+        the cell the panel loses is filled straight back from the stash, so the
+        panel keeps showing as much of the inventory as it has room for; a block
+        the player PLACES passes refill=False (user request: "when the player
+        places a block, don't replace that block's slot in the inventory with a
+        new item") — placing leaves its slot empty.
+        """
+        for bucket in (self.items, self.stash):
+            for index, owned in enumerate(bucket):
+                if owned is item:
+                    del bucket[index]
+                    if bucket is self.items and refill:
+                        self._fill_cell(index)
+                    return True
+        return False
+
+    def _fill_cell(self, index):
+        """Bring one stashed item onto the panel at ``index`` (if any and if there is room)."""
+        if len(self.items) >= self.capacity() or not self.stash:
+            return False
+        self.items.insert(min(index, len(self.items)),
+                          self.stash.pop(random.randrange(len(self.stash))))
+        return True
+
+    def fill(self):
+        """Bring stashed items out until the panel is full, or the stash is empty.
+
+        This is what grows the display when the inventory WINS a cell (a Packed
+        scorer, a v2 Inaction), what tops the panel up after a restore, and what
+        a removal uses to refill the cell it just emptied (see remove). Returns
+        the (extended) display.
+        """
+        while self._fill_cell(len(self.items)):
+            pass
+        return self.items
+
+    def settle(self):
+        """Fit the display back inside the capacity its slot count allows.
+
+        A save written before the panel's slots were bought can come back with
+        more items on display than the save owns cells for, so the overflow is
+        moved to the stash (nothing is lost — the display is only a window, see
+        the class docstring). Returns the (trimmed) display.
+        """
+        while len(self.items) > self.capacity():
+            self.stash.append(self.items.pop())
+        return self.items
+
+    def reshuffle(self):
+        """Re-draw which part of the inventory the panel shows, and in what order.
+
+        Every owned item is a candidate again — one that was on display can be
+        replaced, and one that was waiting can appear — so the selection really
+        is a fresh random draw each time (see Game._consume_action, which calls
+        this whenever an action is used).
+        """
+        pool = self.every_item()
+        # A full random permutation of the inventory: the panel takes its front,
+        # the stash keeps the rest. `sample` (not `shuffle`) so nothing else that
+        # orders a list is affected.
+        order = random.sample(pool, len(pool))
+        limit = max(0, min(self.capacity(), len(order)))
+        self.items = order[:limit]
+        self.stash = order[limit:]
+        return self.items
+
+    def discard(self, targets):
+        """Swap the given displayed items for owned ones the panel is not showing.
+
+        ``targets`` are items the panel is showing right now. Each is replaced,
+        in its own cell, by a random owned item drawn from off the display; the
+        discarded item goes back into that pool, so a later reshuffle or discard
+        can bring it out again, but it leaves the panel immediately. An item
+        that is itself being discarded in the same call is never drawn as a
+        replacement (it would just reappear). An item with nothing to swap in
+        (the inventory holds no more than the panel already shows) stays where
+        it is and is not counted. Returns the items that really were swapped
+        out, in the order they were handled.
+        """
+        swapped = []
+        for target in targets:
+            if not any(target is shown for shown in self.items):
+                continue
+            pool = [item for item in self.every_item()
+                    if not any(item is shown for shown in self.items)
+                    and not any(item is out for out in swapped)]
+            if not pool:
+                break
+            replacement = random.choice(pool)
+            index = next(i for i, shown in enumerate(self.items) if shown is target)
+            self.stash.remove(replacement)
+            self.stash.append(target)
+            self.items[index] = replacement
+            swapped.append(target)
+        return swapped
+
     def cell_rect(self, index):
-        """The screen rect of the inventory grid's cell at ``index``.
+        """The screen rect of the panel's cell at ``index`` ON THIS PAGE.
 
         The grid is read left to right, then top to bottom, so cell ``index``
         sits in column ``index % cols`` of row ``index // cols``. This is the
-        one place the inventory's own layout is spelled out: the items are
-        drawn in their cells here, and the Spirit tokens take the cells right
-        after them (see Game._token_rect).
+        one place the inventory's own layout is spelled out. ``index`` is a
+        page index (0 .. per_page), not an index into ``items``: the page's
+        entries start at first_shown (see rect_for to ask where an ITEM is).
         """
         return pygame.Rect(self.rect.x + (index % self.cols) * GRID_SIZE,
                            self.rect.y + (index // self.cols) * GRID_SIZE,
                            GRID_SIZE, GRID_SIZE)
 
+    def rect_for(self, index):
+        """The cell holding display entry ``index``, or None when it is not shown.
+
+        Display entries are the items first and then the extras (the Spirit
+        tokens), so this answers for either. An entry on another page has no
+        cell on screen right now — the arrow box turns the page to it.
+        """
+        panel = index - self.first_shown()
+        if 0 <= panel < self.per_page:
+            return self.cell_rect(panel)
+        return None
+
+    def panel_index_at(self, pos):
+        """The page cell at a screen position (0 .. per_page), or None."""
+        rect = self.rect
+        if not rect.collidepoint(pos):
+            return None
+        gx = (pos[0] - rect.x) // GRID_SIZE
+        gy = (pos[1] - rect.y) // GRID_SIZE
+        return gy * self.cols + gx
+
     def item_at(self, pos):
         """Return the owned item at a screen position, or None."""
-        if not self.rect.collidepoint(pos):
+        panel = self.panel_index_at(pos)
+        if panel is None:
             return None
-        gx = (pos[0] - self.rect.x) // GRID_SIZE
-        gy = (pos[1] - self.rect.y) // GRID_SIZE
-        index = gy * self.cols + gx
+        index = self.first_shown() + panel
         if 0 <= index < len(self.items):
             return self.items[index]
         return None
 
     def index_at(self, pos):
-        """Return the toolbox index (cell) at a screen position, or None."""
-        if not self.rect.collidepoint(pos):
+        """Return the index (into ``items``) of the item at a position, or None."""
+        panel = self.panel_index_at(pos)
+        if panel is None:
             return None
-        gx = (pos[0] - self.rect.x) // GRID_SIZE
-        gy = (pos[1] - self.rect.y) // GRID_SIZE
-        index = gy * self.cols + gx
+        index = self.first_shown() + panel
         if 0 <= index < len(self.items):
             return index
         return None
@@ -2868,10 +3181,10 @@ class Game:
         # True once a Debt block has triggered THIS RUN: the run then pays no
         # interest (see _award_cash). Reset at the start of every run.
         self.debt_run_triggered = False
-        # True once the Procrastination whole card has rewound THIS RUN: it
-        # rewinds the run's first completion only, so the run can still end (see
-        # _procrastination_rewind). Reset at the start of every run.
-        self.procrastination_used = False
+        # How many of this run's Procrastination rewinds have been spent, one
+        # per copy whose effect applies (see _procrastination_rewind). Reset at
+        # the start of every run.
+        self.procrastination_rewinds = 0
         # Fresh block contacts THIS RUN (Rally): every fresh non-role block
         # touch counts (re-touches count); a Rally block subtracts its own.
         self.run_fresh_touches = 0
@@ -2883,6 +3196,13 @@ class Game:
         # by its v2, which removes the limit altogether).
         self.inaction_used = 0
         self.card_slots_won = 0
+        # The inventory starts a new game with a full set of discards, nothing
+        # selected (see _discard_items / _toggle_toolbox_selection), and the
+        # whole-inventory pop-up closed.
+        self.discards_left = DISCARDS_PER_RUN
+        self.selection = []
+        self.inventory_open = False
+        self.inventory_page = 0
         # Packed: inventory slots won by touching a Packed block or card (saved,
         # and mirrored onto the toolbox as its slot_bonus). The slots granted by
         # THIS run are counted separately so a retry can take just those back,
@@ -2895,6 +3215,18 @@ class Game:
         # Game.action_row_window). A view state, not saved: it is clamped into
         # range whenever it is read.
         self.action_area_page = 0
+        # The inventory's discards left THIS run (see _discard_items) and the
+        # items toggled ON in it (see _toggle_toolbox_selection: a click selects
+        # an item, a second click unselects it, and F discards the selection).
+        # The count comes back with every run the player continues, so it is
+        # reset in _continue_run and not with the run's own build state.
+        self.discards_left = DISCARDS_PER_RUN
+        self.selection = []
+        # Whether the whole-inventory pop-up is open, and which page of it is on
+        # show (see Game._toggle_inventory_view / ui.draw_inventory_overlay).
+        # View state, not saved.
+        self.inventory_open = False
+        self.inventory_page = 0
         # Odyssey: the blocks and components the card has put AWAY (see
         # Game._bank_selected_item). They sit out of the inventory — drawn in
         # their own column beside the Spirit tokens — until the run is over,
@@ -2973,8 +3305,19 @@ class Game:
         self.shop = Shop(SHOP_COORDS, self)
         # The shop shows this many extra Picky offers on every refresh.
         self.shop.bonus_slots = self.bonus_slots
+        # Inventory slots BOUGHT from the shop's Inventory Slot tile, on top of
+        # INVENTORY_START_SLOTS (saved with the game, and mirrored onto the
+        # toolbox as its base_slots — see Toolbox.capacity /
+        # _buy_inventory_slot). Set before the toolbox is built, which reads it.
+        self.inventory_slots_bought = 0
         self.toolbox = Toolbox(TOOLBOX_COORDS)
-        # The inventory shows the grid plus the slots the Packed scorer has won.
+        # The Spirit tokens share the inventory panel with the items: they take
+        # the cells after them (see _token_rect), so the panel's own size and
+        # page count are read off the same list the tokens live in.
+        self.toolbox.extra_cells = lambda: len(self.tokens)
+        # The inventory shows the slots the save started with (bought ones
+        # included) plus the slots the Packed scorer has won.
+        self.toolbox.base_slots = INVENTORY_START_SLOTS + self.inventory_slots_bought
         self.toolbox.slot_bonus = self.inventory_slots_won
         # Bought cards (like Balatro jokers) live in the card area above the
         # toolbox and apply their effects every run while owned.
@@ -3169,6 +3512,11 @@ class Game:
             for dx in range(BOARD_START_WIDTH)
             for dy in range(BOARD_START_HEIGHT)}
         self.board_units = 0
+        # A brand-new save's inventory starts at INVENTORY_START_SLOTS slots
+        # (the shop sells more — see _buy_inventory_slot), so the bought count
+        # and the panel's own size both go back to the start together.
+        self.inventory_slots_bought = 0
+        self.toolbox.base_slots = INVENTORY_START_SLOTS
         self._board_walls = []
         self._board_walls_dirty = True
 
@@ -3304,6 +3652,37 @@ class Game:
         return pygame.Rect(self.shop.rect.x + BOARD_UNIT_COL * GRID_SIZE,
                            self.shop.rect.y + BOARD_UNIT_ROW * GRID_SIZE,
                            GRID_SIZE, GRID_SIZE)
+
+    def _inventory_slot_tile(self):
+        """Screen rect of the shop's always-present Inventory Slot tile.
+
+        One cell right of the Board Unit tile (see INVENTORY_SLOT_ROW / _COL):
+        $30 buys the inventory another slot for good (see
+        _buy_inventory_slot).
+        """
+        return pygame.Rect(self.shop.rect.x + INVENTORY_SLOT_COL * GRID_SIZE,
+                           self.shop.rect.y + INVENTORY_SLOT_ROW * GRID_SIZE,
+                           GRID_SIZE, GRID_SIZE)
+
+    def _buy_inventory_slot(self):
+        """Buy one more inventory slot (the shop's Inventory Slot tile).
+
+        The slot is permanent and saved (see inventory_slots_bought): it is
+        mirrored onto the toolbox as base_slots, which is what Toolbox.capacity
+        counts. Buying it brings a stashed item out at once if there is one, so
+        the player sees the new cell fill.
+        """
+        price = INVENTORY_SLOT_PRICE
+        if self.cash < price:
+            self._set_shop_message(f"Need ${price} for an inventory slot")
+            return False
+        self.cash -= price
+        self.inventory_slots_bought += 1
+        self.toolbox.base_slots = INVENTORY_START_SLOTS + self.inventory_slots_bought
+        self._set_shop_message(
+            f"Inventory grew to {self.toolbox.capacity()} slots (${price})")
+        sounds.play_coin()
+        return True
 
     def _board_wall_blocks(self):
         """The solid wall Blocks covering every locked square (cached).
@@ -3669,6 +4048,13 @@ class Game:
                 if (self.run_complete and self.awaiting_after_run
                         and event.key != pygame.K_y):
                     self._retry_run()
+                if self.inventory_open and event.key in (pygame.K_ESCAPE,
+                                                         pygame.K_f):
+                    # The whole-inventory pop-up holds the screen while it is
+                    # open, so ESC (or F, the key that opens its subject) just
+                    # closes it.
+                    self._toggle_inventory_view()
+                    continue
                 if event.key == pygame.K_a:
                     self.current_block_angle = (self.current_block_angle + 90) % 360
                 elif event.key == pygame.K_SPACE:
@@ -3698,6 +4084,11 @@ class Game:
                     # G: Odyssey puts the selected block/component away for the
                     # run (it comes back, and pays, after the run is continued).
                     self._bank_selected_item()
+                elif event.key == pygame.K_f:
+                    # F: discard — swap the SELECTED inventory items (a click
+                    # selects an item, a second click unselects it) for random
+                    # others from the whole inventory (DISCARDS_PER_RUN a run).
+                    self._discard_items()
                 elif event.key == pygame.K_s:
                     # S: apply the selected action to its subject, assemble the
                     # assigned toolbox parts into a block (missing parts default
@@ -3762,6 +4153,23 @@ class Game:
                             # _click_pack) until the pack is closed.
                             self._click_pack(mouse_pos)
                             continue
+                        if self.inventory_open:
+                            # The whole-inventory pop-up holds the click the
+                            # same way (see _click_inventory_view).
+                            self._click_inventory_view(mouse_pos)
+                            continue
+                        if (self.toolbox.page_count() > 1
+                                and self.inventory_page_button_rect().collidepoint(mouse_pos)):
+                            # The arrow box on the inventory's top-right edge:
+                            # turn the panel to its next page (see
+                            # _turn_inventory_page).
+                            self._turn_inventory_page()
+                            continue
+                        if self.inventory_view_button_rect().collidepoint(mouse_pos):
+                            # The 1x1 box on the inventory's right edge: show the
+                            # whole inventory (see _toggle_inventory_view).
+                            self._toggle_inventory_view()
+                            continue
                         if (self.run_complete and self.awaiting_after_run):
                             self._retry_run()
                         item = self.shop.item_at(mouse_pos)
@@ -3782,12 +4190,12 @@ class Game:
                             keep_selection = True
                             self._click_trial_display(mouse_pos)
                         elif (self.selected_toolbox_item is not None
-                                and SELL_OVERLAY_RECT.collidepoint(mouse_pos)):
+                                and self.sell_overlay_rect().collidepoint(mouse_pos)):
                             keep_selection = True
                             self._sell_selected_item()
                         elif (self.selected_toolbox_item is not None
                                 and isinstance(self.selected_toolbox_item, (Block, BlockItem))
-                                and UPGRADE_OVERLAY_RECT.collidepoint(mouse_pos)):
+                                and self.upgrade_overlay_rect().collidepoint(mouse_pos)):
                             keep_selection = True
                             self._upgrade_trigger_limit()
                         elif ACTION_UPGRADE_RECT.collidepoint(mouse_pos):
@@ -3810,23 +4218,38 @@ class Game:
                             # to spend on any locked board square.
                             keep_selection = True
                             self._buy_board_unit()
+                        elif self._inventory_slot_tile().collidepoint(mouse_pos):
+                            # The shop's fixed Inventory Slot tile: buy one more
+                            # slot on the inventory panel, for good.
+                            keep_selection = True
+                            self._buy_inventory_slot()
                         elif self.selected_action is not None:
                             # An action is active: the next block/card click
-                            # picks its subject (empty space cancels).
+                            # picks its subject (empty space cancels). A subject
+                            # picked OUTSIDE the inventory panel is not one of
+                            # its selected items, so the inventory's selection
+                            # goes with the click.
                             keep_selection = True
+                            if owned is None and not self.toolbox.rect.collidepoint(mouse_pos):
+                                self.selection = []
                             self._pick_action_subject(owned, card, grid_block)
                         elif owned is not None:
                             keep_selection = True
-                            if getattr(owned, "kind", None) == "block":
-                                self._equip_block(owned, self.toolbox.index_at(mouse_pos))
-                            else:
-                                self._select_toolbox_component(owned, self.toolbox.index_at(mouse_pos))
+                            # A click TOGGLES the item: the first selects it (a
+                            # block is armed for placement, a component joins the
+                            # next block), a second unselects it (see
+                            # _toggle_toolbox_selection).
+                            self._toggle_toolbox_selection(
+                                owned, self.toolbox.index_at(mouse_pos))
                         elif card is not None:
                             # Left-clicking an owned card selects it (B sells it
                             # for half price); clicking another card swaps their
                             # order in the card area (Blueprint copies the card
-                            # to its left, so order matters).
+                            # to its left, so order matters). A card is not an
+                            # inventory item, so the inventory's own selection
+                            # goes with the click.
                             keep_selection = True
+                            self.selection = []
                             selected = self.selected_toolbox_item
                             if (selected is not None
                                     and getattr(selected, "kind", None) == "card"
@@ -3879,7 +4302,19 @@ class Game:
                         else:
                             self.drawing = True
                             keep_selection = inside_grid and self.has_selected
-                        if not keep_selection and self.selected_toolbox_item is not None:
+                        # A left-click away from the inventory panel deselects
+                        # EVERYTHING in it (see _clear_toolbox_selection): the
+                        # toggled items and the one in hand. A click that
+                        # SELECTED something (a panel cell, a placed block, a
+                        # card) is a new selection, and the SELL/UPGRADE buttons
+                        # — which hang off the panel's bottom edge, outside it —
+                        # act on the selection, so neither clears it.
+                        if (not keep_selection
+                                and not self.toolbox.rect.collidepoint(mouse_pos)
+                                and not self.sell_overlay_rect().collidepoint(mouse_pos)
+                                and not self.upgrade_overlay_rect().collidepoint(mouse_pos)
+                                and (self.selection
+                                     or self.selected_toolbox_item is not None)):
                             self._clear_toolbox_selection()
                 # Right-clicking a SHOP OPTION is the Hoard whole card's
                 # business: it holds that offer in place across rerolls (and
@@ -4002,21 +4437,19 @@ class Game:
         self._sync_portal_pair_triggers(placed, list(self.grid.values()))
         sounds.play_plop()
         # A bought block is consumed on placement; an assembled block already
-        # consumed its components. Either way, the selection is cleared.
+        # consumed its components. Either way, the selection is cleared. The
+        # slot the block came FROM stays empty: placing does not slide another
+        # item in to replace it (see Toolbox.remove's refill).
         if (item is not None and getattr(item, "kind", None) == "block"
                 and item in self.toolbox.items):
-            self.toolbox.items.remove(item)
+            self.toolbox.remove(item, refill=False)
         # Moving a placed block removes it from its original cell.
         if moving_placed and (item.x, item.y) != (gx, gy):
             self.grid.pop((item.x, item.y), None)
-        self.has_selected = False
-        self.selected_toolbox_item = None
-        self.selected_toolbox_index = None
-        self.selected_shape = None
-        self.selected_effect = None
-        self.selected_scorer = None
-        self.selected_scorer_amount = None
-        self.selected_effect_amounts = {}
+        # The placed item left the inventory, so it leaves the SELECTION with it
+        # (and the other selected items go too: placing a block ends that round
+        # of selection — see _toggle_toolbox_selection).
+        self._clear_toolbox_selection()
         return True
 
     def _carry_trial_mark(self, item, gx, gy, placed):
@@ -4065,16 +4498,24 @@ class Game:
         self.shop_message = text
         self.shop_message_timer = SHOP_MESSAGE_DURATION
 
-    def _equip_block(self, item, index=None):
-        """Equip a block for placement."""
+    def _arm_block(self, item, index=None):
+        """Make ``item`` the block IN HAND (see _equip_block).
+
+        The in-hand block is what a click on the board places, what D upgrades
+        and what B sells. ``index`` is the panel cell it sits in (None for a
+        block that is on the board rather than in the inventory).
+        """
         self.has_selected = True
         self.selected_toolbox_item = item
         if index is None:
-            index = self.toolbox.items.index(item) if item in self.toolbox.items else None
+            index = self._shown_index_of(item)
         self.selected_toolbox_index = index
-        # Selecting a block switches to block mode: any half-built assembly is
-        # dropped so S places/disassembles the block instead of assembling it.
-        self._clear_assigned_parts()
+        # A block the player can click in the panel is one of the SELECTED items
+        # (see _toggle_toolbox_selection), so the highlight and the next click's
+        # toggle agree; a block lifted off the board is not in the inventory and
+        # is in hand alone.
+        if self.toolbox.contains(item) and not self.is_toolbox_selected(item):
+            self.selection.append(item)
         # A fragile block that shattered mid-run is stored with its original
         # shape, so moving it comes back as that shape instead of a permanent
         # Shape.NONE.
@@ -4096,12 +4537,168 @@ class Game:
         own_angle = getattr(item, "angle", None)
         if own_angle is not None:
             self.current_block_angle = own_angle
+
+    def _shown_index_of(self, item):
+        """The inventory cell ``item`` sits in right now, or None.
+
+        Matched by IDENTITY: two identical pieces are different items, and only
+        the one that was clicked may be highlighted (see draw_toolbox).
+        """
+        return next((index for index, shown in enumerate(self.toolbox.items)
+                     if shown is item), None)
+
+    def _equip_block(self, item, index=None):
+        """Equip a block for placement."""
+        # Selecting a block switches to block mode: any half-built assembly is
+        # dropped so S places/disassembles the block instead of assembling it
+        # (and the pieces it drops leave the selection with it).
+        self._clear_assigned_parts()
+        self._arm_block(item, index)
         self._set_shop_message(f"Selected {self._item_name(item)}")
 
     def _select_placed_block(self, block):
         """Select a block already placed in the marble box, like a toolbox block."""
         self._clear_toolbox_selection()
         self._equip_block(block)
+
+    # -----------------------------------------------------------------------
+    # The inventory: which part of it is on display, the discards, and the
+    # whole-inventory pop-up.
+    # -----------------------------------------------------------------------
+    def _reshuffle_inventory(self):
+        """Re-draw the inventory's selection (every action used does this).
+
+        The inventory holds everything the player owns, but the panel only ever
+        SHOWS a random selection of it (see Toolbox); using an action is what
+        turns the selection over, so a stashed item can be brought into reach.
+        Selected items the new draw leaves out stop being selected (see
+        prune_toolbox_selection), and a component assigned to the next block is
+        kept only while it is still shown (its cell index is re-found).
+        """
+        self.toolbox.reshuffle()
+        self.prune_toolbox_selection()
+        for comp in list(self.assigned_toolbox_indexes):
+            index = self._shown_index_of(comp)
+            if index is None:
+                del self.assigned_toolbox_indexes[comp]
+            else:
+                self.assigned_toolbox_indexes[comp] = index
+        return self.toolbox.items
+
+    def _discard_items(self):
+        """Swap the SELECTED inventory items for others from the whole inventory (F).
+
+        One discard replaces up to DISCARD_COUNT_MAX of the items ON DISPLAY with
+        random other items the player owns (see Toolbox.discard) — an item that
+        was not on display can come out, and the discarded one goes back to wait.
+        The targets are the items the player has toggled on (see
+        _toggle_toolbox_selection); with only the item in hand selected, that one
+        is discarded, so "click an item, press F" works as expected. A run hands
+        out DISCARDS_PER_RUN of them (see discards_left, which comes back with
+        every continued run).
+        """
+        targets = list(self.selection)
+        if not targets:
+            selected = self.selected_toolbox_item
+            if selected is not None and self.toolbox.contains(selected):
+                targets = [selected]
+        if not targets:
+            self._set_shop_message(
+                "Click inventory items to select them, then press F to discard")
+            return False
+        if len(targets) > DISCARD_COUNT_MAX:
+            self._set_shop_message(
+                f"Discard at most {DISCARD_COUNT_MAX} items at once")
+            return False
+        if self.discards_left <= 0:
+            self._set_shop_message(
+                "No discards left this run — continuing the run gives them back")
+            return False
+        swapped = self.toolbox.discard(targets)
+        if not swapped:
+            self._set_shop_message(
+                "Nothing else in the inventory to swap in yet")
+            return False
+        self.discards_left -= 1
+        # The cells the swaps happened in keep their places, so a selection or an
+        # assembly elsewhere is untouched — but anything that was itself
+        # discarded has left the panel, so it leaves the selection with it (and
+        # the item in hand moves to whatever is left).
+        self.prune_toolbox_selection()
+        self._set_shop_message(
+            f"Discarded {len(swapped)} item{'s' if len(swapped) != 1 else ''}"
+            f" ({self.discards_left} discard{'s' if self.discards_left != 1 else ''}"
+            f" left this run)")
+        sounds.play_reset()
+        return True
+
+    def _toggle_inventory_view(self):
+        """Open or close the whole-inventory pop-up (the box on the panel's right)."""
+        self.inventory_open = not self.inventory_open
+        self.inventory_page = 0
+        if self.inventory_open:
+            self._set_shop_message(
+                f"Your whole inventory ({len(self.toolbox.every_item())} items)")
+        return self.inventory_open
+
+    def _turn_inventory_page(self):
+        """Turn the inventory panel to its next page (the arrow on its right edge).
+
+        The panel shows at most INVENTORY_MAX_COLS x INVENTORY_MAX_ROWS cells;
+        when the inventory holds more than that, the cell after the last one on
+        this page is the next page's first (see Toolbox.first_shown). Returns
+        the page now shown.
+        """
+        pages = self.toolbox.page_count()
+        if pages <= 1:
+            return self.toolbox.page
+        self.toolbox.turn_page(1)
+        shown = self.toolbox.first_shown()
+        total = self.toolbox.entries
+        self._set_shop_message(
+            f"Inventory page {self.toolbox.page + 1}/{pages}"
+            f" ({shown + 1}–{min(total, shown + self.toolbox.per_page)} of {total})")
+        return self.toolbox.page
+
+    def _click_inventory_view(self, pos):
+        """Handle a click while the whole-inventory pop-up is open.
+
+        Only the pager and CLOSE do anything: the items in it are the whole
+        inventory, including the part that is not on display, so they are not
+        selectable from here (items are selected on the panel itself, see
+        _toggle_toolbox_selection). A click anywhere else closes the pop-up,
+        like SKIP closes a pack.
+        """
+        if ui.inventory_close_rect(self).collidepoint(pos):
+            self._toggle_inventory_view()
+            return
+        # The page buttons are only drawn while there is a second page, so they
+        # are only clickable then either.
+        if self._inventory_view_pages() > 1:
+            if ui.inventory_pager_rect(self, -1).collidepoint(pos):
+                self._page_inventory_view(-1)
+                return
+            if ui.inventory_pager_rect(self, 1).collidepoint(pos):
+                self._page_inventory_view(1)
+                return
+        if not ui.inventory_panel_rect(self).collidepoint(pos):
+            self._toggle_inventory_view()
+
+    def _inventory_view_pages(self):
+        """How many pages the whole-inventory pop-up holds (at least one)."""
+        return ui.inventory_view_pages(self)
+
+    def _page_inventory_view(self, step):
+        """Turn the whole-inventory pop-up a page forwards or back."""
+        pages = self._inventory_view_pages()
+        self.inventory_page = (self.inventory_page + step) % pages
+        shown = self.inventory_page * ui.INVENTORY_VIEW_ROWS * ui.INVENTORY_VIEW_COLS + 1
+        total = len(self.toolbox.every_item())
+        self._set_shop_message(
+            f"Inventory page {self.inventory_page + 1}/{pages}"
+            f" ({shown}–{min(total, shown + ui.INVENTORY_VIEW_ROWS * ui.INVENTORY_VIEW_COLS - 1)}"
+            f" of {total})")
+        return self.inventory_page
 
     def _use_component(self, component, index=None):
         """Add a toolbox component to the block S will build, or drop it again.
@@ -4153,11 +4750,18 @@ class Game:
                 if c.kind == Component.EFFECT]
 
     def _clear_assigned_parts(self):
-        """Drop every component assigned to the next block."""
+        """Drop every component assigned to the next block.
+
+        The pieces also leave the SELECTION (see _toggle_toolbox_selection):
+        a piece that is no longer part of the next block is not highlighted as
+        though it were.
+        """
+        for comp in list(self.assigned_toolbox_indexes):
+            self.selection = [item for item in self.selection if item is not comp]
         self.assigned_toolbox_indexes.clear()
 
-    def _clear_toolbox_selection(self):
-        """Deselect the current toolbox item (block or component)."""
+    def _clear_active_selection(self):
+        """Drop the item IN HAND, leaving the selected items themselves alone."""
         self.has_selected = False
         self.selected_toolbox_item = None
         self.selected_toolbox_index = None
@@ -4166,6 +4770,11 @@ class Game:
         self.selected_scorer = None
         self.selected_scorer_amount = None
         self.selected_effect_amounts = {}
+
+    def _clear_toolbox_selection(self):
+        """Deselect EVERYTHING in the inventory: the toggled items and the one in hand."""
+        self.selection = []
+        self._clear_active_selection()
         # A deselection also drops any pending card build (see the commented-out
         # `_build_card` below); the builder's state is commented out with the
         # conditions.
@@ -4173,21 +4782,102 @@ class Game:
         # self.card_scorer = None
         # self.card_builder_indexes.clear()
 
+    def is_toolbox_selected(self, item):
+        """True when this item is one of the selected inventory items."""
+        return any(item is picked for picked in self.selection)
+
+    def _toggle_toolbox_selection(self, item, index=None):
+        """Click an inventory item: select it, or unselect it if it already is.
+
+        This is the ONE way an inventory item is selected (user request:
+        "clicking on it once makes an item selected, and clicking on a selected
+        item un-selects it"). Every selected item stays selected until it is
+        clicked again, so plain clicks are also how the multi-item selection an
+        F discard acts on is built (up to DISCARD_COUNT_MAX of them).
+
+        The item clicked LAST is the one IN HAND: the block a click on the board
+        places, the component S assembles, and the item B sells, D upgrades and
+        G banks. Unselecting the item in hand hands the place to the most
+        recently selected item left, so a block can still be placed.
+
+        Returns True when the item became selected.
+        """
+        if self.is_toolbox_selected(item):
+            self._unselect_toolbox_item(item)
+            return False
+        self.selection.append(item)
+        if getattr(item, "kind", None) == "block":
+            self._equip_block(item, index)
+        else:
+            self._select_toolbox_component(item, index)
+            # A block has ONE shape and ONE scorer, so the piece a new one takes
+            # the slot from leaves the selection too (an effect stacks, so the
+            # effects already selected stay).
+            if item.kind in (Component.SHAPE, Component.SCORER):
+                self.selection = [other for other in self.selection
+                                  if other is item
+                                  or getattr(other, "kind", None) != item.kind]
+        return True
+
+    def _hand_over_to(self, item):
+        """Make a still-selected item the one IN HAND (see _toggle_toolbox_selection)."""
+        index = self._shown_index_of(item)
+        if getattr(item, "kind", None) == "block":
+            self._arm_block(item, index)
+        else:
+            self._select_toolbox_component(item, index)
+
+    def _unselect_toolbox_item(self, item):
+        """Take one item out of the selection — the second click on it."""
+        self.selection = [picked for picked in self.selection if picked is not item]
+        self.assigned_toolbox_indexes.pop(item, None)
+        if self.selected_toolbox_item is item:
+            # The item in hand was un-picked: the place goes to the most
+            # recently selected item left, so a block can still be placed.
+            self._clear_active_selection()
+            if self.selection:
+                self._hand_over_to(self.selection[-1])
+        self._set_shop_message(f"Deselected {self._item_name(item)} "
+                               f"({len(self.selection)} selected)")
+        return False
+
+    def prune_toolbox_selection(self):
+        """Drop selected items that are no longer ON the inventory panel.
+
+        The panel shows only a selection of the inventory (see Toolbox), so a
+        reshuffle, a discard, or an item leaving the panel can take a selected
+        item out of reach: it stops being selected, and the item in hand moves
+        to the most recently selected item left (or nothing is left in hand).
+        An item in hand that is NOT an inventory item at all (a block lifted
+        off the board) is left alone.
+        """
+        shown = self.toolbox.items
+        self.selection = [item for item in self.selection
+                          if any(item is visible for visible in shown)]
+        active = self.selected_toolbox_item
+        if (active is not None and self.toolbox.contains(active)
+                and not any(active is visible for visible in shown)):
+            self._clear_active_selection()
+            if self.selection:
+                self._hand_over_to(self.selection[-1])
+        return self.selection
+
     def _select_toolbox_component(self, component, index=None):
         """Select a toolbox component and assign it to the block S will build.
 
         A shape/effect/scorer click makes the piece part of the next block (the
         scorer is shared with the card builder, which is commented out with the
-        conditions).
+        conditions). Only the item IN HAND moves: the components already
+        selected stay selected (and assigned), which is what lets a block be
+        assembled from several pieces.
         """
-        self._clear_toolbox_selection()
+        self._clear_active_selection()
         self.selected_toolbox_item = component
         if index is None:
-            try:
-                index = self.toolbox.items.index(component)
-            except ValueError:
-                index = None  # not owned by the toolbox; no cell to highlight
+            index = self._shown_index_of(component)
         self.selected_toolbox_index = index
+        if self.toolbox.contains(component) and not self.is_toolbox_selected(component):
+            self.selection.append(component)
         # COMMENTED OUT with the conditions: a Condition component started the
         # card builder here, and a Scorer picked while a condition was assigned
         # paired with it instead of the next block. Both are commented out
@@ -4262,7 +4952,7 @@ class Game:
     #     # Consume the two halves from the toolbox and clear the builder.
     #     for c in (condition, scorer):
     #         if c in self.toolbox.items:
-    #             self.toolbox.items.remove(c)
+    #             self.toolbox.remove(c)
     #     self._clear_toolbox_selection()
     #     # The built card keeps the scorer piece's own magnitude, so building a
     #     # card is not a way to launder a weak roll into the average card (or the
@@ -4290,8 +4980,9 @@ class Game:
         effect_pieces = self.assigned_effects()
         consumed = [c for c in (shape_piece, scorer_piece, *effect_pieces)
                     if c is not None]
-        # Room check after the assigned components are freed up.
-        free = self.toolbox.capacity() - (len(self.toolbox.items) - len(consumed))
+        # The inventory is unbounded (see Toolbox), so the assembled block always
+        # has a place: it joins the panel if there is a free cell and waits in
+        # the stash otherwise.
         # Missing parts become the free defaults: Rect shape, no effect, no scorer.
         effects = [e.value for e in effect_pieces]
         # Each effect piece carries its own rolled magnitude (a 1350 px/s piston,
@@ -4302,10 +4993,6 @@ class Game:
         shape = shape_piece.value if shape_piece is not None else Shape.RECT
         # The other half of a Key/Lock pair (None for every other shape).
         pair_shape = paired_shape(shape)
-        needs = 2 if (Effect.PORTAL in effects or pair_shape is not None) else 1
-        if free < needs:
-            self._set_shop_message("Inventory needs room for the new block")
-            return
         scorer = scorer_piece.value if scorer_piece is not None else Scorer.NONE
         amount = scorer_piece.amount if scorer_piece is not None else 0
         name = f"{Shape.name(shape)} {Scorer.name(scorer)}"
@@ -4313,7 +5000,7 @@ class Game:
         # Consume the assigned components from the toolbox.
         for c in consumed:
             if c in self.toolbox.items:
-                self.toolbox.items.remove(c)
+                self.toolbox.remove(c)
         self._clear_assigned_parts()
         if Effect.PORTAL in effects:
             # A portal block is assembled as a pair sharing a fresh number.
@@ -4603,9 +5290,6 @@ class Game:
         # A portal block is bought as a pair: two identical blocks that share a
         # fresh pairing number (they teleport marbles between each other).
         if getattr(item, "kind", None) == "block" and item.has_effect(Effect.PORTAL):
-            if len(self.toolbox.items) + 2 > self.toolbox.capacity():
-                self._set_shop_message("Inventory needs room for the portal pair")
-                return
             number = next_portal_number()
             self.toolbox.add(BlockItem(0, 0, item.shape, Effect.NONE, item.scorer,
                                        item.scorer_amount, item.price, item.name, portal_number=number,
@@ -4626,9 +5310,6 @@ class Game:
         # number. Both halves keep the offer's effects and scorer.
         pair_shape = paired_shape(getattr(item, "shape", None))
         if getattr(item, "kind", None) == "block" and pair_shape is not None:
-            if len(self.toolbox.items) + 2 > self.toolbox.capacity():
-                self._set_shop_message("Inventory needs room for the key/lock pair")
-                return
             number = next_key_number()
             self.toolbox.add(BlockItem(0, 0, item.shape, Effect.NONE, item.scorer,
                                        item.scorer_amount, item.price, item.name,
@@ -4646,9 +5327,9 @@ class Game:
             self._set_shop_message(f"Bought {item.name} (key/lock pair #{number})")
             sounds.play_coin()
             return
-        if not self.toolbox.add(item):
-            self._set_shop_message("Inventory is full")
-            return
+        # The inventory is unbounded (see Toolbox), so the purchase always has a
+        # place: it joins the panel if there is a free cell, else the stash.
+        self.toolbox.add(item)
         self._record_component_purchases(item)
         if getattr(item, "kind", None) == "block":
             self._discover_block(item)
@@ -4773,8 +5454,6 @@ class Game:
         if kind == "block":
             pair_shape = paired_shape(option.shape)
             if option.has_effect(Effect.PORTAL) or pair_shape is not None:
-                if len(self.toolbox.items) + 2 > self.toolbox.capacity():
-                    return False, "Inventory needs room for the pair — kept as an option"
                 number = (next_portal_number() if option.has_effect(Effect.PORTAL)
                           else next_key_number())
                 second = (option.shape if option.has_effect(Effect.PORTAL)
@@ -4789,13 +5468,13 @@ class Game:
                                   effect_amounts=getattr(option, "effect_amounts", None)))
                 self._discover_block(option)
                 return True, f"Kept {option.name} (pair)"
-            if not self.toolbox.add(option):
-                return False, "Inventory is full — kept as an option"
+            # The inventory is unbounded: a kept block always has a place (the
+            # panel if there is a free cell, else the stash — see Toolbox).
+            self.toolbox.add(option)
             self._discover_block(option)
             return True, f"Kept {option.name}"
         # A component part (shape, effect or scorer): into the inventory.
-        if not self.toolbox.add(option):
-            return False, "Inventory is full — kept as an option"
+        self.toolbox.add(option)
         self._record_component_purchases(option)
         self._discover_component(option.kind, option.value)
         return True, f"Kept {option.name}"
@@ -5104,6 +5783,26 @@ class Game:
         """
         return sum(1 for c in self.cards
                    if c.value == value and not self._card_disabled(c))
+
+    def _card_activations(self, value):
+        """The card-area indexes at which a card of ``value`` ACTIVATES, in order.
+
+        A card activates once per copy whose effect applies, PLUS once per
+        Blueprint that copies it (see cards.effective_card_value) — a Blueprint
+        plays the card it sits next to, so it activates that card a second time.
+        Two copies, or one copy with a Blueprint beside it, therefore activate
+        twice. _card_count answers the narrower question of how many copies of
+        the card are OWNED (a Blueprint owns nothing of its own), which is what
+        Hoard's cap wants; this is what a card that ACTIVATES asks. A copy the
+        Card cutter has cut activates nothing.
+
+        The order is the card area's, so a caller can tell WHICH copy paid: a
+        card that activates once per copy pops its particle on the copy spending
+        the activation (see Game._procrastination_rewind).
+        """
+        return [i for i, card in enumerate(self.cards)
+                if not self._card_disabled(card)
+                and cards.effective_card_value(self, i) == value]
 
     def shop_lock_cap(self):
         """How many shop offers the player may hold across rerolls.
@@ -5436,12 +6135,17 @@ class Game:
         An action a PACK handed over is not in the action area at all, so it is
         spent by clearing the pending slot instead (see
         _keep_action_from_pack). Everything else leaves the action area.
+
+        Using an action also turns the inventory's selection over (see
+        _reshuffle_inventory): the inventory holds everything the player owns,
+        and what its panel shows is a random draw from it.
         """
         if action is self.pending_pack_action:
             self.pending_pack_action = None
         elif action in self.actions:
             self.actions.remove(action)
         self._clear_action_selection()
+        self._reshuffle_inventory()
 
     def _action_cleansweep(self, action):
         """Cleansweep fills every empty card slot with a random card.
@@ -5695,7 +6399,7 @@ class Game:
             self._set_shop_message("Action target is not owned")
             return False
         gained = int(subject.price * multiplier)
-        self.toolbox.items.remove(subject)
+        self.toolbox.remove(subject)
         self.assigned_toolbox_indexes.pop(subject, None)
         self._delete_pairing_partners(subject)
         self.cash += gained
@@ -5754,9 +6458,7 @@ class Game:
         if self.cash < price:
             self._set_shop_message(f"Need ${price} to duplicate this block")
             return False
-        if not self.toolbox.add(copy):
-            self._set_shop_message("Inventory is full")
-            return False
+        self.toolbox.add(copy)
         self.cash -= price
         self._set_shop_message(f"Recognized a copy of {self._item_name(subject)} (${price})")
         sounds.play_coin()
@@ -6001,7 +6703,7 @@ class Game:
                 self.marbles = [m for m in self.marbles
                                 if getattr(m, "start_block", None) is not subject]
         else:
-            self.toolbox.items.remove(subject)
+            self.toolbox.remove(subject)
             self.assigned_toolbox_indexes.pop(subject, None)
         self._delete_pairing_partners(subject)
         self.tokens.append(token)
@@ -6087,25 +6789,53 @@ class Game:
         """Screen rect of the Spirit token at ``index``: an inventory cell.
 
         A token is part of the inventory (see the note on MAX_TOKENS), so it
-        takes the cell right after the items the inventory holds: the
-        inventory's first cell when it holds nothing, and the row below once an
-        inventory row is full (see Toolbox.cell_rect).
+        takes the display entry right after the items the inventory holds (see
+        Toolbox.rect_for). None when that entry is on a page the panel is not
+        showing — the arrow box turns the page to it.
         """
-        return self.toolbox.cell_rect(len(self.toolbox.items) + index)
+        return self.toolbox.rect_for(len(self.toolbox.items) + index)
 
     def inventory_grid_rows(self):
-        """How many rows of the inventory panel to draw to hold all of it.
+        """How many rows of the inventory panel to draw right now.
 
-        The panel carries the items AND the Spirit tokens in the cells after
-        them (see _token_rect), so it is drawn large enough for both: whole
-        rows of the inventory's own columns, and never fewer than the
-        inventory's configured size. The slots the Packed scorer has won are
-        part of the panel too (see Toolbox.capacity), so the panel grows to show
-        them even while it is empty.
+        The panel carries the items AND the Spirit tokens in the entries after
+        them (see _token_rect), and it is never drawn larger than
+        INVENTORY_MAX_ROWS rows: past that the panel turns pages instead (see
+        Toolbox.first_shown).
         """
-        box = self.toolbox
-        total = max(len(box.items) + len(self.tokens), box.capacity())
-        return max(box.rows, -(-total // max(1, box.cols)))
+        return self.toolbox.rows
+
+    def inventory_page_button_rect(self):
+        """The arrow box on the inventory's TOP-RIGHT edge (see ui.draw_toolbox).
+
+        It shows only while the inventory has more to show than the panel holds
+        (Toolbox.page_count > 1), and clicking it turns the page. It is the cell
+        directly ABOVE the whole-inventory button.
+        """
+        box = self.toolbox.rect
+        return pygame.Rect(box.right, box.bottom - 2 * GRID_SIZE,
+                           GRID_SIZE, GRID_SIZE)
+
+    def inventory_view_button_rect(self):
+        """The 1x1 box on the inventory's RIGHT edge: opens the whole inventory.
+
+        It is the bottom cell of the panel's right edge — directly BELOW the
+        page arrow (see inventory_page_button_rect) — so it never moves when
+        the arrow appears.
+        """
+        box = self.toolbox.rect
+        return pygame.Rect(box.right, box.bottom - GRID_SIZE, GRID_SIZE, GRID_SIZE)
+
+    def sell_overlay_rect(self):
+        """The SELL button: the panel's bottom-right cell, one unit BELOW it."""
+        box = self.toolbox.rect
+        return pygame.Rect(box.right - GRID_SIZE, box.bottom, GRID_SIZE, GRID_SIZE)
+
+    def upgrade_overlay_rect(self):
+        """The UPGRADE button: one cell left of SELL, one unit below the panel."""
+        box = self.toolbox.rect
+        return pygame.Rect(box.right - 2 * GRID_SIZE, box.bottom,
+                           GRID_SIZE, GRID_SIZE)
 
     def inaccessible_rect(self, index):
         """Screen rect of one Odyssey-banked item (see INACCESSIBLE_COORDS).
@@ -6166,7 +6896,7 @@ class Game:
                 f"({self.inaccessible_cap()} max)")
             return False
         item = self.selected_toolbox_item
-        self.toolbox.items.remove(item)
+        self.toolbox.remove(item)
         # An item on its way out must not stay assigned to the next block, and
         # the assigned CELL it was tracked by is stale once it is gone.
         self.assigned_toolbox_indexes.pop(item, None)
@@ -6187,39 +6917,27 @@ class Game:
 
         Called once a finished run is COMMITTED (see _continue_run), so a retry
         neither returns the items nor pays — the same rule every other per-run
-        gain follows. An item comes back into the inventory and pays
-        ODYSSEY_CASH_FRACTION of its sell price. A full inventory withholds the
-        item (it was never sold, so it can wait longer) but the cash is still
-        paid, and the message says which happened. Returns the cash paid.
+        gain follows. An item comes back into the inventory (which is unbounded,
+        so it always fits: see Toolbox) and pays ODYSSEY_CASH_FRACTION of its
+        sell price. Returns the cash paid.
         """
         if not self.inaccessible:
             return 0
         paid = 0
-        waiting = 0
         for item in list(self.inaccessible):
-            if not self.toolbox.add(item):
-                waiting += 1
-                continue
+            self.toolbox.add(item)
             self.inaccessible.remove(item)
             paid += self._bank_value(item)
         if paid:
             self.cash += paid
-        if waiting and not paid:
-            self._set_shop_message(
-                f"Odyssey: no room in the inventory for "
-                f"{waiting} banked item{'s' if waiting != 1 else ''}")
-        elif waiting:
-            self._set_shop_message(
-                f"Odyssey returned ${paid} — {waiting} item"
-                f"{'s' if waiting != 1 else ''} still wait for room")
-        else:
-            self._set_shop_message(f"Odyssey returned your item(s): ${paid}")
+        self._set_shop_message(f"Odyssey returned your item(s): ${paid}")
         return paid
 
     def token_at(self, pos):
         """Return the token chip at a screen position, or None."""
         for i, token in enumerate(self.tokens):
-            if self._token_rect(i).collidepoint(pos):
+            rect = self._token_rect(i)
+            if rect is not None and rect.collidepoint(pos):
                 return token
         return None
 
@@ -6343,6 +7061,14 @@ class Game:
         index = self.pack_option_at(pos)
         if index is not None and index < len(self.open_pack.options):
             return self.open_pack.options[index], "pack"
+        # ...and the whole-inventory pop-up owns the hover while it is open, so
+        # a stashed item reads out exactly like a displayed one.
+        if getattr(self, "inventory_open", False):
+            for item, rect in zip(ui.inventory_view_items(self),
+                                  ui.inventory_item_rects(self)):
+                if rect.collidepoint(pos):
+                    return item, "inventory"
+            return None, None
         # The cash readout is not an item, so it is checked first: hovering it
         # shows where the last run's dollars came from.
         if ui.last_run_cash_rect(self).collidepoint(pos):
@@ -6530,15 +7256,14 @@ class Game:
             self.option_run_gain += amount * self.resource_point_multiplier()
 
     def _grant_inventory_slots(self, count):
-        """Give the inventory ``count`` more slots, for good (the Packed scorer).
+        """Give the inventory's PANEL ``count`` more cells, for good (Packed).
 
         The slots join the saved total (see inventory_slots_won) and are mirrored
-        onto the toolbox, which is what every capacity check reads (see
-        Toolbox.capacity): the panel grows to show them, and buying, granting or
-        assembling an item that would not have fitted now fits. What THIS run
-        grants is counted separately, so a retry takes back only the slots the
-        discarded run won (see reset_run / _retry_run), exactly as Fresh's free
-        rerolls work.
+        onto the toolbox (see Toolbox.slot_bonus), which is how many of the
+        inventory's items the panel shows at once: growing it brings stashed
+        items out to fill the new cells. What THIS run grants is counted
+        separately, so a retry takes back only the slots the discarded run won
+        (see reset_run / _retry_run), exactly as Fresh's free rerolls work.
         """
         self.inventory_slots_won += count
         self.inventory_slots_run_gain += count
@@ -6641,9 +7366,6 @@ class Game:
 
     def _grant_random_component(self):
         """Grant a random shape/effect/scorer component to the toolbox."""
-        if len(self.toolbox.items) >= self.toolbox.capacity():
-            self._set_shop_message("Inventory is full — component withheld")
-            return False
         kind = random.choice([Component.SHAPE, Component.EFFECT, Component.SCORER])
         if kind == Component.SHAPE:
             value = random.choice(Shape.ORDER)
@@ -6698,9 +7420,6 @@ class Game:
 
     def _grant_random_block(self):
         """Grant a random block (like a shop block) to the toolbox."""
-        if len(self.toolbox.items) >= self.toolbox.capacity():
-            self._set_shop_message("Inventory is full — block withheld")
-            return False
         shape = random.choice(Shape.ORDER)
         count = random_effect_count()
         effects = random.sample(Effect.REAL_ORDER, count)
@@ -6845,17 +7564,13 @@ class Game:
             return
         parts = self._block_parts(item)
         in_toolbox = item in self.toolbox.items
-        if (len(self.toolbox.items) + len(parts) - (1 if in_toolbox else 0)
-                > self.toolbox.capacity()):
-            self._set_shop_message("Inventory needs room for the parts")
-            return
         # Remove the block (from the grid if it was placed, else the toolbox).
         if isinstance(item, Block):
             self.grid.pop((item.x, item.y), None)
             if item.scorer == Scorer.START:
                 self.marbles = [m for m in self.marbles if getattr(m, "start_block", None) is not item]
         elif in_toolbox:
-            self.toolbox.items.remove(item)
+            self.toolbox.remove(item)
         self.cash -= cost
         for part in parts:
             self.toolbox.add(part)
@@ -6892,7 +7607,7 @@ class Game:
             return
         for item in list(self.toolbox.items):
             if getattr(item, "key_number", 0) == number:
-                self.toolbox.items.remove(item)
+                self.toolbox.remove(item)
                 return
         for key, block in list(self.grid.items()):
             if getattr(block, "key_number", 0) == number:
@@ -6914,7 +7629,7 @@ class Game:
             return
         for item in list(self.toolbox.items):
             if getattr(item, "portal_number", 0) == number:
-                self.toolbox.items.remove(item)
+                self.toolbox.remove(item)
                 return
         for key, block in list(self.grid.items()):
             if getattr(block, "portal_number", 0) == number:
@@ -6955,7 +7670,7 @@ class Game:
             return
         # Resale value includes any cash paid to raise the trigger limit.
         sell_price = self._sell_price(item) + getattr(item, "trigger_paid", 0)
-        self.toolbox.items.remove(item)
+        self.toolbox.remove(item)
         # COMMENTED OUT with the conditions: selling an assigned condition or
         # scorer used to cancel the pending card build.
         #
@@ -7380,11 +8095,23 @@ class Game:
             if item.fires_at_end:
                 return "Fires at the end of each run it covers (xMult)"
             return "Fires at the start of each run it covers"
+        if source == "inventory":
+            # The whole-inventory pop-up: the item is OWNED, and the panel shows
+            # only a selection of the inventory (see Toolbox), so the hint says
+            # how to bring it into reach.
+            if any(item is shown for shown in self.toolbox.items):
+                return "Shown on the inventory panel — click it there to use it"
+            return ("Waiting off the panel — use an action or press F to swap "
+                    "items onto it")
         if source == "toolbox":
-            hint = ("Left-click to place | D to disassemble"
+            hint = ("Click to select (click again to deselect) | D to disassemble"
                     if getattr(item, "kind", None) == "block"
-                    else "Left-click to assign it to the next block"
+                    else "Click to select it for the next block"
                          " | S to assemble")
+            # The inventory's own verbs, where the player is looking when they
+            # use them: F discards what is selected, and the box on the panel's
+            # right edge opens the whole inventory.
+            hint += " | F discards the selected items"
             # Odyssey's own verb, where the player is looking when they use it.
             if self._has_card(Card.ODYSSEY) and self.can_bank_selected():
                 hint += " | G to put it away for the run"
@@ -7796,10 +8523,10 @@ class Game:
         # cancelled the run's interest yet.
         self.run_blocks_destroyed = 0
         self.debt_run_triggered = False
-        # Fresh run: the Procrastination rewind has not been spent yet. The
+        # Fresh run: the Procrastination rewinds have not been spent yet. The
         # marbles below are newly built, so their motion-history deques start
         # empty too — a new run can never rewind into the last one's past.
-        self.procrastination_used = False
+        self.procrastination_rewinds = 0
         # Fresh run: no Rally touches, no previous-contact block for Echo, no
         # primed Bomb blocks yet, and no opening blocks remembered for
         # Pedestal/Watch.
@@ -9275,7 +10002,7 @@ class Game:
                 self._set_run_random_result(card, card_scorer_value)
 
     def _procrastination_rewind(self):
-        """Procrastination: hand the run back its last second (once per run).
+        """Procrastination: hand the run back its last second (once per copy).
 
         Called when every marble has just finished. Instead of ending, the run
         rewinds: each marble returns to the motion state it had one second ago
@@ -9285,23 +10012,29 @@ class Game:
         (distance travelled, air time) and the run clock keep their values: the
         run is simply one second longer.
 
-        Only the FIRST completion of a run rewinds (``procrastination_used``);
-        the next one ends the run normally. Without that cap a rewound run could
-        never end — the marbles would reach the finish again about a second
-        later and rewind forever. A marble that finished more than a second
-        before the run did was already resting on its finish back then, so it
-        starts the replay there and finishes again immediately; the marble that
-        ended the run replays its whole approach.
+        EVERY copy of the card rewinds once, because a card activates once per
+        copy the player owns: a second Procrastination, or a Blueprint that
+        copies the first (see _card_activations), hands the run a second extra
+        second — the run finishes again, and rewinds again, until the copies run
+        out. Without that cap a rewound run could never end — the marbles would
+        reach the finish again about a second later and rewind forever — so a
+        copy the Card cutter has cut takes its rewind with it. A marble that
+        finished more than a second before the run did was already resting on
+        its finish back then, so it starts the replay there and finishes again
+        immediately; the marble that ended the run replays its whole approach.
 
         Portal travel budgets (Effect.PORTAL's per-run activations) are not
         trigger counts and are left as they are; destroyed blocks stay
         destroyed — only trigger counts and the marbles' motion come back.
 
-        Returns True when the run was rewound (and is therefore still going).
+        The particle pops on the copy that PAYS, so a second copy is visibly the
+        one paying for the second rewind. Returns True when the run was rewound
+        (and is therefore still going).
         """
-        if self.procrastination_used or not self._has_card(Card.PROCRASTINATION):
+        payers = self._card_activations(Card.PROCRASTINATION)
+        if self.procrastination_rewinds >= len(payers):
             return False
-        self.procrastination_used = True
+        self.procrastination_rewinds += 1
         # Every block can score its trigger limit again — the Concert card's
         # bonus and the Hands tied trial's cap included, exactly as a fresh run
         # would set it (see _trigger_limit).
@@ -9315,13 +10048,17 @@ class Game:
             # the run is not over.
             marble.history.clear()
             marble.finished = False
+        # With more than one copy to spend, the message says how many rewinds
+        # are left, so a second copy reads as a second chance rather than a
+        # repeat of the first.
+        spent = ""
+        if len(payers) > 1:
+            spent = f" ({self.procrastination_rewinds} of {len(payers)})"
         self._set_shop_message(
-            "Procrastination: rewound 1 second — every block's triggers are back")
-        card = next((c for c in self.cards
-                     if c.value == Card.PROCRASTINATION
-                     and not self._card_disabled(c)), None)
-        if card is not None:
-            self._spawn_card_particle(card, "-1s", BLUE)
+            f"Procrastination{spent}: rewound 1 second — every block's triggers"
+            " are back")
+        self._spawn_card_particle(self.cards[payers[self.procrastination_rewinds - 1]],
+                                  "-1s", BLUE)
         return True
 
     def _deal_breaker_gags(self):
@@ -9931,6 +10668,11 @@ class Game:
         # committed the same way.
         self.free_rerolls_run_gain = 0
         self.inventory_slots_run_gain = 0
+        # A continued run hands the inventory's discards back (see
+        # _discard_items): DISCARDS_PER_RUN of them per run. The items SELECTED
+        # on the panel are left alone — only using an action (or a discard)
+        # changes the selection.
+        self.discards_left = DISCARDS_PER_RUN
         # Choose the next run's trial now, before the run starts, so the info
         # box shows it during setup (a new round draws its own trials here, see
         # _choose_trial). The 24th run is no exception any more: it used to be a

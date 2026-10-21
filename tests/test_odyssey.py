@@ -165,33 +165,27 @@ class OdysseyCardTests(GameTestCase):
         self.assertEqual(self.game._return_inaccessible(), 0)
         self.assertEqual(self.game.cash, 1000)
 
-    def test_a_full_inventory_withholds_the_item_until_there_is_room(self):
-        # An item that cannot fit back into the inventory stays banked and pays
-        # nothing yet — it is never lost, and the message says why. It pays
-        # when it finally comes home.
+    def test_a_full_panel_still_takes_the_item_home(self):
+        # The inventory is unbounded: an item that comes back while the panel is
+        # full is stashed rather than withheld, so it always comes home (and
+        # pays) on the first return.
         self._own_odyssey()
         wall = self._wall(price=40)
         self._select(wall)
         self.assertTrue(self.game._bank_selected_item())
         cash_before = self.game.cash
-        # Fill every remaining cell of the inventory.
+        # Fill every cell of the panel.
         for _ in range(self.game.toolbox.cols * self.game.toolbox.rows):
             self.game.toolbox.add(main.BlockItem(0, 0, main.Shape.RECT,
                                                  main.Effect.NONE,
                                                  main.Scorer.NONE, 0, 12, "Wall"))
-        self.game.shop_message = ""
 
         paid = self.game._return_inaccessible()
 
-        self.assertEqual(paid, 0)
-        self.assertEqual(self.game.cash, cash_before)
-        self.assertEqual(self.game.inaccessible, [wall])  # the item waits
-        self.assertIn("no room in the inventory", self.game.shop_message)
-        # Make room and it comes home with its cash.
-        self.game.toolbox.items.pop()
-
-        self.assertEqual(self.game._return_inaccessible(), 10)
+        self.assertEqual(paid, 10)
+        self.assertEqual(self.game.cash, cash_before + 10)
         self.assertEqual(self.game.inaccessible, [])
+        self.assertTrue(self.game.toolbox.contains(wall))
 
     def test_a_retry_keeps_the_item_banked_and_pays_nothing(self):
         # Banking is build-phase state: the run the item waits out is the run
@@ -324,4 +318,4 @@ class OdysseyWiringTests(GameTestCase):
         self.assertNotIn("G to", self.game._action_hint(wall, "toolbox"))
         self._own_odyssey()
         self.assertIn("G to put it away", self.game._action_hint(wall, "toolbox"))
-        self.assertIn("Left-click", self.game._action_hint(wall, "toolbox"))
+        self.assertIn("Click to select", self.game._action_hint(wall, "toolbox"))

@@ -220,8 +220,8 @@ class UiTests(GameTestCase):
             self.game.draw()
         self.assertTrue(self._region_has_white(self._toolbox_title_region()))
         with mock.patch("main.pygame.mouse.get_pos",
-                        return_value=(main.TOOLBOX_COORDS[0] + 5,
-                                      main.TOOLBOX_COORDS[1] + 5)):
+                        return_value=(self.game.toolbox.rect.x + 5,
+                                      self.game.toolbox.rect.y + 5)):
             self.game.draw()
         self.assertTrue(self._region_has_white(self._toolbox_title_region()))
 
@@ -256,7 +256,7 @@ class UiTests(GameTestCase):
         # panel's bottom-left corner is where blocks get placed); the
         # inventory's and the shop's stay put, wherever the mouse is.
         board = (main.MARBLE_BOX_COORDS[0] + 5, main.MARBLE_BOX_COORDS[1] + 5)
-        inventory = (main.TOOLBOX_COORDS[0] + 5, main.TOOLBOX_COORDS[1] + 5)
+        inventory = (self.game.toolbox.rect.x + 5, self.game.toolbox.rect.y + 5)
         shop = (main.SHOP_COORDS[0] + 5, main.SHOP_COORDS[1] + 5)
         for mouse, over_board in ((board, True), (inventory, False),
                                   (shop, False)):
@@ -1068,11 +1068,38 @@ class UiTests(GameTestCase):
             marble.draw(self.game.screen)
 
 
-    def test_sell_overlay_rect_is_bottom_right_toolbox_cell(self):
-        rect = main.SELL_OVERLAY_RECT
+    def test_cells_past_the_inventory_capacity_are_shaded(self):
+        # The panel is only ever as big as its slot count allows, but a slot
+        # count that does not fill its last row (six slots is a 5x2 grid) leaves
+        # cells the save has NOT bought: they are shaded so they read as locked
+        # rather than as empty slots the player could fill.
+        self.game.cash = 100
+        self.game._buy_inventory_slot()
+        self.game._buy_inventory_slot()
+        capacity = self.game.toolbox.capacity()
+        self.assertGreater(self.game.toolbox.per_page, capacity)
+        main.ui.draw(self.game)
+
+        def shade(panel):
+            rect = self.game.toolbox.cell_rect(panel)
+            return sum(self.game.screen.get_at((rect.centerx,
+                                                rect.bottom - 4))[:3])
+
+        # The last owned cell is a plain (bright) empty slot; the cells the save
+        # has not bought yet are shaded darker.
+        first = self.game.toolbox.first_shown()
+        last_owned = capacity - 1 - first
+        self.assertGreater(shade(last_owned), shade(last_owned + 1))
+
+    def test_sell_overlay_rect_hangs_one_unit_below_the_toolbox(self):
+        # The SELL/UPGRADE buttons hang off the panel's bottom-right corner, one
+        # grid unit BELOW it, so they never cover the rightmost inventory slots.
+        rect = self.game.sell_overlay_rect()
         self.assertEqual(rect.right, self.game.toolbox.rect.right)
-        self.assertEqual(rect.bottom, self.game.toolbox.rect.bottom)
+        self.assertEqual(rect.top, self.game.toolbox.rect.bottom)
         self.assertEqual((rect.width, rect.height), (main.GRID_SIZE, main.GRID_SIZE))
+        # ...and clear of the panel's own cells.
+        self.assertFalse(rect.colliderect(self.game.toolbox.rect))
 
 
     def test_new_shapes_draw_without_raising(self):
@@ -1712,8 +1739,8 @@ class UiTests(GameTestCase):
         self.assertNotEqual(tint, main.MARBLE_BOX_COLOR)
         for label, pos in (("board", (main.MARBLE_BOX_COORDS[0] + 3,
                                       main.MARBLE_BOX_COORDS[1] + 3)),
-                           ("inventory", (main.TOOLBOX_COORDS[0] + 3,
-                                          main.TOOLBOX_COORDS[1] + 3)),
+                           ("inventory", (self.game.toolbox.rect.x + 3,
+                                          self.game.toolbox.rect.y + 3)),
                            ("shop", (main.SHOP_COORDS[0] + 3,
                                      main.SHOP_COORDS[1] + 3))):
             with self.subTest(panel=label):
@@ -2214,8 +2241,8 @@ class UiTests(GameTestCase):
 
 
     def test_upgrade_overlay_rect_is_left_of_sell_rect(self):
-        sell = main.SELL_OVERLAY_RECT
-        up = main.UPGRADE_OVERLAY_RECT
+        sell = self.game.sell_overlay_rect()
+        up = self.game.upgrade_overlay_rect()
         # Same row and size, sitting directly left of the SELL cell.
         self.assertEqual(up.top, sell.top)
         self.assertEqual(up.bottom, sell.bottom)
@@ -2232,7 +2259,7 @@ class UiTests(GameTestCase):
         self.game.cash = 1000
         cost = self.game._trigger_upgrade_cost(block)
 
-        self._click(main.UPGRADE_OVERLAY_RECT.center)
+        self._click(self.game.upgrade_overlay_rect().center)
 
         self.assertEqual(block.trigger_limit, 2)
         self.assertEqual(self.game.cash, 1000 - cost)
@@ -2245,7 +2272,7 @@ class UiTests(GameTestCase):
         self.game.selected_toolbox_item = comp
         self.game.cash = 1000
 
-        self._click(main.UPGRADE_OVERLAY_RECT.center)
+        self._click(self.game.upgrade_overlay_rect().center)
 
         self.assertEqual(self.game.cash, 1000)
 

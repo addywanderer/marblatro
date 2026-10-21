@@ -68,7 +68,7 @@ class CardsTests(GameTestCase):
     def test_resource_points_discarded_on_retry(self):
         # A retry is a full do-over for resource points: the run's pending gain
         # AND the points banked from earlier runs are all reset (a NEW run
-        # keeps the bank — see test_resource_points_persist_across_runs).
+        # keeps the bank â€” see test_resource_points_persist_across_runs).
         self.game.toolbox.items.clear()
         self.game.shred_points = 2
         self.game.rubble_points = 3
@@ -162,7 +162,7 @@ class CardsTests(GameTestCase):
                                        scorer_amount=4)])
         self.assertEqual(self.game.score_mult, 5)
         # With the card a no-scorer block (a plain wall) is retriggered into
-        # nothing — it has no scorer to fire twice.
+        # nothing â€” it has no scorer to fire twice.
         self.game.cards.append(main.CardItem(main.Card.PEDESTAL, 44))
         self.game.score_mult = 1
         self._touch_blocks([main.Block(1, 5, scorer=main.Scorer.NONE)])
@@ -326,7 +326,7 @@ class CardsTests(GameTestCase):
 
     def test_infinity_makes_the_factors_straight_lines_through_the_anchor(self):
         # The card's whole rule: the two saturating curves become straight
-        # lines, each pinned to its curve at INFINITY_ANCHOR — so the two
+        # lines, each pinned to its curve at INFINITY_ANCHOR â€” so the two
         # formulas AGREE at the anchor (0.75) and the card trades a slower start
         # for a factor that never levels off.
         self.assertEqual(main.INFINITY_ANCHOR, 0.75)
@@ -431,17 +431,38 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.run_first_blocks, [])
 
 
+    def test_two_copies_of_a_card_both_activate(self):
+        # The rule a card's per-copy activation follows: the card area fires
+        # EVERY card in it, so a second copy of an activating card pays a second
+        # time (a second Joker adds its +mult again at the run's start), and a
+        # Blueprint applies the count as well. Procrastination's rewinds are the
+        # same rule with a cap of one activation per copy.
+        def run_mult(values):
+            self.game.cards = [main.CardItem(v, main.Card.PRICES[v]) for v in values]
+            self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+            self.game.upgrades_enabled = False
+            return self._start_run_base()[1]
+
+        plain = run_mult([])
+        one = run_mult([main.Card.JOKER])
+        two = run_mult([main.Card.JOKER, main.Card.JOKER])
+        blueprint = run_mult([main.Card.JOKER, main.Card.BLUEPRINT])
+        self.assertGreater(one, plain)
+        self.assertAlmostEqual(two - plain, 2 * (one - plain))
+        self.assertAlmostEqual(blueprint - plain, 2 * (one - plain))
+
+
     def test_procrastination_rewinds_the_run_instead_of_ending_it(self):
         # The run's FIRST completion rewinds it: the marbles fly their last
         # second again with every block trigger refilled, so the run carries on
         # instead of ending.
         marble, block = self._start_procrastination_run()
         frames = 0
-        while not self.game.procrastination_used and frames < 300:
+        while not self.game.procrastination_rewinds and frames < 300:
             self.game.update()
             frames += 1
 
-        self.assertTrue(self.game.procrastination_used)
+        self.assertEqual(self.game.procrastination_rewinds, 1)
         self.assertTrue(self.game.run_active)          # still going
         self.assertFalse(self.game.run_complete)
         self.assertFalse(self.game.awaiting_after_run)
@@ -471,7 +492,7 @@ class CardsTests(GameTestCase):
             frames += 1
 
         self.assertTrue(self.game.run_complete)
-        self.assertFalse(self.game.procrastination_used)
+        self.assertEqual(self.game.procrastination_rewinds, 0)
 
 
     def test_the_card_cutter_silences_the_rewind(self):
@@ -480,13 +501,108 @@ class CardsTests(GameTestCase):
 
         self.assertFalse(self.game._procrastination_rewind())
 
-        self.assertFalse(self.game.procrastination_used)
+        self.assertEqual(self.game.procrastination_rewinds, 0)
         block.triggers_left = 0
         frames = 0
         while not self.game.run_complete and frames < 300:
             self.game.update()
             frames += 1
         self.assertTrue(self.game.run_complete)  # the run just ended as usual
+
+
+    def test_a_second_copy_rewinds_the_run_a_second_time(self):
+        # Two copies are two activations: the run rewinds, the marble reaches the
+        # finish again, and THAT completion rewinds it once more â€” then the
+        # copies are spent and the next completion ends the run. The message
+        # counts the copies as they are spent, and each rewind pops its popup on
+        # the copy that paid for it.
+        first = main.CardItem(main.Card.PROCRASTINATION, 46)
+        second = main.CardItem(main.Card.PROCRASTINATION, 46)
+        marble, block = self._start_procrastination_run(cards=[first, second])
+        self.assertEqual(len(self.game._card_activations(main.Card.PROCRASTINATION)), 2)
+
+        messages = []
+        frames = 0
+        while self.game.procrastination_rewinds < 2 and frames < 600:
+            self.game.update()
+            frames += 1
+            message = self.game.shop_message or ""
+            if message.startswith("Procrastination") and message not in messages:
+                messages.append(message)
+
+        self.assertEqual(self.game.procrastination_rewinds, 2)
+        self.assertTrue(self.game.run_active)          # still going after two
+        self.assertFalse(self.game.run_complete)
+        self.assertFalse(marble.finished)              # flying again, again
+        self.assertEqual(block.triggers_left, block.trigger_limit)
+        self.assertEqual(len(messages), 2)
+        self.assertIn("(1 of 2)", messages[0])
+        self.assertIn("(2 of 2)", messages[1])
+        # The second rewind is the SECOND copy paying, so its popup lands on that
+        # copy's slot in the card area (see _spawn_card_particle).
+        popup = [p for p in self.game.score_particles if p.text == "-1s"][-1]
+        self.assertEqual(popup.x, main.CARD_AREA_COORDS[0] + main.GRID_SIZE
+                         + main.GRID_SIZE // 2)
+
+        # With both copies spent the run ends at the next completion.
+        frames = 0
+        while not self.game.run_complete and frames < 600:
+            self.game.update()
+            frames += 1
+        self.assertTrue(self.game.run_complete)
+        self.assertEqual(self.game.procrastination_rewinds, 2)
+
+        # ...and replaying the run (RETRY) hands both rewinds back.
+        self.game._retry_run()
+        self.assertEqual(self.game.procrastination_rewinds, 0)
+
+
+    def test_a_blueprint_copying_the_card_rewinds_once_more(self):
+        # A Blueprint plays the card to its left, so it ACTIVATES that card
+        # again: a Procrastination with a Blueprint beside it is two rewinds,
+        # exactly like two copies of the card.
+        cards = [main.CardItem(main.Card.PROCRASTINATION, 46),
+                 main.CardItem(main.Card.BLUEPRINT, 46)]
+        self._start_procrastination_run(cards=cards)
+        self.assertEqual(len(self.game._card_activations(main.Card.PROCRASTINATION)), 2)
+
+        self.assertTrue(self.game._procrastination_rewind())
+        self.assertTrue(self.game._procrastination_rewind())
+        self.assertFalse(self.game._procrastination_rewind())   # both spent
+        self.assertEqual(self.game.procrastination_rewinds, 2)
+
+
+    def test_a_blueprint_with_nothing_to_copy_adds_no_rewind(self):
+        self._start_procrastination_run(
+            cards=[main.CardItem(main.Card.BLUEPRINT, 46)])
+        self.assertEqual(len(self.game._card_activations(main.Card.PROCRASTINATION)), 0)
+        self.assertFalse(self.game._procrastination_rewind())
+        self.assertEqual(self.game.procrastination_rewinds, 0)
+
+
+    def test_blueprints_do_not_chain_into_a_second_rewind(self):
+        # [Procrastination][Blueprint][Blueprint]: the second Blueprint would
+        # have to copy a Blueprint, which the game never allows, so it activates
+        # nothing â€” two cards, two rewinds, not three.
+        cards = [main.CardItem(main.Card.PROCRASTINATION, 46),
+                 main.CardItem(main.Card.BLUEPRINT, 46),
+                 main.CardItem(main.Card.BLUEPRINT, 46)]
+        self._start_procrastination_run(cards=cards)
+        self.assertEqual(len(self.game._card_activations(main.Card.PROCRASTINATION)), 2)
+
+
+    def test_a_cut_copy_takes_its_rewind_with_it(self):
+        # Two copies with one cut by the Card cutter: one rewind left, so the run
+        # ends at its second completion.
+        first = main.CardItem(main.Card.PROCRASTINATION, 46)
+        second = main.CardItem(main.Card.PROCRASTINATION, 46)
+        self._start_procrastination_run(cards=[first, second])
+        self.game.disabled_card = second
+
+        self.assertEqual(len(self.game._card_activations(main.Card.PROCRASTINATION)), 1)
+        self.assertTrue(self.game._procrastination_rewind())
+        self.assertFalse(self.game._procrastination_rewind())
+        self.assertEqual(self.game.procrastination_rewinds, 1)
 
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
@@ -784,7 +900,7 @@ class CardsTests(GameTestCase):
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_blueprint_copies_the_magnitude_too(self):
-        # A Blueprint copies the card to its left — its value AND its roll.
+        # A Blueprint copies the card to its left â€” its value AND its roll.
         mult = main.condition_scorer_card(main.Condition.START, main.Scorer.MULT_ADD)
         self.game.cards.append(main.make_card_item(mult, amount=9))
         self.game.cards.append(main.CardItem(main.Card.BLUEPRINT, 33))
@@ -800,7 +916,7 @@ class CardsTests(GameTestCase):
         # Building a card consumes the scorer piece, so the card PAYS the
         # strength that piece was bought at: no laundering a cheap roll into
         # the average card (or the reverse). Its price is the catalog price
-        # either way — a roll is never part of what something costs.
+        # either way â€” a roll is never part of what something costs.
         for amount, expected in ((45, 45), (15, 15)):
             with self.subTest(amount=amount):
                 self.game.toolbox.items.clear()
@@ -990,7 +1106,7 @@ class CardsTests(GameTestCase):
         # An island is a group of unlocked units joined by SHARED SIDES. Two
         # blocks touching only at a corner are two islands: the corner between
         # them is water. The count is of groups, so one big continent is still
-        # 1 — and a board with nothing unlocked has none.
+        # 1 â€” and a board with nothing unlocked has none.
         game = self.game
         game.unlocked_cells = set()
         self.assertEqual(main.cards.island_group_count(game), 0)
@@ -1146,7 +1262,7 @@ class CardsTests(GameTestCase):
     def test_start_parts_card_banks_its_component_at_run_start(self):
         # Regression: a start-of-run resource card (Ripped Card + Parts =
         # FEW_BLOCKS x Parts) fires when the run starts, but its reward is
-        # BANKED — the component only reaches the toolbox when the player
+        # BANKED â€” the component only reaches the toolbox when the player
         # continues the run (see Game._continue_run).
         value = main.condition_scorer_card(main.Condition.FEW_BLOCKS, main.Scorer.PARTS)
         self.game.cards.append(main.CardItem(value, 50))
@@ -1526,7 +1642,7 @@ class CardsTests(GameTestCase):
         self.assertIn("when the marble collides with a Pipe block", pipe)
         self.assertIn("$15 when the marble collides", pipe)  # no comma: a clause
         # A time adverbial gets its own comma instead of running the two
-        # clauses together ("… the first block the marble hits this run at the
+        # clauses together ("â€¦ the first block the marble hits this run at the
         # start of the run").
         row = main.Card.description(
             main.condition_scorer_card(main.Condition.FULLEST_COLUMN,
@@ -1856,7 +1972,7 @@ class CardsTests(GameTestCase):
         rect = main.Block(0, 0, shape=main.Shape.RECT, scorer=main.Scorer.NONE)
         self._card_fire(rect)
         self.assertEqual(self.game.parts_run_gain, 1)
-        # The bank is handed over on continue — and only then.
+        # The bank is handed over on continue â€” and only then.
         self._complete_run(2000)
         self.game._continue_run()
         self.assertEqual(self._component_count(), 1)
@@ -2168,7 +2284,7 @@ class CardsTests(GameTestCase):
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_cards_ignore_role_blocks(self):
         # Start/Finish blocks are not scoring blocks and never spend a trigger,
-        # so a collision card must not fire on them at all — otherwise a
+        # so a collision card must not fire on them at all â€” otherwise a
         # slope-shaped Start block would feed a Slope xMult card on every touch.
         value = main.condition_scorer_card(main.Condition.SHAPE_SLOPE, main.Scorer.MULT_MUL)
         self.game.cards = [main.CardItem(value, 40)]
@@ -2311,7 +2427,7 @@ class CardsTests(GameTestCase):
 
     def test_cash_card_reward_folds_into_run_award_and_retry_discards(self):
         # Cash earned by Cash cards is added at _award_cash (part of the run's
-        # end award), so retrying the run undoes it — it only sticks after a run.
+        # end award), so retrying the run undoes it â€” it only sticks after a run.
         self.game.score_total = 10000
         self.game.required_score = 1
         self.game.card_cash_run_gain = 9
@@ -2848,7 +2964,7 @@ class CardsTests(GameTestCase):
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_card_cutter_covers_every_passive_whole_card(self):
         # Every passive whole card is read through _has_card, so cutting it
-        # silences it — and cutting one card never silences another.
+        # silences it â€” and cutting one card never silences another.
         passive = [main.Card.SHOWMAN, main.Card.GARDEN, main.Card.RIGGED_CASINO,
                    main.Card.CONQUISTADOR, main.Card.COMPOUND_INTEREST,
                    main.Card.INFERNO, main.Card.WATCH, main.Card.PEDESTAL,

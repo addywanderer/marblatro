@@ -35,6 +35,9 @@ BORD_WIDTH = _ui_source.BORD_WIDTH
 BOARD_UNIT_COL = _ui_source.BOARD_UNIT_COL
 BOARD_UNIT_PRICE = _ui_source.BOARD_UNIT_PRICE
 BOARD_UNIT_ROW = _ui_source.BOARD_UNIT_ROW
+INVENTORY_SLOT_COL = _ui_source.INVENTORY_SLOT_COL
+INVENTORY_SLOT_PRICE = _ui_source.INVENTORY_SLOT_PRICE
+INVENTORY_SLOT_ROW = _ui_source.INVENTORY_SLOT_ROW
 ACTION_AREA_COORDS = _ui_source.ACTION_AREA_COORDS
 ACTION_UPGRADE_COST = _ui_source.ACTION_UPGRADE_COST
 ACTION_UPGRADE_RECT = _ui_source.ACTION_UPGRADE_RECT
@@ -87,10 +90,8 @@ GAME_OVER_NEW_BUTTON_RECT = _ui_source.GAME_OVER_NEW_BUTTON_RECT
 MARBLE_BACK_BUTTON_RECT = _ui_source.MARBLE_BACK_BUTTON_RECT
 MARBLE_UPGRADES_TOGGLE_RECT = _ui_source.MARBLE_UPGRADES_TOGGLE_RECT
 RETURN_TO_MENU_BUTTON_RECT = _ui_source.RETURN_TO_MENU_BUTTON_RECT
-SELL_OVERLAY_RECT = _ui_source.SELL_OVERLAY_RECT
 SHOP_REFRESH_BUTTON_RECT = _ui_source.SHOP_REFRESH_BUTTON_RECT
 TRIAL_BOX_RECT = _ui_source.TRIAL_BOX_RECT
-UPGRADE_OVERLAY_RECT = _ui_source.UPGRADE_OVERLAY_RECT
 UPGRADES_BACK_BUTTON_RECT = _ui_source.UPGRADES_BACK_BUTTON_RECT
 UPGRADES_BUTTON_RECT = _ui_source.UPGRADES_BUTTON_RECT
 ActionItem = _ui_source.ActionItem
@@ -570,6 +571,189 @@ def draw_pack_overlay(game):
     pygame.draw.rect(game.screen, WHITE, skip, 2, border_radius=6)
     label = font("tiny").render("SKIP THE REST", True, (255, 255, 255))
     game.screen.blit(label, label.get_rect(center=skip.center))
+
+
+# ---------------------------------------------------------------------------
+# The whole-inventory pop-up (see Game._toggle_inventory_view)
+# ---------------------------------------------------------------------------
+# The inventory holds everything the player owns, but its panel only ever shows
+# one selection of it (see main.Toolbox). The 1x1 button on the panel's right
+# edge opens the WHOLE inventory in this pop-up, drawn in the same style as an
+# opened pack: a dimmed backdrop, a bordered panel, and a grid of the item art
+# with its name under it. It is a viewer that PAGES (the inventory is
+# unbounded), so the page buttons and CLOSE live in its footer.
+INVENTORY_VIEW_COLS = 8
+INVENTORY_VIEW_ROWS = 4
+INVENTORY_VIEW_CELL = 78
+INVENTORY_VIEW_GAP = 8
+INVENTORY_VIEW_HEADER = 46
+INVENTORY_VIEW_FOOTER = 44
+INVENTORY_VIEW_PAD = 20
+INVENTORY_VIEW_PAGER = 30
+INVENTORY_VIEW_CLOSE = (104, 24)
+# The footer's own gap: the page buttons sit either side of CLOSE (see
+# inventory_pager_rect), so the panel is never drawn narrower than the footer
+# needs — a small inventory used to squeeze the buttons on top of each other.
+INVENTORY_VIEW_FOOTER_GAP = 8
+INVENTORY_VIEW_MIN_WIDTH = (2 * INVENTORY_VIEW_PAD
+                            + INVENTORY_VIEW_CLOSE[0]
+                            + 2 * (INVENTORY_VIEW_FOOTER_GAP
+                                   + INVENTORY_VIEW_PAGER))
+
+
+def inventory_view_pages(game):
+    """How many pages the whole-inventory pop-up holds (at least one)."""
+    per_page = INVENTORY_VIEW_COLS * INVENTORY_VIEW_ROWS
+    return max(1, -(-len(game.toolbox.every_item()) // per_page))
+
+
+def inventory_view_items(game):
+    """The whole inventory's items on the pop-up's current page, in order.
+
+    The order is the inventory's own (the displayed part first, then the stash —
+    see main.Toolbox.every_item), so a page is a window onto it. The page index
+    is clamped by wrapping, so a stale page (an item left the inventory) still
+    lands on a real page.
+    """
+    items = game.toolbox.every_item()
+    per_page = INVENTORY_VIEW_COLS * INVENTORY_VIEW_ROWS
+    page = game.inventory_page % inventory_view_pages(game)
+    return items[page * per_page:(page + 1) * per_page]
+
+
+def inventory_panel_rect(game):
+    """The panel the whole-inventory pop-up is drawn in.
+
+    Its width follows the items the page holds, but never falls below what the
+    footer needs (see INVENTORY_VIEW_MIN_WIDTH): the page buttons and CLOSE are
+    laid out from the panel's own edges, so a two-item inventory would otherwise
+    draw them on top of each other.
+    """
+    count = max(1, len(inventory_view_items(game)))
+    cols = min(INVENTORY_VIEW_COLS, count)
+    rows = max(1, -(-count // INVENTORY_VIEW_COLS))
+    width = cols * INVENTORY_VIEW_CELL + (cols - 1) * INVENTORY_VIEW_GAP + 40
+    width = max(width, INVENTORY_VIEW_MIN_WIDTH)
+    height = (rows * INVENTORY_VIEW_CELL + (rows - 1) * INVENTORY_VIEW_GAP
+              + INVENTORY_VIEW_HEADER + INVENTORY_VIEW_FOOTER)
+    return pygame.Rect((SCREEN_WIDTH - width) // 2,
+                       (SCREEN_HEIGHT - height) // 2, width, height)
+
+
+def inventory_item_rects(game):
+    """One rect per item of the pop-up's current page, in draw order.
+
+    Index i of this list is index i of ``inventory_view_items(game)``, so a
+    click (or a hover read-out) can be mapped straight back to the item.
+    """
+    panel = inventory_panel_rect(game)
+    rects = []
+    for index in range(len(inventory_view_items(game))):
+        col = index % INVENTORY_VIEW_COLS
+        row = index // INVENTORY_VIEW_COLS
+        rects.append(pygame.Rect(
+            panel.x + INVENTORY_VIEW_PAD
+            + col * (INVENTORY_VIEW_CELL + INVENTORY_VIEW_GAP),
+            panel.y + INVENTORY_VIEW_HEADER
+            + row * (INVENTORY_VIEW_CELL + INVENTORY_VIEW_GAP),
+            INVENTORY_VIEW_CELL, INVENTORY_VIEW_CELL))
+    return rects
+
+
+def inventory_pager_rect(game, direction):
+    """The pop-up's page buttons: ``direction`` -1 is back, +1 is forwards.
+
+    They sit at the footer's two ends — flush with its padding, either side of
+    CLOSE — so they can never be drawn over it or over each other, whatever the
+    panel's width. They are only DRAWN (and clickable) while the pop-up has more
+    than one page (see inventory_view_pages).
+    """
+    panel = inventory_panel_rect(game)
+    size = INVENTORY_VIEW_PAGER
+    y = panel.bottom - INVENTORY_VIEW_FOOTER + (INVENTORY_VIEW_FOOTER - size) // 2
+    if direction < 0:
+        x = panel.x + INVENTORY_VIEW_PAD
+    else:
+        x = inventory_close_rect(game).left - INVENTORY_VIEW_FOOTER_GAP - size
+    return pygame.Rect(x, y, size, size)
+
+
+def inventory_close_rect(game):
+    """The pop-up's CLOSE button (the pack pop-up's SKIP button's cousin)."""
+    panel = inventory_panel_rect(game)
+    width, height = INVENTORY_VIEW_CLOSE
+    return pygame.Rect(panel.right - INVENTORY_VIEW_PAD - width,
+                       panel.bottom - INVENTORY_VIEW_FOOTER
+                       + (INVENTORY_VIEW_FOOTER - height) // 2,
+                       width, height)
+
+
+def draw_inventory_overlay(game):
+    """Draw the whole-inventory pop-up (see Game._toggle_inventory_view).
+
+    Same language as an opened pack (see draw_pack_overlay): a dimmed backdrop
+    over the play screen, a panel in the panel colour with an accent border, the
+    item art in a grid with its name under it, and the footer's page buttons and
+    CLOSE. The items the panel is currently SHOWING are green-framed, so the
+    player can tell at a glance which part of the inventory is within reach
+    without a discard; everything else is what a reshuffle or a discard can
+    bring out.
+    """
+    if not getattr(game, "inventory_open", False):
+        return
+    backdrop = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    backdrop.fill((0, 0, 0, 150))
+    game.screen.blit(backdrop, (0, 0))
+    panel = inventory_panel_rect(game)
+    items = inventory_view_items(game)
+    total = len(game.toolbox.every_item())
+    pages = inventory_view_pages(game)
+    page = game.inventory_page % pages
+    pygame.draw.rect(game.screen, (28, 28, 34), panel, border_radius=10)
+    pygame.draw.rect(game.screen, WHITE, panel, 3, border_radius=10)
+    title = font("small").render("WHOLE INVENTORY", True, WHITE)
+    game.screen.blit(title, title.get_rect(midtop=(panel.centerx, panel.y + 8)))
+    shown = len(game.toolbox.items)
+    rule = (f"{total} item{'s' if total != 1 else ''} — {shown} on panel — "
+            f"page {page + 1}/{pages}")
+    rule_surf = font("tiny").render(rule, True, (215, 215, 215))
+    game.screen.blit(rule_surf,
+                     rule_surf.get_rect(midtop=(panel.centerx, panel.y + 26)))
+    mouse = pygame.mouse.get_pos()
+    for item, rect in zip(items, inventory_item_rects(game)):
+        hovered = rect.collidepoint(mouse)
+        pygame.draw.rect(game.screen, (46, 46, 54), rect, border_radius=6)
+        pygame.draw.rect(game.screen, WHITE if hovered else (90, 90, 100),
+                         rect, 2, border_radius=6)
+        inner = pygame.Rect(rect.centerx - GRID_SIZE // 2,
+                            rect.y + 6, GRID_SIZE, GRID_SIZE)
+        draw_shop_item(game.screen, item, inner)
+        for line in game._wrap_text(game._item_name(item), font("tiny"),
+                                    rect.width - 8)[:2]:
+            text = font("tiny").render(line, True, (235, 235, 235))
+            game.screen.blit(text, text.get_rect(midtop=(rect.centerx, inner.bottom + 2)))
+        # Green frame: this item is one the panel is showing right now.
+        if any(item is shown_item for shown_item in game.toolbox.items):
+            pygame.draw.rect(game.screen, GREEN, rect, 2, border_radius=6)
+    # Only a pop-up with more than one page shows (or needs) the arrows: with a
+    # small inventory they used to be drawn over CLOSE and over each other.
+    if pages > 1:
+        for direction, glyph in ((-1, "<"), (1, ">")):
+            button = inventory_pager_rect(game, direction)
+            hovered = button.collidepoint(mouse)
+            pygame.draw.rect(game.screen,
+                             (70, 70, 80) if not hovered else (96, 96, 108),
+                             button, border_radius=6)
+            pygame.draw.rect(game.screen, WHITE, button, 2, border_radius=6)
+            label = font("tiny").render(glyph, True, (255, 255, 255))
+            game.screen.blit(label, label.get_rect(center=button.center))
+    close = inventory_close_rect(game)
+    hovered = close.collidepoint(mouse)
+    pygame.draw.rect(game.screen, (70, 70, 80) if not hovered else (96, 96, 108),
+                     close, border_radius=6)
+    pygame.draw.rect(game.screen, WHITE, close, 2, border_radius=6)
+    label = font("tiny").render("CLOSE", True, (255, 255, 255))
+    game.screen.blit(label, label.get_rect(center=close.center))
 
 
 def _draw_condition_mini(screen, shape, effect, center, size):
@@ -3300,6 +3484,8 @@ def draw(game):
     # the sidebar is the info box that follows the mouse, so hovering an option
     # in the overlay reads out what that option is (see draw_pack_overlay).
     draw_pack_overlay(game)
+    # The whole-inventory pop-up opens the same way (see draw_inventory_overlay).
+    draw_inventory_overlay(game)
     draw_sidebar(game)
     # The bottom-left MAIN MENU button: clicking it returns to the title screen.
     btn = RETURN_TO_MENU_BUTTON_RECT
@@ -3495,16 +3681,44 @@ def draw_run_dots(game):
 
 
 def draw_toolbox(game):
-    """Draw the inventory panel: its grid, title, and green selection borders.
+    """Draw the inventory panel: its grid, title, and its own furniture.
 
-    The panel is drawn large enough to hold everything the inventory carries:
-    the items, and the Spirit tokens in the cells right after them (see
-    Game._token_rect / Game.inventory_grid_rows) — so a token always reads as
-    part of the inventory rather than something sitting beside it.
+    The panel is exactly as big as the inventory needs it — one cell per owned
+    slot, up to main.INVENTORY_MAX_COLS x main.INVENTORY_MAX_ROWS and never
+    larger — with the Spirit tokens in the entries right after the items (see
+    Game._token_rect), so a token always reads as part of the inventory rather
+    than something sitting beside it. The panel grows UP from its bottom edge
+    (see Toolbox.rect), so the SELL/UPGRADE buttons under it never move.
+
+    Three things frame it, all of them part of the panel rather than of the
+    play area:
+
+    * the SELECTION on the title strip: how many items are selected, and the
+      discards left this run. Every selected item is green-framed — thick for
+      the one IN HAND (the block a board click places, the piece just clicked),
+      thin for the rest (see Game._toggle_toolbox_selection), because a click
+      toggles an item and F discards the whole selection;
+    * the ARROW box on the panel's top-right edge (see
+      Game.inventory_page_button_rect), which turns the page while the
+      inventory holds more than the panel can show;
+    * the 1x1 box DIRECTLY BELOW that arrow (Game.inventory_view_button_rect),
+      which opens the whole inventory (see draw_inventory_overlay).
     """
     box = game.toolbox
-    draw_marble_box(game.screen, box.rect.x, box.rect.y, box.cols,
-                    game.inventory_grid_rows(), fill=panel_fill(game))
+    rect = box.rect
+    draw_marble_box(game.screen, rect.x, rect.y, box.cols, box.rows,
+                    fill=panel_fill(game))
+
+    # Cells past the panel's capacity are NOT owned yet — a save starts at
+    # main.INVENTORY_START_SLOTS and the shop's Inventory Slot tile sells more
+    # (see Game._buy_inventory_slot) — so they are shaded rather than drawn as
+    # empty slots the player could fill.
+    first = box.first_shown()
+    for panel in range(box.per_page):
+        if first + panel >= box.capacity():
+            shade = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+            shade.fill((0, 0, 0, 110))
+            game.screen.blit(shade, box.cell_rect(panel))
 
     # The inventory title sits left of the panel's TOP edge, the way the card
     # and action areas label the rows above them (CARDS / ACTIONS), and it
@@ -3513,26 +3727,47 @@ def draw_toolbox(game):
     # cursor's way (only the board's title does that — see
     # Game._show_marble_box_title).
     title = game.small_font.render("INVENTORY", True, WHITE)
-    game.screen.blit(title, (box.rect.x + 8, box.rect.y - 14))
+    game.screen.blit(title, (rect.x + 8, rect.y - 14))
+    # The discards left this run (right-aligned on the same strip), and — left of
+    # it — how many items are SELECTED (see Game._toggle_toolbox_selection).
+    discards = getattr(game, "discards_left", 0)
+    selected = len(getattr(game, "selection", ()))
+    label = game.tiny_font.render(f"{discards} DISCARD", True,
+                                  (150, 150, 160) if discards <= 0 else WHITE)
+    right = rect.right - label.get_width() - 2
+    game.screen.blit(label, (right, rect.y - 13))
+    if selected:
+        picked = game.tiny_font.render(f"{selected} selected", True, GREEN)
+        game.screen.blit(picked, (right - picked.get_width() - 8,
+                                  rect.y - 13))
 
-    # Green border cells: the currently selected item (block or component)
-    # plus each assigned component. Index-based, so a duplicated component
-    # only lights up the exact cell that was clicked/assigned — not every
-    # copy that shares the same identity.
-    green_indexes = set()
+    # Green border cells: every SELECTED item — the whole toggle selection, which
+    # is what F discards and what S assembles — with the item IN HAND (the block
+    # a board click places, the piece just clicked) marked by an inner ring so it
+    # is clear which of several selected items the action verbs act on. A
+    # component the code assigned directly (see Game._use_component) is framed
+    # too, exactly as it was before selection became a toggle. Index-based, so a
+    # duplicated component only lights up the exact cell that was clicked or
+    # assigned — not every cell holding the same object.
+    framed = [item for item in box.items if game.is_toolbox_selected(item)]
+    framed += list(game.assigned_toolbox_indexes)
+    active_index = None
     si = game.selected_toolbox_index
     if (si is not None and 0 <= si < len(box.items)
             and box.items[si] is game.selected_toolbox_item):
-        green_indexes.add(si)
-    for comp, idx in game.assigned_toolbox_indexes.items():
-        if 0 <= idx < len(box.items) and box.items[idx] is comp:
-            green_indexes.add(idx)
-        else:
-            # The toolbox list shifted; fall back to the first occurrence.
-            try:
-                green_indexes.add(box.items.index(comp))
-            except ValueError:
-                pass
+        active_index = si
+    elif game.selected_toolbox_item is not None:
+        active_index = next((index for index, item in enumerate(box.items)
+                             if item is game.selected_toolbox_item), None)
+    selected_indexes = {active_index} - {None}
+    for item in framed:
+        index = game.assigned_toolbox_indexes.get(item)
+        if not (index is not None and 0 <= index < len(box.items)
+                and box.items[index] is item):
+            index = next((i for i, shown in enumerate(box.items) if shown is item),
+                         None)
+        if index is not None:
+            selected_indexes.add(index)
 
     # Gold border cells: the condition + scorer assigned to the card builder.
     gold_indexes = set()
@@ -3545,17 +3780,89 @@ def draw_toolbox(game):
             except ValueError:
                 pass
 
-    for index, item in enumerate(box.items):
-        rect = box.cell_rect(index)
-        draw_shop_item(game.screen, item, rect)
-        if index in green_indexes:
-            pygame.draw.rect(game.screen, GREEN, rect, 3)
+    # Only the page being shown has cells; an item on another page is reachable
+    # through the arrow box.
+    for panel, item in enumerate(box.shown_items()):
+        index = first + panel
+        cell = box.cell_rect(panel)
+        draw_shop_item(game.screen, item, cell)
+        if index in selected_indexes:
+            pygame.draw.rect(game.screen, GREEN, cell, 3)
+            # The item IN HAND wears an inner white ring on top of the green, so
+            # a multi-item selection still shows which one D/B/G and a click on
+            # the board act on.
+            if index == active_index:
+                pygame.draw.rect(game.screen, WHITE, cell.inflate(-8, -8), 1)
         elif index in gold_indexes:
-            pygame.draw.rect(game.screen, (255, 215, 0), rect, 3)
+            pygame.draw.rect(game.screen, (255, 215, 0), cell, 3)
         # The subject of an active action (a toolbox block) is gold-outlined.
         if (game.selected_action is not None and getattr(item, "kind", None) == "block"
                 and game.selected_action_subject is item):
-            pygame.draw.rect(game.screen, (255, 215, 0), rect, 3)
+            pygame.draw.rect(game.screen, (255, 215, 0), cell, 3)
+
+    # The page arrow: the top-right cell of the panel, shown only while the
+    # inventory holds more than the panel can display. Clicking it (see
+    # Game._turn_inventory_page) shows the next page.
+    pages = box.page_count()
+    if pages > 1:
+        arrow = game.inventory_page_button_rect()
+        _draw_inventory_side_box(game, arrow, draw_bottom=False)
+        hovered = arrow.collidepoint(pygame.mouse.get_pos())
+        pygame.draw.polygon(
+            game.screen, WHITE if hovered else (200, 200, 200),
+            ((arrow.centerx - 3, arrow.top + 7),
+             (arrow.centerx + 5, arrow.top + 13),
+             (arrow.centerx - 3, arrow.top + 19)))
+        count = game.tiny_font.render(f"{box.page + 1}/{pages}", True, WHITE)
+        game.screen.blit(count, count.get_rect(center=(arrow.centerx,
+                                                       arrow.bottom - 10)))
+
+    # The whole-inventory button: the cell directly below the arrow box, drawn
+    # as a panel cell of its own with a little grid on it (it shows the
+    # inventory, which is a grid). Hovering it lights the edges it owns — never
+    # the left one, which is the panel's own border (see
+    # _draw_inventory_side_box).
+    button = game.inventory_view_button_rect()
+    _draw_inventory_side_box(game, button)
+    hovered = button.collidepoint(pygame.mouse.get_pos())
+    if hovered:
+        pygame.draw.line(game.screen, WHITE,
+                         (button.right + BORD_WIDTH // 2, button.top),
+                         (button.right + BORD_WIDTH // 2, button.bottom), 1)
+        pygame.draw.line(game.screen, WHITE, (button.left, button.top),
+                         (button.right, button.top), 1)
+        pygame.draw.line(game.screen, WHITE, (button.left, button.bottom),
+                         (button.right, button.bottom), 1)
+    for gx in range(3):
+        for gy in range(3):
+            pygame.draw.rect(
+                game.screen, WHITE if hovered else (200, 200, 200),
+                (button.x + 9 + gx * 8, button.y + 9 + gy * 8, 5, 5))
+
+
+def _draw_inventory_side_box(game, rect, draw_bottom=True):
+    """Draw one of the inventory's own 1x1 boxes hanging off its right edge.
+
+    Only the edges the box OWNS are drawn. Its LEFT edge is the panel's own
+    right edge — user request: don't draw it, so the two boxes never stack a
+    second wall of border on top of the inventory box ("including the left edge
+    of the box for showing the full inventory"). The line between the page arrow
+    and the whole-inventory box below it is drawn ONCE, by the box underneath:
+    the arrow passes ``draw_bottom=False`` and the view box's top edge is that
+    shared line.
+    """
+    pygame.draw.rect(game.screen, panel_fill(game), rect)
+    edge = (30, 30, 30)
+    right_x = rect.right + BORD_WIDTH // 2
+    pygame.draw.line(game.screen, edge, (right_x, rect.top - BORD_WIDTH),
+                     (right_x, rect.bottom + BORD_WIDTH), BORD_WIDTH + 1)
+    top_y = rect.top - BORD_WIDTH // 2 - 1
+    pygame.draw.line(game.screen, edge, (rect.left, top_y),
+                     (rect.right, top_y), BORD_WIDTH)
+    if draw_bottom:
+        bottom_y = rect.bottom + BORD_WIDTH // 2
+        pygame.draw.line(game.screen, edge, (rect.left, bottom_y),
+                         (rect.right, bottom_y), BORD_WIDTH + 1)
 
 
 def draw_cards(game):
@@ -3633,7 +3940,7 @@ def _token_visual(token, rect):
 
 
 def draw_tokens(game):
-    """Draw the Spirit tokens, in the inventory cells after the items.
+    """Draw the Spirit tokens, in the inventory entries after the items.
 
     A token is part of the inventory rather than an area of its own (see
     Game._token_rect), so each is drawn in its own cell of the inventory grid,
@@ -3642,9 +3949,13 @@ def draw_tokens(game):
     board. Each fires once per run it covers, as if the marble had collided
     with it: the payoffs that belong to the run's start fire then, and a
     multiplier block is held for the run's END instead (see ScorerToken).
+    A token on a page the panel is not showing has no cell to draw in (see
+    Game._token_rect) and is skipped until its page is turned to.
     """
     for i, token in enumerate(game.tokens):
-        draw_token(game.screen, token, game._token_rect(i))
+        rect = game._token_rect(i)
+        if rect is not None:
+            draw_token(game.screen, token, rect)
 
 
 def draw_inaccessible(game):
@@ -3741,7 +4052,7 @@ def draw_sell_overlay(game):
         return
     if item not in game.toolbox.items:
         return  # a placed block selected in the marble box isn't sellable
-    rect = SELL_OVERLAY_RECT
+    rect = game.sell_overlay_rect()
     overlay = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
     # The run's role blocks (Start/Finish) can never be sold: their cell shows
     # a plain refusal instead of a price (see Game._unsellable).
@@ -3770,7 +4081,7 @@ def draw_upgrade_overlay(game):
         return
     if item not in game.toolbox.items:
         return  # a placed block selected in the marble box isn't sellable/upgradeable here
-    rect = UPGRADE_OVERLAY_RECT
+    rect = game.upgrade_overlay_rect()
     cost = game._trigger_upgrade_cost(item)
     affordable = game.cash >= cost
     overlay = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
@@ -3919,6 +4230,28 @@ def draw_shop(game):
     bu_center_x = bcell.centerx
     bu_price_y = shop.rect.y + (BOARD_UNIT_ROW + 1) * GRID_SIZE + GRID_SIZE // 2
     game.screen.blit(bu_price, bu_price.get_rect(center=(bu_center_x, bu_price_y)))
+
+    # The shop's always-present Inventory Slot tile (the cell right of the Board
+    # Unit tile): $30 buys the inventory panel one more slot, for good (see
+    # Game._buy_inventory_slot). The little grid on it reads as inventory cells,
+    # and the current slot count sits under the price.
+    icell = pygame.Rect(shop.rect.x + INVENTORY_SLOT_COL * GRID_SIZE,
+                        shop.rect.y + INVENTORY_SLOT_ROW * GRID_SIZE,
+                        GRID_SIZE, GRID_SIZE)
+    pygame.draw.rect(game.screen, (60, 70, 110), icell)
+    pygame.draw.rect(game.screen, WHITE, icell, 2)
+    for gx in range(2):
+        for gy in range(2):
+            pygame.draw.rect(game.screen, (255, 255, 255),
+                             (icell.x + 9 + gx * 11, icell.y + 8 + gy * 11, 9, 9), 1)
+    pygame.draw.line(game.screen, (255, 255, 255), (icell.centerx, icell.y + 30),
+                     (icell.centerx, icell.y + 36), 2)
+    pygame.draw.line(game.screen, (255, 255, 255), (icell.centerx - 3, icell.y + 33),
+                     (icell.centerx + 3, icell.y + 33), 2)
+    is_price = game.small_font.render(f"${INVENTORY_SLOT_PRICE}", True, WHITE)
+    game.screen.blit(is_price, is_price.get_rect(
+        center=(icell.centerx, shop.rect.y + (INVENTORY_SLOT_ROW + 1) * GRID_SIZE
+                + GRID_SIZE // 2)))
 
     if game.shop_message:
         lines, rect = shop_message_layout(game, game.shop_message)

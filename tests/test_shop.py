@@ -532,11 +532,15 @@ class ShopTests(GameTestCase):
         self.assertGreater(halves[0].key_number, 0)
 
 
-    def test_buying_a_key_lock_pair_requires_two_free_slots(self):
+    def test_a_key_lock_pair_fits_even_when_the_panel_is_full(self):
+        # Unbounded inventory: the pair fills the last free cell and stashes the
+        # other half instead of being refused (see Toolbox).
         self.game.toolbox.items.clear()
+        self.game.toolbox.stash.clear()
         filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                 main.Scorer.NONE, 0, 5, "filler")
-        while len(self.game.toolbox.items) < self.game.toolbox.cols * self.game.toolbox.rows - 1:
+        capacity = self.game.toolbox.capacity()
+        while len(self.game.toolbox.items) < capacity - 1:
             self.game.toolbox.add(filler)
         lock = main.BlockItem(0, 0, main.Shape.LOCK, main.Effect.NONE,
                               main.Scorer.NONE, 0, 30, "Lock Block")
@@ -544,11 +548,13 @@ class ShopTests(GameTestCase):
 
         self.game._buy_shop_item(lock)
 
-        # Nothing is added and nothing is charged: a lone half is useless.
-        self.assertEqual(len(self.game.toolbox.items),
-                         self.game.toolbox.cols * self.game.toolbox.rows - 1)
-        self.assertEqual(self.game.cash, 1000)
-        self.assertTrue(self.game.shop_message)
+        self.assertEqual(len(self.game.toolbox.items), capacity)
+        self.assertEqual(len(self.game.toolbox.stash), 1)
+        halves = [i for i in self.game.toolbox.every_item()
+                  if getattr(i, "key_number", 0)]
+        self.assertEqual(len(halves), 2)                  # a matched pair
+        self.assertEqual(halves[0].key_number, halves[1].key_number)
+        self.assertEqual(self.game.cash, 1000 - lock.price)
 
 
     def test_assembling_a_lock_shape_adds_its_key_half(self):
@@ -3276,10 +3282,15 @@ class ShopTests(GameTestCase):
         self.assertIn(block, self.game.toolbox.items)
 
 
-    def test_buying_portal_block_requires_two_free_slots(self):
+    def test_a_portal_pair_fits_even_when_the_panel_is_full(self):
+        # The inventory is unbounded: buying a portal pair with only one free
+        # cell fills that cell and stashes the partner, rather than refusing the
+        # purchase (see Toolbox).
         self.game.toolbox.items.clear()
+        self.game.toolbox.stash.clear()
         filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE, main.Scorer.NONE, 0, 5, "filler")
-        while len(self.game.toolbox.items) < self.game.toolbox.cols * self.game.toolbox.rows - 1:
+        capacity = self.game.toolbox.capacity()
+        while len(self.game.toolbox.items) < capacity - 1:
             self.game.toolbox.add(filler)
         portal = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.PORTAL,
                                 main.Scorer.NONE, 0, 50, "Portal Block")
@@ -3287,9 +3298,13 @@ class ShopTests(GameTestCase):
 
         self.game._buy_shop_item(portal)
 
-        self.assertEqual(len(self.game.toolbox.items), self.game.toolbox.cols * self.game.toolbox.rows - 1)
-        self.assertTrue(self.game.shop_message)
-        self.assertEqual(self.game.cash, 1000)  # not charged when there's no room
+        self.assertEqual(len(self.game.toolbox.items), capacity)
+        self.assertEqual(len(self.game.toolbox.stash), 1)
+        portals = [i for i in self.game.toolbox.every_item()
+                   if getattr(i, "effect", None) == main.Effect.PORTAL]
+        self.assertEqual(len(portals), 2)
+        self.assertEqual(portals[0].portal_number, portals[1].portal_number)
+        self.assertEqual(self.game.cash, 1000 - portal.price)  # charged
 
 
     def test_assembling_portal_block_adds_two_copies_with_same_number(self):

@@ -569,19 +569,22 @@ class PackKeepTests(GameTestCase):
                                 main.Scorer.NONE, 0, 60, "Portal",
                                 effects=[main.Effect.PORTAL])
         self._open([portal], main.Pack.BLOCK)
-        before = len(self.game.toolbox.items)
+        before = len(self.game.toolbox.every_item())
         self.game._keep_pack_option(0)
-        added = self.game.toolbox.items[before:]
+        added = self.game.toolbox.every_item()[before:]
         self.assertEqual(len(added), 2)
         self.assertEqual(len({b.portal_number for b in added}), 1)
         self.assertTrue(all(b.has_effect(main.Effect.PORTAL) for b in added))
-        # ...and a Key/Lock option arrives as its matched partner shape.
+        # ...and a Key/Lock option arrives as its matched partner shape. Both
+        # halves are OWNED even when the panel has no room for them (the
+        # inventory is unbounded — see Toolbox), so the test counts every item,
+        # not just the cells on display.
         key = main.BlockItem(0, 0, main.Shape.KEY, main.Effect.NONE,
                              main.Scorer.NONE, 0, 10, "Key")
         self._open([key], main.Pack.BLOCK)
-        before = len(self.game.toolbox.items)
+        before = len(self.game.toolbox.every_item())
         self.game._keep_pack_option(0)
-        added = self.game.toolbox.items[before:]
+        added = self.game.toolbox.every_item()[before:]
         self.assertEqual({b.shape for b in added}, {main.Shape.KEY, main.Shape.LOCK})
         self.assertEqual(len({b.key_number for b in added}), 1)
 
@@ -604,17 +607,21 @@ class PackKeepTests(GameTestCase):
         self.assertIs(self.game.open_pack, pack)
         self.assertIn("Already own", self.game.shop_message)
 
-    def test_a_full_inventory_refuses_a_part_and_keeps_the_pack_open(self):
+    def test_a_full_panel_still_takes_a_pack_part(self):
+        # The inventory is unbounded (see Toolbox): a part kept from a pack while
+        # the panel is full goes to the stash, so the pick is never refused and
+        # the pack does not stay open.
         part = main.Component.shape_component(main.Shape.PIPE)
         pack = self._open([part], main.Pack.SHAPE)
         self.game.toolbox.items = [main.BlockItem(0, 0, main.Shape.RECT,
                                                  main.Effect.NONE, main.Scorer.NONE,
                                                  0, 0, "wall")] * (
-            self.game.toolbox.cols * self.game.toolbox.rows)
+            self.game.toolbox.capacity())
+        self.game.toolbox.stash = []
         self.game._keep_pack_option(0)
-        self.assertEqual(pack.options, [part])
-        self.assertIs(self.game.open_pack, pack)
-        self.assertIn("full", self.game.shop_message)
+        self.assertIsNot(self.game.open_pack, pack)       # the pick went through
+        self.assertTrue(self.game.toolbox.contains(part))
+        self.assertEqual(len(self.game.toolbox.stash), 1)
 
     def test_a_full_card_area_refuses_a_card(self):
         card = main.CardItem(main.Card.GARDEN, 36)

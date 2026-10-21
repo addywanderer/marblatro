@@ -178,7 +178,7 @@ class RunsTests(GameTestCase):
         self.assertEqual(marble.sticky_timer, 0.0)      # the hold never happened
         self.assertIsNone(marble.sticky_velocity)
         self.assertEqual(list(marble.history), [])       # the future is gone
-        self.assertTrue(self.game.procrastination_used)
+        self.assertEqual(self.game.procrastination_rewinds, 1)
 
 
     def test_the_rewind_history_is_exactly_one_second_deep(self):

@@ -40,6 +40,8 @@ BlockItem = _save_source.BlockItem
 CardItem = _save_source.CardItem
 Component = _save_source.Component
 DEFAULT_DIFFICULTY = _save_source.DEFAULT_DIFFICULTY
+DISCARDS_PER_RUN = _save_source.DISCARDS_PER_RUN
+INVENTORY_START_SLOTS = _save_source.INVENTORY_START_SLOTS
 Difficulty = _save_source.Difficulty
 Effect = _save_source.Effect
 GREEN = _save_source.GREEN
@@ -425,6 +427,15 @@ def _save_data(game):
         "cards": [_serialize_item(c) for c in game.cards],
         "actions": [_serialize_item(a) for a in game.actions],
         "toolbox": [_serialize_item(i) for i in game.toolbox.items],
+        # The inventory's OTHER part: everything owned that the panel is not
+        # showing right now (the inventory is unbounded, see main.Toolbox). A
+        # save written before the stash existed has none.
+        "toolbox_stash": [_serialize_item(i) for i in game.toolbox.stash],
+        # The discards left this run (see Game._discard_items), and the
+        # inventory slots bought from the shop (on top of
+        # main.INVENTORY_START_SLOTS — see Game._buy_inventory_slot).
+        "discards_left": game.discards_left,
+        "inventory_slots_bought": game.inventory_slots_bought,
         "grid": [_serialize_item(b) for b in game.grid.values()],
         "shop": [_serialize_item(i) for i in game.shop.items],
         # The pack the player is choosing from, if any (it has already left the
@@ -612,6 +623,11 @@ def _load_save_data(game, data, slot):
     game.card_slots_won = data.get("card_slots_won", 0)
     game.inventory_slots_won = data.get("inventory_slots_won", 0)
     game.inventory_slots_run_gain = 0
+    # The inventory slots the save BOUGHT come back with it (a save written
+    # before the shop sold slots has none), so the panel is as big as it was.
+    game.inventory_slots_bought = data.get("inventory_slots_bought", 0)
+    game.toolbox.base_slots = (INVENTORY_START_SLOTS
+                               + game.inventory_slots_bought)
     game.toolbox.slot_bonus = game.inventory_slots_won
     # A sale recorded before the save keeps the Deal breaker trial beaten, so a
     # save written before the record existed just reads as "never sold".
@@ -619,6 +635,11 @@ def _load_save_data(game, data, slot):
     game.action_slots_won = data.get("action_slots_won", 0)
     game.action_slots_unlimited = data.get("action_slots_unlimited", False)
     game.action_area_page = 0
+    # The inventory's own view state is not saved either: the pop-up starts
+    # closed, on its first page, and so does the panel itself.
+    game.inventory_open = False
+    game.inventory_page = 0
+    game.toolbox.page = 0
     # The action bonuses above: a save written before they existed reads as an
     # untouched game (no factor, full reroll price, no banked xMult).
     game.resource_gain_mult = data.get("resource_gain_mult", 1.0)
@@ -664,8 +685,21 @@ def _load_save_data(game, data, slot):
     game.touch_shape_counts = {}
     game.touch_effect_counts = {}
     game.touch_scorer_counts = {}
-    # Rebuild the owned/shop collections from the save.
+    # Rebuild the owned/shop collections from the save. The toolbox comes back
+    # as it was left: the part the panel was showing, and the stash behind it
+    # (a save written before the inventory was unbounded has no stash).
     game.toolbox.items = [_deserialize_item(d) for d in data.get("toolbox", [])]
+    game.toolbox.stash = [_deserialize_item(d)
+                          for d in data.get("toolbox_stash", [])]
+    # The slots come before the items above, so a save written when the panel was
+    # wider than its bought slots (see INVENTORY_START_SLOTS) has its overflow
+    # moved to the stash instead of landing in unsold cells.
+    game.toolbox.settle()
+    # The discards the run had left come back too, so loading a save cannot hand
+    # a mid-run discard back (see Game._discard_items). A save written before
+    # the inventory had discards starts the run with a full set.
+    game.discards_left = int(data.get("discards_left", DISCARDS_PER_RUN))
+    game.selection = []
     # Odyssey's banked items come back before anything asks the toolbox for
     # room (see Game._return_inaccessible), and a save written before the card
     # existed banks nothing.

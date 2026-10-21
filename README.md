@@ -23,13 +23,17 @@ pip install pygame numpy
 
 | Input | What it does |
 |---|---|
-| Left-click a toolbox item | Select it (a block is armed for placement, a component joins the next block) |
+| Click a toolbox item | Select it — a block is armed for placement, a component joins the next block. Click it again to unselect it |
+| Click the arrow box on the inventory's top-right edge | Turn the panel to its next page (shown once the inventory outgrows it) |
+| Click the box below the arrow | Open the whole inventory (the panel only shows a selection of it) |
+| **F** | Discard: swap the selected inventory items (up to 4) for random others from the whole inventory — 2 a run |
 | Left-drag on the board | Place the armed block — it costs the item's price |
 | Right-click a block | Erase it (it goes back to the toolbox as a block) |
 | Hover anything | The sidebar describes it: shape, effects, scorer, trigger limit |
 | **A** | Rotate the block being placed by 90° |
 | **S** | The context action: apply the selected action, split a card, build a card, assemble the assigned parts, disassemble a block — with nothing selected it builds a plain wall |
 | **B** | Sell the selected item |
+| Click the shop's Inventory Slot tile | Buy the inventory one more permanent slot ($30) |
 | **D** | Pay cash to raise the selected block's trigger limit |
 | **T** | Start a fresh run (rolls a new trial) |
 | **R** | Restart the current run, keeping its trial |
@@ -69,6 +73,22 @@ Conventions worth knowing before editing:
   average with a continuous truncated Cauchy whose tail is set by
   `components.MAGNITUDE_SPREAD` (4 = a deliberately long tail). A roll changes
   what an item DOES, never what it costs.
+* **The inventory is unbounded; its panel is a window.** `main.Toolbox` keeps
+  every item the player owns — `items` is the selection its cells show, `stash`
+  is the rest — and using an action, or a discard, re-draws which part is on
+  display. Nothing that fills the inventory can be refused for room.
+* **The panel's slot count is bought, not fixed.** `Toolbox.capacity()` is
+  `base_slots + slot_bonus`: a save starts with `INVENTORY_START_SLOTS` (4),
+  the shop's Inventory Slot tile adds a permanent slot for
+  `INVENTORY_SLOT_PRICE` (`inventory_slots_bought`, which is saved), and the
+  Packed scorer's bonus rides on top. The cells past the capacity are drawn
+  shaded — they are not slots yet.
+* **The panel sizes itself to the inventory, up to 5x2.** `Toolbox.rect` is
+  derived (`cols` x `rows` cells, grown up from the bottom of
+  `TOOLBOX_COORDS` so the SELL/UPGRADE buttons never move), and past
+  `INVENTORY_MAX_COLS x INVENTORY_MAX_ROWS` it pages: the arrow box on its
+  top-right edge shows the next page of cells, and the whole-inventory box sits
+  directly below it.
 * **Player data is local**: `profiles/<name>/…` (saves, `collection.json`,
   `achievements.json`, `metagame.json`), with the active profile name in
   `profiles/current.txt`. The tests redirect all of it into a temp folder.
@@ -90,6 +110,7 @@ produces.
 | `test_ui.py` | The HUD, sidebar, panels, info boxes, fonts, popups, particles and the CRT filter. |
 | `test_shop.py` | The shop, prices and rarity, buying, selling, assembly/disassembly, the economy. |
 | `test_toolbox.py` | The inventory: selection, assignment and clicks on the board. |
+| `test_inventory.py` | The unbounded inventory: the panel's selection and stash, reshuffles, discards, and the whole-inventory pop-up. |
 | `test_cards.py` | Cards: conditions, whole cards, composed halves, the card area. |
 | `test_scorers.py` | Each scorer's payoff, description and shop availability. |
 | `test_blocks.py` | Blocks: shapes, effects, triggers, portals, keys and locks, borders, and placing one with `_place_block_at`. |

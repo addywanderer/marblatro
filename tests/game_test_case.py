@@ -280,10 +280,12 @@ class GameTestCase(unittest.TestCase):
 
         The inventory is labelled the way the card and action areas are (see
         ui.draw_toolbox): the label sits just ABOVE the panel's top-left
-        corner.
+        corner. The panel's own size follows the inventory (see Toolbox.rect),
+        so the strip follows the rect the game is drawing rather than the
+        full-size coords.
         """
-        return pygame.Rect(main.TOOLBOX_COORDS[0] + 6,
-                           main.TOOLBOX_COORDS[1] - 20, 220, 20)
+        panel = self.game.toolbox.rect
+        return pygame.Rect(panel.x + 6, panel.y - 20, panel.width, 20)
 
 
     def _shop_title_region(self):
@@ -461,13 +463,17 @@ class GameTestCase(unittest.TestCase):
 
     # --- Procrastination: the run's second chance ---------------------------
 
-    def _start_procrastination_run(self, own_card=True):
+    def _start_procrastination_run(self, own_card=True, cards=None):
         """Fly a one-column ladder run (Start -> scoring field -> Finish).
 
         The marble falls the whole height of the box through a no-hitbox field
         block and lands on the Finish block, so the run ends about half a second
         in — short enough that a rewind reaches back to its very first frame.
         Returns (marble, scoring block).
+
+        ``cards`` replaces the card area outright, for the tests that need more
+        than one copy of the card (a second Procrastination, or a Blueprint
+        copying the first); otherwise ``own_card`` puts one copy in the area.
         """
         self.game.grid.clear()
         self.game.grid[(5, 1)] = main.Block(5, 1, scorer=main.Scorer.START)
@@ -475,7 +481,9 @@ class GameTestCase(unittest.TestCase):
             5, 5, shape=main.Shape.NONE, scorer=main.Scorer.CHIPS_ADD,
             scorer_amount=10)
         self.game.grid[(5, 9)] = main.Block(5, 9, scorer=main.Scorer.FINISH)
-        if own_card:
+        if cards is not None:
+            self.game.cards = list(cards)
+        elif own_card:
             self.game.cards = [main.CardItem(main.Card.PROCRASTINATION, 46)]
         self.game.reset_run()
         return self.game.marbles[0], self.game.grid[(5, 5)]
@@ -528,10 +536,14 @@ class GameTestCase(unittest.TestCase):
         return offer
 
 
-    def _click(self, pos):
+    def _click(self, pos, mod=0):
+        """Click the play screen at ``pos``; ``mod`` is the keyboard modifier mask."""
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN
         event.button = 1
+        # A real click always carries a mod mask (0 for a plain click); the
+        # inventory reads it for ctrl/shift-click discard picks.
+        event.mod = mod
         with mock.patch("main.pygame.mouse.get_pos", return_value=pos), \
              mock.patch("main.pygame.event.get", return_value=[event]):
             self.game.handle_events()

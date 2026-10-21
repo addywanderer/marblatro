@@ -293,23 +293,30 @@ class ScorersTests(GameTestCase):
         self.assertEqual(self._component_count(), 0)
 
 
-    def test_parts_reward_is_withheld_when_the_inventory_is_full(self):
-        # A full inventory withholds the banked components (the same rule the
-        # instant grant followed) rather than overfilling the toolbox.
+    def test_parts_reward_comes_home_even_when_the_panel_is_full(self):
+        # The inventory is unbounded, so a banked component is never withheld: a
+        # full panel means the grant waits in the stash.
         self.game.toolbox.items.clear()
+        self.game.toolbox.stash.clear()
         filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                 main.Scorer.NONE, 0, 5, "filler")
-        capacity = self.game.toolbox.cols * self.game.toolbox.rows
+        capacity = self.game.toolbox.capacity()
         while len(self.game.toolbox.items) < capacity:
             self.game.toolbox.add(filler)
         self.game.parts_run_gain = 2
         self.game.run_complete = True
         self.game.awaiting_after_run = True
         self.game._continue_run()
-        self.assertEqual(self._component_count(), 0)
+        # Both banked components were granted — into the stash, since the panel
+        # has no room — so nothing was withheld.
+        granted = [i for i in self.game.toolbox.every_item()
+                   if getattr(i, "kind", None) in (main.Component.SHAPE,
+                                                   main.Component.EFFECT,
+                                                   main.Component.SCORER)]
+        self.assertEqual(len(granted), 2)
         self.assertEqual(len(self.game.toolbox.items), capacity)
+        self.assertEqual(len(self.game.toolbox.stash), 2)
         self.assertEqual(self.game.parts_run_gain, 0)
-        self.assertIn("withheld", self.game.shop_message)
 
 
     def test_parts_description_states_when_the_reward_arrives(self):
@@ -1481,10 +1488,14 @@ class ScorersTests(GameTestCase):
     def test_a_bought_block_keeps_its_own_effects_and_scorer(self):
         # A shop block's components carry their own rolled magnitudes, and the
         # block keeps them when it is bought, placed, erased and returned.
-        block = next(i for i in self.game.shop.items if i.kind == "block")
+        # The shelf's kinds are drawn at their own odds (a block only 20% of the
+        # time — see Pack.SHELF_WEIGHTS), so one is placed on it rather than
+        # hunted for.
+        block = self._place_shop_offer("block", (0, main.SHOP_ITEM_ROW))
         amount = block.scorer_amount
         amounts = dict(block.effect_amounts)
         self.game.toolbox.items.clear()
+        self.game.toolbox.stash.clear()
         self.game.cash = 1000
         self.game._buy_shop_item(block)
         self.game._equip_block(block)
@@ -1764,23 +1775,28 @@ class PackedScorerTests(GameTestCase):
         self.assertEqual(self.game.toolbox.capacity(), before + 2)
         self.assertIn("Inventory grew 2 slots", self.game.shop_message)
 
-    def test_the_won_slots_really_hold_more_items(self):
-        # The capacity is not decoration: the cells gate every path that fills
-        # the inventory, so an item that did not fit before fits now.
+    def test_the_won_slots_really_show_more_items(self):
+        # The capacity is not decoration: it is how many of the inventory's items
+        # the panel SHOWS (the inventory itself is unbounded — see Toolbox), so
+        # the two slots Packed wins bring two more items out of the stash.
         box = self.game.toolbox
         box.items.clear()
+        box.stash.clear()
         filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                 main.Scorer.NONE, 0, 5, "filler")
-        while box.add(filler):
-            pass
+        for _ in range(box.capacity() + 2):
+            box.add(filler)
         self.assertEqual(len(box.items), box.capacity())
-        self.assertFalse(box.add(filler))
+        self.assertEqual(len(box.stash), 2)
+        stashed = list(box.stash)
 
         self.game._grant_inventory_slots(2)
 
-        self.assertTrue(box.add(filler))
-        self.assertTrue(box.add(filler))
-        self.assertFalse(box.add(filler))
+        # The panel is two cells bigger, and the stashed items filled them.
+        self.assertEqual(len(box.items), box.capacity())
+        self.assertEqual(box.stash, [])
+        self.assertEqual([id(i) for i in box.items[-2:]],
+                         [id(i) for i in stashed])
         # ...and the panel is drawn tall enough to show them.
         self.assertGreaterEqual(self.game.inventory_grid_rows()
                                 * box.cols, box.capacity())
@@ -1821,7 +1837,7 @@ class PackedScorerTests(GameTestCase):
         self.assertTrue(self.game.reset_run(False))
         self.assertEqual(self.game.inventory_slots_won, 2)
         self.assertEqual(self.game.toolbox.capacity(),
-                         self.game.toolbox.cols * self.game.toolbox.rows + 2)
+                         main.INVENTORY_START_SLOTS + 2)
 
     def test_the_card_gives_the_slots_when_it_fires(self):
         # The flat (match group x Packed) card pays the same gain a block does,

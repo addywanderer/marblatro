@@ -294,7 +294,7 @@ class ToolboxTests(GameTestCase):
         # last cell the panel HAS where it is smaller: a box that holds fewer
         # than 13 items can never fill a 13th, so asking for one would fill the
         # box and then loop for ever.
-        index = min(13, box.cols * box.rows) - 1
+        index = min(13, box.capacity()) - 1
         while len(box.items) < index + 1:
             box.add(filler)
         pos = (box.rect.x + (index % box.cols) * main.GRID_SIZE + 5,
@@ -383,10 +383,8 @@ class ToolboxTests(GameTestCase):
         self._click((main.ACTION_AREA_COORDS[0] + 5, main.ACTION_AREA_COORDS[1] + 5))
         self.assertIs(self.game.selected_action, action)
         # Click the toolbox block to make it the subject.
-        idx = self.game.toolbox.items.index(block)
-        col = idx % self.game.toolbox.cols
-        self._click((main.TOOLBOX_COORDS[0] + col * main.GRID_SIZE + 5,
-                     main.TOOLBOX_COORDS[1] + 5))
+        self._click(self.game.toolbox.cell_rect(
+            self.game.toolbox.items.index(block)).center)
         self.assertIs(self.game.selected_action_subject, block)
         # Press S to apply (Death sells it for 1.5x).
         self._press(main.pygame.K_s)
@@ -429,12 +427,22 @@ class ToolboxTests(GameTestCase):
         self.assertIsNone(self.game.toolbox.item_at((self.game.toolbox.rect.x - 10, self.game.toolbox.rect.y - 10)))
 
 
-    def test_toolbox_is_full_cap(self):
+    def test_the_panel_shows_capacity_worth_and_the_inventory_keeps_the_rest(self):
+        # The inventory has NO size limit: the panel's cells show `capacity`
+        # items at a time and everything past them waits in the stash, which a
+        # reshuffle (or a discard) draws from. Adding is therefore never refused.
         self.game.toolbox.items.clear()
+        self.game.toolbox.stash.clear()
         item = self.game.shop.items[0]
-        for _ in range(self.game.toolbox.cols * self.game.toolbox.rows):
+        capacity = self.game.toolbox.capacity()
+        self.assertEqual(capacity, main.INVENTORY_START_SLOTS)  # a new save's size
+        for _ in range(capacity):
             self.assertTrue(self.game.toolbox.add(item))
-        self.assertFalse(self.game.toolbox.add(item))
+        self.assertEqual(len(self.game.toolbox.items), capacity)
+        self.assertTrue(self.game.toolbox.add(item))        # an overflow item...
+        self.assertEqual(len(self.game.toolbox.items), capacity)   # ...is kept...
+        self.assertEqual(len(self.game.toolbox.stash), 1)          # ...in the stash
+        self.assertEqual(len(self.game.toolbox.every_item()), capacity + 1)
 
 
     def test_distinct_duplicate_components_other_copy_survives(self):

@@ -59,20 +59,22 @@ class TokensTests(GameTestCase):
 
     def test_the_inventory_panel_grows_to_hold_its_tokens(self):
         # The inventory's panel is drawn to hold everything the inventory
-        # carries: past one row of cells it grows by whole rows, so the tokens
-        # in the cells after the items are inside the panel that holds them.
+        # carries — the items and the tokens in the entries after them — up to
+        # main.INVENTORY_MAX_COLS x main.INVENTORY_MAX_ROWS cells. Past that it
+        # turns pages instead (see test_the_panel_pages_past_its_largest_size).
         box = self.game.toolbox
         self.game.toolbox.items.clear()
         self.game.tokens = []
-        self.assertEqual(self.game.inventory_grid_rows(), box.rows)
+        self.assertEqual(self.game.inventory_grid_rows(), 1)
 
+        # Tokens that outgrow a single row make the panel take a second one, and
+        # every token still has a cell inside it.
         self.game.tokens = [_token(main.Scorer.CASH, 15, runs_left=None)
-                            for _ in range(box.cols + 1)]
-        rows = self.game.inventory_grid_rows()
-        self.assertEqual(rows, 2)
+                            for _ in range(main.INVENTORY_MAX_COLS + 1)]
+        self.assertEqual(self.game.inventory_grid_rows(), 2)
         last = self.game._token_rect(len(self.game.tokens) - 1)
         self.assertLessEqual(last.bottom,
-                             box.rect.y + rows * main.GRID_SIZE)
+                             box.rect.y + box.rows * main.GRID_SIZE)
         self.game.draw()  # the taller panel renders without raising
 
 

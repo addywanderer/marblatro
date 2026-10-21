@@ -425,7 +425,7 @@ class BlocksTests(GameTestCase):
         # measurements keep the values they had when the run finished.
         marble, _block = self._start_procrastination_run()
         frames = 0
-        while not self.game.procrastination_used and frames < 300:
+        while not self.game.procrastination_rewinds and frames < 300:
             clock, travelled = self.game.run_time, marble.distance
             self.game.update()
             frames += 1

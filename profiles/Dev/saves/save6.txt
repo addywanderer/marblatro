@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": 6405,
+  "cash": 6445,
   "run_number": 35,
   "round_index": 11,
   "run_in_round": 2,
@@ -84,7 +84,9 @@
   "runs_cleared": 1,
   "failed_runs": 34,
   "current_trial": 5,
-  "trial_decision": null,
+  "trial_decision": {
+    "trial": 5
+  },
   "difficulty": 4,
   "cards": [
     {
