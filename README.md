@@ -27,7 +27,7 @@ pip install pygame numpy
 | Click the arrow box on the inventory's top-right edge | Turn the panel to its next page (shown once the inventory outgrows it) |
 | Click the box below the arrow | Open the whole inventory (the panel only shows a selection of it) |
 | **F** | Discard: swap the selected inventory items (up to 4) for random others from the whole inventory — 2 a run |
-| Left-drag on the board | Place the armed block — it costs the item's price |
+| Left-drag on the board | Place the armed block — its item keeps its inventory spot, marked as standing on the board |
 | Right-click a block | Erase it (it goes back to the toolbox as a block) |
 | Hover anything | The sidebar describes it: shape, effects, scorer, trigger limit |
 | **A** | Rotate the block being placed by 90° |
@@ -89,6 +89,13 @@ Conventions worth knowing before editing:
   `INVENTORY_MAX_COLS x INVENTORY_MAX_ROWS` it pages: the arrow box on its
   top-right edge shows the next page of cells, and the whole-inventory box sits
   directly below it.
+* **A placed block and its inventory item are one existence.** Placing does
+  not consume the item: it keeps its cell and records the square its block
+  stands on (`BlockItem.placed_cell`), and the block points back at it
+  (`Block.source_item`). Clicking that cell picks the block up to move it, and
+  erasing the block makes the same item placeable again — one item can never
+  field two blocks. Anything that removes the item (selling, banking,
+  sacrificing, disassembling) takes its block off the board with it.
 * **Player data is local**: `profiles/<name>/…` (saves, `collection.json`,
   `achievements.json`, `metagame.json`), with the active profile name in
   `profiles/current.txt`. The tests redirect all of it into a temp folder.

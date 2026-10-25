@@ -163,14 +163,27 @@ class MatchGroupRarityTests(GameTestCase):
                         components.match_group_price(pipe))
 
     def test_the_fiddliest_shapes_are_the_cheapest_group_to_match(self):
-        # Flat Line / Curved Slope Line / Half Pipe are the expensive, awkward
-        # pieces, so their group is the cheapest shape group's card — the one
-        # the shop offers most often.
-        flat = main.match_group_for_shape(main.Shape.FLAT_LINE)
-        self.assertEqual(main.match_group_price(flat),
+        # The dearest shapes make the cheapest group's card (the same inverse
+        # rule as above): the group whose cheapest member costs the most is the
+        # one the shop offers most often. Flat Line / Curved Slope Line / Half
+        # Pipe used to be that group; Key and Lock are dearer still (6x their
+        # old component prices), so their group now takes the spot.
+        shape_groups = [group for group in components.MATCH_GROUPS
+                        if group[0] == "shape"]
+        dearest = max(
+            shape_groups,
+            key=lambda group: min(main.COMPONENT_PRICES[
+                (main.Component.SHAPE, shape)] for shape in group[1]))
+        self.assertEqual(components.match_group_label(dearest), "Key/Lock")
+        self.assertEqual(main.match_group_price(dearest),
                          min(components.match_group_price(group)
-                             for group in components.MATCH_GROUPS
-                             if group[0] == "shape"))
+                             for group in shape_groups))
+        # The fiddly triplet is still the cheapest of the plain wall-like
+        # groups, so the ordering the test used to pin is unchanged there.
+        flat = main.match_group_for_shape(main.Shape.FLAT_LINE)
+        self.assertLess(main.match_group_price(flat),
+                        main.match_group_price(
+                            main.match_group_for_shape(main.Shape.SLOPE)))
 
     def test_every_group_is_offered_as_often_as_any_other(self):
         # Every group holds exactly one entry per scorer in its tier's pool (see

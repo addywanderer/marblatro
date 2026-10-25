@@ -190,6 +190,11 @@ def _serialize_item(item):
                               if getattr(item, "triggers_left", None) is not None
                               else None),
             "random_rolls": _serialize_random_rolls(item),
+            # The board square this item's block stands on, if it is placed: a
+            # placed block keeps its inventory spot (see main._place_block_at),
+            # so the link has to survive a save.
+            "placed_cell": (list(item.placed_cell)
+                            if getattr(item, "placed_cell", None) else None),
         }
     if kind == "card":
         return {
@@ -315,6 +320,8 @@ def _deserialize_item(data):
         # main._refund_block); a save from before this simply has none.
         if data.get("triggers_left") is not None:
             item.triggers_left = int(data["triggers_left"])
+        if data.get("placed_cell"):
+            item.placed_cell = tuple(data["placed_cell"])
         return _restore_random_rolls(item, data)
     return Component(
         data["kind"], data["value"],
@@ -737,6 +744,18 @@ def _load_save_data(game, data, slot):
     for d in data.get("grid", []):
         block = _deserialize_item(d)
         game.grid[(block.x, block.y)] = block
+    # A placed block and the inventory item it came from are one existence (see
+    # main._place_block_at): point each restored block back at its item, so
+    # erasing it makes that same item placeable again instead of refunding a
+    # second copy. An item whose square holds no block any more (a save from
+    # before the two were linked) simply comes back unplaced.
+    for item in game.toolbox.every_item():
+        cell = getattr(item, "placed_cell", None)
+        block = game.grid.get(tuple(cell)) if cell else None
+        if block is not None:
+            block.source_item = item
+        else:
+            item.placed_cell = None
     # The decided trial picks come back now that the items above exist: a
     # Shuffled order is stored as card-area slots and is resolved against the
     # loaded cards here (see _restore_trial_decision).

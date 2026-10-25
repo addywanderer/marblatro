@@ -41,6 +41,7 @@ GRAVITY = _physics_source.GRAVITY
 DOWN_GRAVITY = np.array([0.0, 1.0])
 GRID_SIZE = _physics_source.GRID_SIZE
 GROW_RADIUS_FACTOR = _physics_source.GROW_RADIUS_FACTOR
+GROW_MAX_TRIGGERS = _physics_source.GROW_MAX_TRIGGERS
 MARBLE_BOX_COORDS = _physics_source.MARBLE_BOX_COORDS
 MAX_MARBLE_RECURSION = _physics_source.MAX_MARBLE_RECURSION
 MIN_MARBLE_RADIUS = _physics_source.MIN_MARBLE_RADIUS
@@ -267,12 +268,15 @@ class PhysicsEngine:
         self._collect_field_contacts(marble, blocks)
         # Growing/Shrinking effects change the marble's radius once per fresh
         # touch (not every frame while it stays in contact), so the size change
-        # persists for the rest of the run.
+        # persists for the rest of the run. Growing stops after
+        # GROW_MAX_TRIGGERS touches for the run.
         for block in marble.collisions_this_tick:
             if block in marble.collisions_last_tick:
                 continue
             if block.has_effect(Effect.GROWING):
-                marble.radius *= GROW_RADIUS_FACTOR
+                if marble.grow_triggers < GROW_MAX_TRIGGERS:
+                    marble.grow_triggers += 1
+                    marble.radius *= GROW_RADIUS_FACTOR
             elif block.has_effect(Effect.SHRINKING):
                 marble.radius = max(marble.radius * SHRINK_RADIUS_FACTOR,
                                     MIN_MARBLE_RADIUS)

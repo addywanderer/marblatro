@@ -465,7 +465,8 @@ class ToolboxTests(GameTestCase):
     def test_place_block_at_places_the_armed_block_without_any_clicks(self):
         # Placement is its own method: a direct call builds the block from the
         # armed parts, stamps the item's price on it, hands out its triggers,
-        # consumes the item and clears the selection — no mouse events needed.
+        # keeps the item in its inventory spot (marked with the square it stands
+        # on) and clears the selection — no mouse events needed.
         self.game.toolbox.items.clear()
         item = main.BlockItem(0, 0, main.Shape.PIPE, main.Effect.NONE,
                               main.Scorer.CHIPS_ADD, 30, 21, "Pipe +Chips",
@@ -484,7 +485,8 @@ class ToolboxTests(GameTestCase):
         self.assertEqual(placed.scorer, main.Scorer.CHIPS_ADD)
         self.assertEqual(placed.resale_price, 21)
         self.assertEqual(placed.triggers_left, 1)
-        self.assertNotIn(item, self.game.toolbox.items)  # consumed on placement
+        self.assertIn(item, self.game.toolbox.items)  # keeps its spot
+        self.assertEqual(item.placed_cell, (2, 3))
         self.assertFalse(self.game.has_selected)
         self.assertIsNone(self.game.selected_toolbox_item)
 

@@ -552,14 +552,14 @@ class Trial(TileArt):
         DEAD_ZONE: "Gravity is tripled in the board's bottom third.",
         ALL_FINISHES: "The board borders count as finish blocks.",
         SLIM_PICKINGS: "Removes two random shop options.",
-        LONG_RUN: "Doubles the ideal time for a run.",
+        LONG_RUN: "Time exponent is penalized after double the normal time.",
         SHUFFLED: "Flips and shuffles your cards.",
         BOUNCY_CASTLE: "Every solid block bounces like a bouncy block.",
         CRUMBLING: "A random 1/4 of your blocks are fragile: they shatter "
                    "when touched.",
         MARBLE_WEIGHT: "Randomly heavier or lighter: effect pushes are weaker "
                        "or stronger, but it falls at the same speed.",
-        SPEEDRUN: "Halves the ideal time for a run.",
+        SPEEDRUN: "Time exponent is penalized after half the normal time.",
         REPEATS_ONLY: "Only block types touched twice count toward the "
                       "uniqueness score.",
         INFLATION: "Everything costs 50% more: shop prices, rerolls, "
@@ -1095,7 +1095,7 @@ class Card:
         COZY: "Adds 90 chips at the start of the run while 10 or fewer board units are unlocked",
         PAINTING: "Adds 3 chips at the start of the run for each $1 of the total sell price of the blocks on your board",
         SYNTHESIZER: "Adds 3 mult at the start of the run for each card in your card area",
-        ISLAND: "Adds 0.5 xMult at the end of the run for each unconnected group of unlocked board units",
+        ISLAND: "Adds 0.125 xMult at the end of the run for each unconnected group of unlocked board units",
         FOUNTAIN: "Adds 0.25 xMult at the end of the run for every 3 different Pipe, Drain or Pipe Bend blocks the marble touches in a row",
         INTANGIBLE: "Adds, at the end of the run, 0.5 mult a second inside a block and 15 a second inside a locked board unit",
         ERR_404: r"\marblatro\main.py, line 2339: 'self._return_card()' CardNotFoundError: Card was not found [FATAL]",
@@ -1525,10 +1525,10 @@ class MAGNITUDES:
     # ratio 1.0 is +4 mult, Plane's 0.5 is +15 chips an air second, Pillar's 0.25
     # is +1 mult a column block, Banker's 1/30 is +1 chip per $10, Ripped Card's
     # 4.0 is +120 chips, Cozy's 3.0 is +90 chips, Painting's 0.1 is +3 chips a
-    # dollar, Synthesizer's 0.75 is +3 mult a card and Island's 2.0 is +0.5 xMult
-    # a group (1 + 0.25 x 2 x groups). A match-group card has no ratio here: it
-    # pays one standard unit per matching collision and carries its scorer's
-    # rolled magnitude instead.
+    # dollar, Synthesizer's 0.75 is +3 mult a card and Island's 0.5 is +0.125
+    # xMult a group (1 + 0.25 x 0.5 x groups). A match-group card has no ratio
+    # here: it pays one standard unit per matching collision and carries its
+    # scorer's rolled magnitude instead.
     CARD_RATIOS: ClassVar[dict[int, float]] = {
         Card.JOKER: 1.0,
         Card.EXPLORER: 1.0,
@@ -2680,8 +2680,13 @@ COMPONENT_PRICES = {
     (Component.SHAPE, Shape.SAWTOOTH): 11,
     # COMMENTED OUT with the shape itself: (Component.SHAPE, Shape.CRADLE): 11,
     (Component.SHAPE, Shape.BUMP): 9,
-    (Component.SHAPE, Shape.KEY): 8,
-    (Component.SHAPE, Shape.LOCK): 10,
+    # A Key/Lock pair is bought as one offer that hands over both halves (see
+    # Game._buy_shop_item / _keep_pack_block), so its shape price is what the
+    # pair costs: 6x the old $8/$10 (user request: "make locks and keys each
+    # cost 6x more"). A block is priced at 75% of its parts, so a bare Key block
+    # goes $10 -> $40 and a bare Lock block $12 -> $49.
+    (Component.SHAPE, Shape.KEY): 48,
+    (Component.SHAPE, Shape.LOCK): 60,
     (Component.EFFECT, Effect.NONE): 6,
     (Component.EFFECT, Effect.BOUNCY): 28,
     (Component.EFFECT, Effect.ACCELERATOR): 25,

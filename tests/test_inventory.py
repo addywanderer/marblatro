@@ -216,8 +216,9 @@ class InventoryTests(GameTestCase):
 
 
     def test_clicking_the_board_places_the_block_in_hand(self):
-        # The armed block is still what a board click places (and the selection
-        # is spent with the item) — the toggle did not take that away.
+        # The armed block is still what a board click places — the toggle did
+        # not take that away — and the item keeps its inventory spot, marked
+        # with the square its block stands on (see _place_block_at).
         self._fill(3)
         block = self.game.toolbox.items[0]
         self.game._toggle_toolbox_selection(block, 0)
@@ -226,7 +227,8 @@ class InventoryTests(GameTestCase):
 
         placed = self.game.grid.get((3, 3))
         self.assertIsNotNone(placed)
-        self.assertFalse(any(block is shown for shown in self.game.toolbox.items))
+        self.assertIn(block, self.game.toolbox.items)
+        self.assertEqual(block.placed_cell, (3, 3))
         self.assertFalse(self.game.has_selected)
 
 
@@ -508,10 +510,10 @@ class InventoryTests(GameTestCase):
                 (30, 30, 30))
 
 
-    def test_placing_a_block_leaves_its_slot_empty(self):
-        # User request: placing a block must NOT slide another item into the slot
-        # it came from — the panel keeps the hole until a reshuffle or discard
-        # fills it from the stash.
+    def test_placing_a_block_keeps_it_in_its_slot(self):
+        # User request: "when a block is placed on the board, make its spot in
+        # the inventory still occupied with the block" — the item is not
+        # consumed, it keeps its cell, and it remembers the square it stands on.
         capacity = self.game.toolbox.capacity()
         self._fill(capacity + 2)
         stashed = list(self.game.toolbox.stash)
@@ -520,11 +522,81 @@ class InventoryTests(GameTestCase):
 
         self.assertTrue(self.game._place_block_at(3, 3))
 
-        self.assertEqual(len(self.game.toolbox.items), capacity - 1)
+        self.assertEqual(len(self.game.toolbox.items), capacity)
+        self.assertIs(self.game.toolbox.items[1], block)   # same cell, same item
+        self.assertEqual(block.placed_cell, (3, 3))
         self.assertEqual([id(i) for i in self.game.toolbox.stash],
                          [id(i) for i in stashed])      # nothing pulled out
-        self.assertFalse(any(block is shown for shown in self.game.toolbox.items))
-        self.assertIsNotNone(self.game.grid.get((3, 3)))
+        self.assertIs(self.game.grid[(3, 3)].source_item, block)
+
+    def test_a_placed_block_is_picked_up_not_copied(self):
+        # The item's spot is occupied BY the block that stands on the board, so
+        # clicking it takes hold of that block (a move) instead of arming a
+        # second copy of the item.
+        self._fill(self.game.toolbox.capacity())
+        block = self.game.toolbox.items[0]
+        self.game._toggle_toolbox_selection(block, 0)
+        self.game._place_block_at(2, 2)
+
+        self._click(self.game.toolbox.cell_rect(0).center)
+
+        self.assertIs(self.game.selected_toolbox_item, self.game.grid[(2, 2)])
+        # ...and moving it keeps the item's mark on the new square.
+        self.assertTrue(self.game._place_block_at(4, 4))
+        self.assertEqual(block.placed_cell, (4, 4))
+        self.assertNotIn((2, 2), self.game.grid)
+
+    def test_erasing_a_placed_block_makes_its_item_placeable_again(self):
+        # Erasing gives the block back to the spot that was holding it — no
+        # second copy is created.
+        capacity = self.game.toolbox.capacity()
+        self._fill(capacity + 1)
+        block = self.game.toolbox.items[0]
+        self.game._toggle_toolbox_selection(block, 0)
+        self.game._place_block_at(2, 2)
+
+        self.game._erase_block_at(2, 2)
+
+        self.assertNotIn((2, 2), self.game.grid)
+        self.assertIsNone(block.placed_cell)
+        self.assertIn(block, self.game.toolbox.items)
+        self.assertEqual(len(self.game.toolbox.every_item()), capacity + 1)
+
+    def test_an_item_that_leaves_takes_its_block_off_the_board(self):
+        # Selling/banking/sacrificing the item must not leave an orphaned block
+        # behind — that block could later be erased into a copy of something the
+        # player no longer owns.
+        self._fill(self.game.toolbox.capacity())
+        block = self.game.toolbox.items[0]
+        self.game._toggle_toolbox_selection(block, 0)
+        self.game._place_block_at(2, 2)
+
+        self.game.toolbox.remove(block)
+
+        self.assertNotIn((2, 2), self.game.grid)
+        self.assertNotIn(block, self.game.toolbox.every_item())
+
+    def test_a_placed_block_and_its_item_ride_through_a_save(self):
+        self.game.save_slot = 1
+        self._fill(self.game.toolbox.capacity())
+        block = self.game.toolbox.items[0]
+        self.game._toggle_toolbox_selection(block, 0)
+        self.game._place_block_at(2, 2)
+
+        save_system.save_game(self.game)
+        fresh = main.Game()
+        save_system.load_slot(fresh, 1)
+
+        placed = [item for item in fresh.toolbox.every_item()
+                  if getattr(item, "placed_cell", None)]
+        self.assertEqual(len(placed), 1)
+        self.assertEqual(placed[0].placed_cell, (2, 2))
+        self.assertIs(fresh.grid[(2, 2)].source_item, placed[0])
+        # Erasing the loaded block keeps the count: the item was already there.
+        before = len(fresh.toolbox.every_item())
+        fresh._erase_block_at(2, 2)
+        self.assertEqual(len(fresh.toolbox.every_item()), before)
+        self.assertIsNone(placed[0].placed_cell)
 
 
     def test_other_removals_still_refill_the_slot(self):

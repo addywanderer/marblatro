@@ -346,6 +346,12 @@ class TrialsTests(GameTestCase):
         self.assertEqual(main.Trial.description(main.Trial.DEAL_BREAKER),
                          "Blocks never score until you sell a card — one sale "
                          "is enough.")
+        # The two time trials state the rule the score factors follow: the time
+        # exponent peaks at the ideal time and is penalized past it.
+        self.assertEqual(main.Trial.description(main.Trial.SPEEDRUN),
+                         "Time exponent is penalized after half the normal time.")
+        self.assertEqual(main.Trial.description(main.Trial.LONG_RUN),
+                         "Time exponent is penalized after double the normal time.")
         # The description still fits the trial display's two lines (see
         # ui.draw_trial_display, which wraps it into the box and drops any line
         # that will not fit).

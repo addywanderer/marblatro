@@ -1896,7 +1896,9 @@ class BlocksTests(GameTestCase):
         placed = self.game.grid[(1, 1)]
         self.assertEqual(placed.effect, main.Effect.PORTAL)
         self.assertEqual(placed.portal_number, 5)  # the placed block keeps its number
-        self.assertNotIn(portal, self.game.toolbox.items)  # consumed on placement
+        # The item keeps its inventory spot, marked with the square it stands on.
+        self.assertIn(portal, self.game.toolbox.items)
+        self.assertEqual(portal.placed_cell, (1, 1))
 
 
     def test_using_either_portal_of_a_pair_depletes_both(self):

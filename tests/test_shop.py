@@ -2623,7 +2623,7 @@ class ShopTests(GameTestCase):
         self.assertEqual(price, int(total * 0.75))
 
 
-    def test_buying_block_equips_and_placing_consumes_it(self):
+    def test_buying_block_equips_and_placing_keeps_its_spot(self):
         self.game.toolbox.items.clear()
         # Use a plain (non-portal) block so buying it adds exactly one copy.
         block_item = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
@@ -2647,7 +2647,11 @@ class ShopTests(GameTestCase):
         placed = self.game.grid[(1, 1)]
         self.assertEqual(placed.shape, block_item.shape)
         self.assertEqual(placed.scorer, block_item.scorer)
-        self.assertNotIn(block_item, self.game.toolbox.items)
+        # The block keeps the inventory spot it was bought into (user request:
+        # "when a block is placed on the board, make its spot in the inventory
+        # still occupied with the block").
+        self.assertIn(block_item, self.game.toolbox.items)
+        self.assertEqual(block_item.placed_cell, (1, 1))
         self.assertFalse(self.game.has_selected)
 
 
@@ -3500,8 +3504,12 @@ class ShopTests(GameTestCase):
 
         self.assertIn((1, 1), self.game.grid)
         self.assertFalse(self.game.has_selected)  # one block per assembly
-        # The assembled block was consumed from the toolbox when placed.
-        self.assertEqual(len([i for i in self.game.toolbox.items if i.kind == "block"]), 0)
+        # The assembled block keeps the inventory spot it was assembled into
+        # (see _place_block_at), so it is still one block there — just marked as
+        # standing on the board.
+        blocks = [i for i in self.game.toolbox.items if i.kind == "block"]
+        self.assertEqual(len(blocks), 1)
+        self.assertEqual(blocks[0].placed_cell, (1, 1))
 
 
 class EarthquakeTests(GameTestCase):

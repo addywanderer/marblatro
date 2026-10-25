@@ -958,6 +958,42 @@ class CollisionBehaviorTests(unittest.TestCase):
             game.update()
         self.assertEqual(marble.radius, main.MARBLE_RADIUS * 2)
 
+    def test_growing_effect_stops_after_four_doublings(self):
+        # User request: "make the growing effect trigger a maximum of 4 times".
+        # Each fresh touch doubles the radius, but only the first four do; the
+        # touches after that still count as touches, they just change nothing.
+        marble = main.Marble(main.MARBLE_BOX_COORDS[0] + 4 * main.GRID_SIZE + 20,
+                             main.MARBLE_BOX_COORDS[1] + 2 * main.GRID_SIZE + 20)
+        block = main.Block(4, 5, shape=main.Shape.RECT,
+                           effect=main.Effect.GROWING, scorer=main.Scorer.NONE)
+        engine = main.PhysicsEngine()
+        for _ in range(main.GROW_MAX_TRIGGERS + 3):
+            # Fresh touch: stand in the block for a frame, then clear of it.
+            marble.position = np.array([block.rect.centerx, block.rect.centery],
+                                       dtype=float)
+            marble.velocity = np.zeros(2)
+            engine.update(marble, 1 / 60, [block])
+            marble.position = np.array([block.rect.centerx,
+                                        block.rect.top - 400], dtype=float)
+            marble.velocity = np.zeros(2)
+            engine.update(marble, 1 / 60, [block])
+        self.assertEqual(main.GROW_MAX_TRIGGERS, 4)
+        self.assertEqual(marble.grow_triggers, main.GROW_MAX_TRIGGERS)
+        self.assertEqual(marble.radius,
+                         main.MARBLE_RADIUS * 2 ** main.GROW_MAX_TRIGGERS)
+
+    def test_a_new_run_starts_growing_over(self):
+        # The cap is per run: the marble a run releases starts its count at zero
+        # (see Game._release_start_marble).
+        game = main.Game()
+        game.title_screen = False
+        start = main.Block(4, 4, scorer=main.Scorer.START, effects=[])
+        game.grid[(4, 4)] = start
+
+        fresh = game._release_start_marble(start)
+
+        self.assertEqual(fresh.grow_triggers, 0)
+
     def test_size_effect_icons_render_without_raising(self):
         for effect in (main.Effect.GROWING, main.Effect.SHRINKING):
             surface = main.pygame.Surface((main.GRID_SIZE, main.GRID_SIZE))

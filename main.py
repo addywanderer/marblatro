@@ -143,8 +143,11 @@ QUICK_SCALE = MAGNITUDES.QUICK_CHIPS_PER_SPEED  # chips a Quick scorer grants pe
 RECENT_SPEED_DECAY = 0.9
 # Growing/Shrinking blocks multiply the marble's radius by these factors on
 # each fresh touch. Shrinking clamps at MIN_MARBLE_RADIUS so a marble never
-# shrinks to nothing.
+# shrinks to nothing, and Growing stops after GROW_MAX_TRIGGERS touches (user
+# request: "make the growing effect trigger a maximum of 4 times") so a marble
+# cannot grow without bound.
 GROW_RADIUS_FACTOR = 2.0
+GROW_MAX_TRIGGERS = 4
 SHRINK_RADIUS_FACTOR = 0.5
 MIN_MARBLE_RADIUS = 1.0
 # Marble trails: small marble-colored dots shrink and fade behind a moving
@@ -612,6 +615,11 @@ class Block:
         # why the travel cannot live in the rect, and Game._reset_gondola).
         self.gondola_travel = 0.0
         self.gondola_dir = None
+        # The inventory item this block was placed FROM, if any (see
+        # Game._place_block_at): the item keeps the spot it was bought into, and
+        # the block remembers it so erasing the block puts that same item back
+        # in reach instead of refunding a second copy.
+        self.source_item = None
 
 # =============================================================================
 
@@ -1715,6 +1723,12 @@ class BlockItem:
         # toolbox (see _refund_block). None for a shop block: it has no rotation
         # of its own and takes the build tool's angle when it is placed.
         self.angle = angle
+        # The board square this item's block stands on while it is placed (see
+        # Game._place_block_at), or None when the item is not on the board. A
+        # placed block keeps the inventory spot it was bought into: the item is
+        # not consumed, it remembers the square, and clicking that spot picks
+        # the block up rather than arming a second copy.
+        self.placed_cell = None
 
     def effect_magnitude(self, effect):
         """This block's own strength for an effect (the average when unrolled)."""
@@ -2493,6 +2507,10 @@ class Toolbox:
         # own token list, so the panel's size and its page count follow tokens
         # arriving and expiring without anything having to keep them in sync.
         self.extra_cells = lambda: 0
+        # Called with an item that has just left the inventory, so the game can
+        # take that item's block off the board with it (see
+        # Game._drop_placed_copy).
+        self.on_remove = None
 
     @property
     def base_slots(self):
@@ -2634,10 +2652,10 @@ class Toolbox:
         matters: two identical components or blocks are different items, and
         only the one that was clicked may leave. With ``refill`` (the default)
         the cell the panel loses is filled straight back from the stash, so the
-        panel keeps showing as much of the inventory as it has room for; a block
-        the player PLACES passes refill=False (user request: "when the player
-        places a block, don't replace that block's slot in the inventory with a
-        new item") — placing leaves its slot empty.
+        panel keeps showing as much of the inventory as it has room for.
+        ``on_remove`` runs last, so the game can take the item's block off the
+        board with it (a placed block shares its item's existence — see
+        Game._drop_placed_copy).
         """
         for bucket in (self.items, self.stash):
             for index, owned in enumerate(bucket):
@@ -2645,6 +2663,8 @@ class Toolbox:
                     del bucket[index]
                     if bucket is self.items and refill:
                         self._fill_cell(index)
+                    if self.on_remove is not None:
+                        self.on_remove(item)
                     return True
         return False
 
@@ -2813,6 +2833,9 @@ class Marble:
         # a phase block can't re-arm the phase forever.
         self.phase_timer = 0.0
         self.phase_block = None
+        # How many times a Growing block has doubled this marble's radius this
+        # run. Growing stops at GROW_MAX_TRIGGERS (see physics.update).
+        self.grow_triggers = 0
         # The key numbers this marble has collected this run: passing through a
         # Key block remembers its pairing number (see Game._gate_key_and_lock),
         # and the Gate whole card pays when THIS marble then passes through the
@@ -3315,6 +3338,9 @@ class Game:
         # the cells after them (see _token_rect), so the panel's own size and
         # page count are read off the same list the tokens live in.
         self.toolbox.extra_cells = lambda: len(self.tokens)
+        # An item that leaves the inventory takes its placed block with it (see
+        # _drop_placed_copy).
+        self.toolbox.on_remove = self._drop_placed_copy
         # The inventory shows the slots the save started with (bought ones
         # included) plus the slots the Packed scorer has won.
         self.toolbox.base_slots = INVENTORY_START_SLOTS + self.inventory_slots_bought
@@ -4356,14 +4382,15 @@ class Game:
         drag means "place" (see _handle_mouse); this is the placement itself,
         kept a plain method so it can be called — and tested — directly.
 
-        It: swaps out whatever stood in the cell (refunding it), builds the
-        block from the armed parts, stamps it with the price of the item it
-        came FROM (so a sale, Death and Painting read what the player actually
-        paid rather than a re-summed part total), carries over a RANDOM/LUCKY
-        outcome and the remaining triggers the item already had for this run,
-        hands out its triggers when it is a FRESH block (the Concert card's
-        bonus included), keeps a portal in step with its partner, consumes a
-        bought block from the toolbox, unsets the old cell when an
+        It: swaps out whatever stood in the cell (returning it to the inventory),
+        builds the block from the armed parts, stamps it with the price of the
+        item it came FROM (so a sale, Death and Painting read what the player
+        actually paid rather than a re-summed part total), carries over a
+        RANDOM/LUCKY outcome and the remaining triggers the item already had for
+        this run, hands out its triggers when it is a FRESH block (the Concert
+        card's bonus included), keeps a portal in step with its partner, leaves
+        the item in its inventory spot (marked with the square the block stands
+        on — see BlockItem.placed_cell), unsets the old cell when an
         already-placed block is moved, and clears the selection. It refuses a
         locked cell or nothing selected, so a direct call can never place a
         block where a click could not.
@@ -4375,8 +4402,12 @@ class Game:
         item = self.selected_toolbox_item
         moving_placed = isinstance(item, Block)
         old = self.grid.get((gx, gy))
+        # A block that stood in this cell leaves the board first — through the
+        # same door erasing uses, so a block placed from the inventory goes back
+        # to its own spot rather than being refunded as a second copy (see
+        # _unplace_block).
         if old is not None and not (moving_placed and old is item):
-            self._refund_block(old)
+            self._unplace_block(old)
         self.grid[(gx, gy)] = Block(
             gx,
             gy,
@@ -4436,19 +4467,29 @@ class Game:
         # in lockstep (e.g. both exhausted after one use).
         self._sync_portal_pair_triggers(placed, list(self.grid.values()))
         sounds.play_plop()
-        # A bought block is consumed on placement; an assembled block already
-        # consumed its components. Either way, the selection is cleared. The
-        # slot the block came FROM stays empty: placing does not slide another
-        # item in to replace it (see Toolbox.remove's refill).
+        # The block's spot in the inventory stays OCCUPIED by it (user request:
+        # "when a block is placed on the board, make its spot in the inventory
+        # still occupied with the block"). The item is NOT consumed: it keeps
+        # its cell and remembers the square its block stands on, and the block
+        # remembers the item. That pair is what keeps one item from fielding two
+        # blocks — clicking the spot picks the block up (a move) instead of
+        # arming a copy (see _toggle_toolbox_selection) — and what lets erasing
+        # the block make that same item placeable again (see _unplace_block).
         if (item is not None and getattr(item, "kind", None) == "block"
-                and item in self.toolbox.items):
-            self.toolbox.remove(item, refill=False)
+                and self.toolbox.contains(item)):
+            item.placed_cell = (gx, gy)
+            placed.source_item = item
+        elif moving_placed:
+            source = getattr(item, "source_item", None)
+            if source is not None and self.toolbox.contains(source):
+                placed.source_item = source
+                source.placed_cell = (gx, gy)
         # Moving a placed block removes it from its original cell.
         if moving_placed and (item.x, item.y) != (gx, gy):
             self.grid.pop((item.x, item.y), None)
-        # The placed item left the inventory, so it leaves the SELECTION with it
-        # (and the other selected items go too: placing a block ends that round
-        # of selection — see _toggle_toolbox_selection).
+        # Placing a block ends that round of selection (see
+        # _toggle_toolbox_selection), whether the block came from the inventory
+        # or off the board.
         self._clear_toolbox_selection()
         return True
 
@@ -4504,7 +4545,16 @@ class Game:
         The in-hand block is what a click on the board places, what D upgrades
         and what B sells. ``index`` is the panel cell it sits in (None for a
         block that is on the board rather than in the inventory).
+
+        A marked inventory item is a block that is ON the board (see
+        _place_block_at), so the BLOCK is what gets armed: an item can never
+        field a second copy of itself.
         """
+        cell = getattr(item, "placed_cell", None)
+        if cell is not None:
+            block = self.grid.get(cell)
+            if block is not None:
+                item, index = block, None
         self.has_selected = True
         self.selected_toolbox_item = item
         if index is None:
@@ -4800,8 +4850,20 @@ class Game:
         G banks. Unselecting the item in hand hands the place to the most
         recently selected item left, so a block can still be placed.
 
+        A block that is ON THE BOARD keeps its inventory spot (see
+        _place_block_at), so clicking that spot takes hold of the BLOCK — the
+        move every placed block already knows (see _select_placed_block) —
+        rather than arming a second copy of the item.
+
         Returns True when the item became selected.
         """
+        cell = getattr(item, "placed_cell", None)
+        if cell is not None and self.grid.get(cell) is not None:
+            self._select_placed_block(self.grid[cell])
+            self._set_shop_message(
+                f"{self._item_name(item)} is on the board — click a square to "
+                f"move it")
+            return True
         if self.is_toolbox_selected(item):
             self._unselect_toolbox_item(item)
             return False
@@ -5114,20 +5176,87 @@ class Game:
                     group.add(item)
         self.toolbox.add(item)
 
+    def _drop_placed_copy(self, item):
+        """An item left the inventory: the block it put on the board goes too.
+
+        A placed block keeps the inventory spot it came from (see
+        _place_block_at), so the two are one existence. Selling, banking,
+        sacrificing or disassembling the item must not leave an orphaned block
+        on the board — that block could later be erased into a second copy of
+        something the player no longer owns.
+        """
+        cell = getattr(item, "placed_cell", None)
+        if cell is None:
+            return
+        item.placed_cell = None
+        block = self.grid.get(cell)
+        if block is None or getattr(block, "source_item", None) is not item:
+            return
+        self.grid.pop(cell, None)
+        if block.scorer == Scorer.START:
+            self.marbles = [m for m in self.marbles
+                            if getattr(m, "start_block", None) is not block]
+
+    def _unplace_block(self, block):
+        """Take a block off the board and give it back to the inventory.
+
+        A block placed from the inventory never left it (see _place_block_at),
+        so its item is still sitting in its own spot: the item simply becomes
+        placeable again, taking back the state the board block built up (its
+        RANDOM/LUCKY roll, the triggers it has left, its rotation and any mark
+        the trial put on it). A block with no spot of its own — a save written
+        before blocks kept one, or a block another effect put down — is refunded
+        into the inventory the way it always was (see _refund_block).
+        """
+        source = getattr(block, "source_item", None)
+        if source is not None and self.toolbox.contains(source):
+            self._restore_item_from_block(block, source)
+        else:
+            self._refund_block(block)
+
+    def _restore_item_from_block(self, block, item):
+        """Hand a board block's state back to the inventory item it came from.
+
+        Most of the item's own fields never changed (it is the block's source),
+        so only what the BOARD built up is brought back: the rotation the player
+        turned it to, a fragile block's original shape, this run's RANDOM/LUCKY
+        outcome, the triggers it has left, and the trial mark (Hands tied /
+        Crumbling track the block itself, so the mark moves back to the item
+        with the cell it now stands in — see _carry_trial_mark).
+        """
+        item.placed_cell = None
+        if getattr(block, "_fragile_shape", None) is not None:
+            item.shape = block._fragile_shape
+            block._fragile_shape = None
+        item.angle = getattr(block, "angle", getattr(item, "angle", None))
+        rolls = getattr(block, "random_rolls", None)
+        if rolls is not None:
+            item.random_rolls = dict(rolls)
+        remaining = getattr(block, "triggers_left", None)
+        if remaining is not None:
+            item.triggers_left = int(remaining)
+        if (block in self.trial_debuffed_blocks
+                or block in self.trial_fragile_blocks):
+            item.trial_cell = (block.x, block.y)
+            for group in (self.trial_debuffed_blocks, self.trial_fragile_blocks):
+                if block in group:
+                    group.discard(block)
+                    group.add(item)
+
     def _erase_block_at(self, grid_x, grid_y):
         """Remove a block from the grid and return it to the toolbox as a block."""
         block = self.grid.pop((grid_x, grid_y), None)
         if block is not None:
             # A block the player picked up (see _select_placed_block) IS the
-            # armed selection, so erasing it has to drop that selection with it.
-            # _refund_block puts the block back in the toolbox; leaving it armed
-            # would let the player place it again while the refunded copy sits
-            # in the toolbox — the same block fielded twice, since
-            # _place_block_at treats a selected Block as a MOVE and so removes
-            # nothing from the inventory.
+            # armed selection, so erasing it has to drop that selection with it:
+            # leaving it armed would let the player place it again while its
+            # inventory copy sits in the panel — the same block fielded twice.
             if block is self.selected_toolbox_item:
                 self._clear_toolbox_selection()
-            self._refund_block(block)
+            # The inventory spot the block came from is still holding it, so it
+            # goes back there (see _unplace_block); a block with no spot of its
+            # own is refunded as a new item.
+            self._unplace_block(block)
             if block.scorer == Scorer.START:
                 # Erasing a start block removes the marble released from it.
                 self.marbles = [m for m in self.marbles if getattr(m, "start_block", None) is not block]
@@ -7605,7 +7734,11 @@ class Game:
         """
         if not number:
             return
-        for item in list(self.toolbox.items):
+        # Every owned item is a candidate, not just the ones the panel shows:
+        # the inventory is unbounded (see Toolbox), so the partner may be
+        # stashed — or placed, in which case its item is still in the inventory
+        # and removing it takes the block with it (see _drop_placed_copy).
+        for item in list(self.toolbox.every_item()):
             if getattr(item, "key_number", 0) == number:
                 self.toolbox.remove(item)
                 return
@@ -7627,7 +7760,9 @@ class Game:
         """
         if not number:
             return
-        for item in list(self.toolbox.items):
+        # The whole inventory, not just the panel: the partner may be stashed,
+        # or placed (its item is still owned — see _place_block_at).
+        for item in list(self.toolbox.every_item()):
             if getattr(item, "portal_number", 0) == number:
                 self.toolbox.remove(item)
                 return
@@ -8104,6 +8239,12 @@ class Game:
             return ("Waiting off the panel — use an action or press F to swap "
                     "items onto it")
         if source == "toolbox":
+            # A block that is ON the board keeps its inventory spot (see
+            # _place_block_at), so its hint explains that clicking it takes hold
+            # of the block rather than offering to place a second copy.
+            if getattr(item, "placed_cell", None) is not None:
+                return ("On the board — click it to pick the block up and move "
+                        "it (right-click the block to erase it)")
             hint = ("Click to select (click again to deselect) | D to disassemble"
                     if getattr(item, "kind", None) == "block"
                     else "Click to select it for the next block"
@@ -8389,6 +8530,8 @@ class Game:
         marble.phase_timer = (PHANTOM_PHASE_SECONDS if trial == Trial.PHANTOM
                               else 0.0)
         marble.radius = MARBLE_RADIUS * 2 if trial == Trial.ELEPHANT else MARBLE_RADIUS
+        # Growing starts over each run (see physics.update / GROW_MAX_TRIGGERS).
+        marble.grow_triggers = 0
         # The vertigo trial pulls in the direction the run rolled (see
         # _apply_trial); every other trial — and no trial at all — leaves the
         # marble's gravity pointing straight down.

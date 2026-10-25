@@ -331,20 +331,22 @@ class NamedCardEndTests(GameTestCase):
         self.game._apply_cards_on_finish()
         self.game._flush_run_xmult()
 
-    def test_the_island_multiplies_by_one_point_five_a_group(self):
+    def test_the_island_pays_an_eighth_of_an_xmult_a_group(self):
         # Island is an xMult card, so it fires as the run SETTLES (see the
         # Card.NAMED row): three separated squares are three islands (corners do
         # not connect), and the factor lands with the rest of the xMult bank.
+        # Its magnitude is the +0.25-xMult-a-unit base at the card's 0.5 ratio,
+        # i.e. +0.125 xMult a group — the number its description states.
         self.game.unlocked_cells = {(0, 0), (2, 0), (4, 0)}
         self.game.score_mult = 10
         self._finish(main.Card.ISLAND)
-        self.assertAlmostEqual(self.game.score_mult, 10 * (1 + 0.5 * 3))
+        self.assertAlmostEqual(self.game.score_mult, 10 * (1 + 0.125 * 3))
         # A solid 2x3 block of units is ONE island, however big: the card
         # rewards a fragmented board, not a large one.
         self.game.unlocked_cells = {(x, y) for x in range(3) for y in range(2)}
         self.game.score_mult = 10
         self._finish(main.Card.ISLAND)
-        self.assertAlmostEqual(self.game.score_mult, 10 * 1.5)
+        self.assertAlmostEqual(self.game.score_mult, 10 * 1.125)
 
 
     def test_the_plane_pays_fifteen_chips_an_air_second(self):
