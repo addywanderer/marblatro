@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "cash": 430,
+  "cash": 447,
   "run_number": 12,
   "round_index": 4,
   "run_in_round": 0,
@@ -523,7 +523,9 @@
       "col": 1,
       "row": 1,
       "shape": 21,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 3,
       "scorer_amount": 1.552,
@@ -562,7 +564,7 @@
       "amount": 70.26,
       "price": 24,
       "name": "Debt",
-      "col": 5,
+      "col": 4,
       "row": 1
     },
     {
@@ -828,16 +830,8 @@
   "continue_past_game_over": false,
   "score_chips": 54.18,
   "score_mult": 4,
-  "last_run_cash_gained": 129,
-  "last_run_cash_breakdown": {
-    "base": 20,
-    "interest": 30,
-    "score": 62,
-    "cards": 0,
-    "scorers": 17,
-    "essence": 0,
-    "debt": false
-  },
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       9,
@@ -848,12 +842,12 @@
       5
     ],
     [
-      8,
-      1
-    ],
-    [
       11,
       0
+    ],
+    [
+      8,
+      1
     ],
     [
       7,

@@ -3804,10 +3804,11 @@ def draw_toolbox(game):
     # inventory holds more than the panel can display. Clicking it (see
     # Game._turn_inventory_page) shows the next page.
     pages = box.page_count()
+    mouse = pygame.mouse.get_pos()
     if pages > 1:
         arrow = game.inventory_page_button_rect()
+        hovered = arrow.collidepoint(mouse)
         _draw_inventory_side_box(game, arrow, draw_bottom=False)
-        hovered = arrow.collidepoint(pygame.mouse.get_pos())
         pygame.draw.polygon(
             game.screen, WHITE if hovered else (200, 200, 200),
             ((arrow.centerx - 3, arrow.top + 7),
@@ -3823,16 +3824,8 @@ def draw_toolbox(game):
     # the left one, which is the panel's own border (see
     # _draw_inventory_side_box).
     button = game.inventory_view_button_rect()
-    _draw_inventory_side_box(game, button)
-    hovered = button.collidepoint(pygame.mouse.get_pos())
-    if hovered:
-        pygame.draw.line(game.screen, WHITE,
-                         (button.right + BORD_WIDTH // 2, button.top),
-                         (button.right + BORD_WIDTH // 2, button.bottom), 1)
-        pygame.draw.line(game.screen, WHITE, (button.left, button.top),
-                         (button.right, button.top), 1)
-        pygame.draw.line(game.screen, WHITE, (button.left, button.bottom),
-                         (button.right, button.bottom), 1)
+    hovered = button.collidepoint(mouse)
+    _draw_inventory_side_box(game, button, hovered=hovered)
     for gx in range(3):
         for gy in range(3):
             pygame.draw.rect(
@@ -3840,7 +3833,7 @@ def draw_toolbox(game):
                 (button.x + 9 + gx * 8, button.y + 9 + gy * 8, 5, 5))
 
 
-def _draw_inventory_side_box(game, rect, draw_bottom=True):
+def _draw_inventory_side_box(game, rect, draw_bottom=True, hovered=False):
     """Draw one of the inventory's own 1x1 boxes hanging off its right edge.
 
     Only the edges the box OWNS are drawn. Its LEFT edge is the panel's own
@@ -3850,19 +3843,38 @@ def _draw_inventory_side_box(game, rect, draw_bottom=True):
     and the whole-inventory box below it is drawn ONCE, by the box underneath:
     the arrow passes ``draw_bottom=False`` and the view box's top edge is that
     shared line.
+
+    ``hovered`` lights those same edges white. The highlight runs along the very
+    rows/columns the thick border is drawn on (the box's own outer edge, not a
+    second rectangle inset from it), so it frames the box instead of floating
+    inside it.
     """
     pygame.draw.rect(game.screen, panel_fill(game), rect)
     edge = (30, 30, 30)
+    highlight = WHITE if hovered else edge
+    # The three edges as (row, column, thickness) so the border and the hover
+    # highlight can never drift apart.
     right_x = rect.right + BORD_WIDTH // 2
+    top_y = rect.top - BORD_WIDTH // 2 - 1
+    bottom_y = rect.bottom + BORD_WIDTH // 2
     pygame.draw.line(game.screen, edge, (right_x, rect.top - BORD_WIDTH),
                      (right_x, rect.bottom + BORD_WIDTH), BORD_WIDTH + 1)
-    top_y = rect.top - BORD_WIDTH // 2 - 1
     pygame.draw.line(game.screen, edge, (rect.left, top_y),
                      (rect.right, top_y), BORD_WIDTH)
     if draw_bottom:
-        bottom_y = rect.bottom + BORD_WIDTH // 2
         pygame.draw.line(game.screen, edge, (rect.left, bottom_y),
                          (rect.right, bottom_y), BORD_WIDTH + 1)
+    if not hovered:
+        return
+    # White lines on the middle of each band: 2px, so they read on top of the
+    # 6-7px border they trace.
+    pygame.draw.line(game.screen, highlight, (right_x, rect.top - BORD_WIDTH),
+                     (right_x, rect.bottom + BORD_WIDTH), 2)
+    pygame.draw.line(game.screen, highlight, (rect.left, top_y),
+                     (rect.right, top_y), 2)
+    if draw_bottom:
+        pygame.draw.line(game.screen, highlight, (rect.left, bottom_y),
+                         (rect.right, bottom_y), 2)
 
 
 def draw_cards(game):

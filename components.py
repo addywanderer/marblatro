@@ -244,7 +244,7 @@ class Scorer:
     COLOSSUS = 32  # +0.1 xMult per px of marble radius above the base size
     UNDERTAKER = 33  # +15 mult per block destroyed this run
     DEBT = 34  # +60 chips, but the run pays no interest afterwards
-    PACKED = 35  # when touched, +2 inventory slots (permanent, saved)
+    PACKED = 35  # when touched, +1 inventory slot (permanent, saved)
 
     # Each scorer's AVERAGE magnitude lives in MAGNITUDES.SCORERS (see the
     # MAGNITUDES section below), which is bound back onto this class as
@@ -1512,7 +1512,7 @@ class MAGNITUDES:
         Scorer.COLOSSUS: 0.04,  # +0.1 xMult per px of radius above the base
         Scorer.UNDERTAKER: 30,  # +30 mult per block destroyed this run
         Scorer.DEBT: 60,  # 60 chips per trigger
-        Scorer.PACKED: 2,  # 2 inventory slots per touch
+        Scorer.PACKED: 1,  # 1 inventory slot per touch
     }
 
     # --- Card magnitudes -----------------------------------------------------

@@ -8013,8 +8013,8 @@ class Game:
                 (f"Pack - {Pack.name(item.pack_type)}",
                  Pack.description(item.pack_type)),
                 (f"Size - {Pack.size_name(item.size)}",
-                 f"{Pack.options(item.size)} options, "
-                 f"{Pack.size_description(item.size)}"),
+                 (f"{Pack.options(item.size)} options, "
+                  f"{Pack.size_description(item.size)}")),
                 ("Kept", f"{item.kept} of {item.keep} kept so far"),
             ]
         if getattr(item, "kind", None) == "resource":
@@ -8025,9 +8025,9 @@ class Game:
             return [
                 (f"Resource - {Scorer.name(item.scorer)}",
                  scorer_description(item.scorer, item.amount)),
-                ("Option", f"Banks {points_text(item.points)} "
-                           f"{resource_point_label(item.scorer)} point{plural} "
-                           f"at once"),
+                ("Option", (f"Banks {points_text(item.points)} "
+                            f"{resource_point_label(item.scorer)} point{plural} "
+                            f"at once")),
             ]
         if getattr(item, "kind", None) == "token":
             # A token is a whole kept block, so it describes itself the way that

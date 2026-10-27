@@ -1757,28 +1757,28 @@ class PackedScorerTests(GameTestCase):
         self.assertIn(main.Scorer.PACKED, main.Scorer.SHOP_ORDER)
         self.assertIn(main.Scorer.PACKED, components.CARD_SCORERS)
         self.assertIn(main.Scorer.PACKED, components.FLAT_CARD_SCORERS)
-        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.PACKED], 2)
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.PACKED], 1)
         self.assertGreater(
             main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.PACKED)], 0)
         self.assertIn("inventory slot",
                       main.scorer_description(main.Scorer.PACKED).lower())
 
-    def test_touching_it_gives_two_inventory_slots(self):
+    def test_touching_it_gives_one_inventory_slot(self):
         block = main.Block(0, 0, scorer=main.Scorer.PACKED)
         before = self.game.toolbox.capacity()
         self.assertEqual(self.game.inventory_slots_won, 0)
 
         self._card_fire(block)
 
-        self.assertEqual(self.game.inventory_slots_won, 2)
-        self.assertEqual(self.game.inventory_slots_run_gain, 2)
-        self.assertEqual(self.game.toolbox.capacity(), before + 2)
-        self.assertIn("Inventory grew 2 slots", self.game.shop_message)
+        self.assertEqual(self.game.inventory_slots_won, 1)
+        self.assertEqual(self.game.inventory_slots_run_gain, 1)
+        self.assertEqual(self.game.toolbox.capacity(), before + 1)
+        self.assertIn("Inventory grew 1 slot", self.game.shop_message)
 
     def test_the_won_slots_really_show_more_items(self):
         # The capacity is not decoration: it is how many of the inventory's items
         # the panel SHOWS (the inventory itself is unbounded — see Toolbox), so
-        # the two slots Packed wins bring two more items out of the stash.
+        # the slots Packed wins bring more items out of the stash.
         box = self.game.toolbox
         box.items.clear()
         box.stash.clear()
@@ -1812,7 +1812,7 @@ class PackedScorerTests(GameTestCase):
         self.game.inventory_slots_won = 4          # won by an earlier run
         self.game.toolbox.slot_bonus = 4
         self._card_fire(main.Block(0, 0, scorer=main.Scorer.PACKED))
-        self.assertEqual(self.game.inventory_slots_won, 6)
+        self.assertEqual(self.game.inventory_slots_won, 5)
 
         self.game.run_complete = True
         self.game.awaiting_after_run = True
@@ -1829,15 +1829,15 @@ class PackedScorerTests(GameTestCase):
         self.game.awaiting_after_run = True
         self.game._continue_run()
 
-        self.assertEqual(self.game.inventory_slots_won, 2)
+        self.assertEqual(self.game.inventory_slots_won, 1)
         self.assertEqual(self.game.inventory_slots_run_gain, 0)
-        self.assertEqual(self.game.toolbox.slot_bonus, 2)
+        self.assertEqual(self.game.toolbox.slot_bonus, 1)
         # The next run's reset cannot take them back either.
         self.game.grid[(5, 6)] = main.Block(5, 6, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run(False))
-        self.assertEqual(self.game.inventory_slots_won, 2)
+        self.assertEqual(self.game.inventory_slots_won, 1)
         self.assertEqual(self.game.toolbox.capacity(),
-                         main.INVENTORY_START_SLOTS + 2)
+                         main.INVENTORY_START_SLOTS + 1)
 
     def test_the_card_gives_the_slots_when_it_fires(self):
         # The flat (match group x Packed) card pays the same gain a block does,

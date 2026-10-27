@@ -509,6 +509,33 @@ class InventoryTests(GameTestCase):
                     (rect.right + main.BORD_WIDTH // 2, rect.centery)))[:3],
                 (30, 30, 30))
 
+    def test_the_view_buttons_hover_lights_its_own_edges(self):
+        # Hovering the whole-inventory box lights the edges the box OWNS, ON the
+        # border bands themselves (not a second rectangle inset from them), and
+        # never the left edge that belongs to the panel.
+        self._fill(self.game.toolbox.capacity())
+        button = self.game.inventory_view_button_rect()
+        with mock.patch("main.pygame.mouse.get_pos", return_value=button.center):
+            self.game.screen.fill(main.BLACK)
+            main.ui.draw_toolbox(self.game)
+
+        right_x = button.right + main.BORD_WIDTH // 2
+        top_y = button.top - main.BORD_WIDTH // 2 - 1
+        bottom_y = button.bottom + main.BORD_WIDTH // 2
+        for pos in ((right_x, button.centery),      # right edge
+                    (button.centerx, top_y),        # top edge
+                    (button.centerx, bottom_y)):    # bottom edge
+            self.assertEqual(tuple(self.game.screen.get_at(pos))[:3],
+                             main.WHITE, pos)
+        # No left highlight, and nothing lit INSIDE the box either (where the
+        # old, offset lines used to sit).
+        self.assertNotEqual(
+            tuple(self.game.screen.get_at((button.left, button.centery)))[:3],
+            main.WHITE)
+        self.assertNotEqual(
+            tuple(self.game.screen.get_at((button.centerx, button.top)))[:3],
+            main.WHITE)
+
 
     def test_placing_a_block_keeps_it_in_its_slot(self):
         # User request: "when a block is placed on the board, make its spot in

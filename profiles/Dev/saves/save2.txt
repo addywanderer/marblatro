@@ -16,7 +16,9 @@
   "runs_cleared": 1,
   "failed_runs": 0,
   "current_trial": 6,
-  "trial_decision": null,
+  "trial_decision": {
+    "trial": 6
+  },
   "difficulty": 4,
   "cards": [],
   "actions": [],
@@ -59,7 +61,8 @@
       "trigger_paid": 0,
       "angle": 0,
       "triggers_left": 1,
-      "random_rolls": null
+      "random_rolls": null,
+      "placed_cell": null
     },
     {
       "kind": "block",
@@ -81,7 +84,8 @@
       "trigger_paid": 0,
       "angle": null,
       "triggers_left": null,
-      "random_rolls": null
+      "random_rolls": null,
+      "placed_cell": null
     }
   ],
   "toolbox_stash": [
@@ -105,7 +109,8 @@
       "trigger_paid": 0,
       "angle": null,
       "triggers_left": null,
-      "random_rolls": null
+      "random_rolls": null,
+      "placed_cell": null
     }
   ],
   "discards_left": 2,
@@ -218,7 +223,8 @@
       "trigger_paid": 0,
       "angle": null,
       "triggers_left": null,
-      "random_rolls": null
+      "random_rolls": null,
+      "placed_cell": null
     },
     {
       "kind": "pack",
@@ -413,16 +419,8 @@
   "continue_past_game_over": false,
   "score_chips": 30,
   "score_mult": 4,
-  "last_run_cash_gained": 24,
-  "last_run_cash_breakdown": {
-    "base": 20,
-    "interest": 0,
-    "score": 4,
-    "cards": 0,
-    "scorers": 0,
-    "essence": 0,
-    "debt": false
-  },
+  "last_run_cash_gained": 0,
+  "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
       6,
