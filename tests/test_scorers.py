@@ -293,30 +293,26 @@ class ScorersTests(GameTestCase):
         self.assertEqual(self._component_count(), 0)
 
 
-    def test_parts_reward_comes_home_even_when_the_panel_is_full(self):
-        # The inventory is unbounded, so a banked component is never withheld: a
-        # full panel means the grant waits in the stash.
+    def test_parts_reward_comes_home_even_when_the_board_is_full(self):
+        # A full board never withholds a reward: the piece is owned and waits for
+        # a square (see Toolbox.add), and it comes home on CONTINUE.
         self.game.toolbox.items.clear()
         self.game.toolbox.stash.clear()
-        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
-                                main.Scorer.NONE, 0, 5, "filler")
-        capacity = self.game.toolbox.capacity()
-        while len(self.game.toolbox.items) < capacity:
-            self.game.toolbox.add(filler)
-        self.game.parts_run_gain = 2
+        for x in range(main.GRID_WIDTH):
+            for y in range(main.GRID_HEIGHT):
+                self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE)
+        self.game.ensure_board_cells()
+        self.game.parts_run_gain = 1
         self.game.run_complete = True
         self.game.awaiting_after_run = True
+
         self.game._continue_run()
-        # Both banked components were granted — into the stash, since the panel
-        # has no room — so nothing was withheld.
+
         granted = [i for i in self.game.toolbox.every_item()
                    if getattr(i, "kind", None) in (main.Component.SHAPE,
                                                    main.Component.EFFECT,
                                                    main.Component.SCORER)]
-        self.assertEqual(len(granted), 2)
-        self.assertEqual(len(self.game.toolbox.items), capacity)
-        self.assertEqual(len(self.game.toolbox.stash), 2)
-        self.assertEqual(self.game.parts_run_gain, 0)
+        self.assertEqual(len(granted), 1)
 
 
     def test_parts_description_states_when_the_reward_arrives(self):
@@ -370,15 +366,14 @@ class ScorersTests(GameTestCase):
 
 
     def test_shreds_scorer_points_convert_only_on_continue(self):
-        # Three shred triggers bank 1/3 of a point each: one whole point, which
-        # converts into a random card after a run.
+        # A shred trigger banks a whole point, which converts into a random
+        # card after a run.
         self.game.cards.clear()
         self.game.run_active = True
-        for _ in range(3):
-            block = main.Block(0, 0, scorer=main.Scorer.SHREDS)
-            marble = self._add_marble()
-            marble.collisions_this_tick = [block]
-            self.game._handle_block_contacts([block])
+        block = main.Block(0, 0, scorer=main.Scorer.SHREDS)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [block]
+        self.game._handle_block_contacts([block])
         self.assertAlmostEqual(self.game.shred_run_gain, 1.0)
         self.assertEqual(self.game.cards, [])
         self.game.run_complete = True
@@ -390,15 +385,14 @@ class ScorersTests(GameTestCase):
 
 
     def test_rubble_scorer_points_convert_only_on_continue(self):
-        # Two rubble triggers bank 1/2 a point each: one whole point, which
-        # converts into a random block after a run.
+        # A rubble trigger banks a whole point, which converts into a random
+        # block after a run.
         self.game.toolbox.items.clear()
         self.game.run_active = True
-        for _ in range(2):
-            block = main.Block(0, 0, scorer=main.Scorer.RUBBLE)
-            marble = self._add_marble()
-            marble.collisions_this_tick = [block]
-            self.game._handle_block_contacts([block])
+        block = main.Block(0, 0, scorer=main.Scorer.RUBBLE)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [block]
+        self.game._handle_block_contacts([block])
         self.assertAlmostEqual(self.game.rubble_run_gain, 1.0)
         self.assertEqual(self.game.rubble_points, 0)
         blocks = [i for i in self.game.toolbox.items if getattr(i, "kind", None) == "block"]
@@ -413,15 +407,14 @@ class ScorersTests(GameTestCase):
 
 
     def test_ideas_scorer_points_convert_only_on_continue(self):
-        # Two idea points earned during a run convert into one random action
-        # after a run.
+        # A point earned during a run converts into one random action after
+        # the run.
         self.game.actions.clear()
         self.game.run_active = True
-        for _ in range(2):
-            block = main.Block(0, 0, scorer=main.Scorer.IDEAS)
-            marble = self._add_marble()
-            marble.collisions_this_tick = [block]
-            self.game._handle_block_contacts([block])
+        block = main.Block(0, 0, scorer=main.Scorer.IDEAS)
+        marble = self._add_marble()
+        marble.collisions_this_tick = [block]
+        self.game._handle_block_contacts([block])
         self.assertAlmostEqual(self.game.idea_run_gain, 1.0)
         self.assertEqual(self.game.actions, [])
         self.game.run_complete = True
@@ -475,7 +468,7 @@ class ScorersTests(GameTestCase):
 
 
     def test_seed_scorer_gives_mult_for_each_seed_on_board(self):
-        # Seed grants +3 mult (scorer_amount) for EVERY Seed block placed on
+        # Seed grants +4 mult (scorer_amount) for EVERY Seed block placed on
         # the board, including the touched block itself.
         self.game.grid[(0, 0)] = touched = main.Block(0, 0, scorer=main.Scorer.SEED)
         self.game.grid[(0, 1)] = main.Block(0, 1, scorer=main.Scorer.SEED)
@@ -485,8 +478,8 @@ class ScorersTests(GameTestCase):
         self.game.run_active = True
         self.game.score_mult = 2
         self.game._handle_block_contacts([touched])
-        # 2 Seed blocks x +3 mult = +6 mult.
-        self.assertEqual(self.game.score_mult, 8)
+        # 2 Seed blocks x +4 mult = +8 mult.
+        self.assertEqual(self.game.score_mult, 10)
         self.assertEqual(touched.triggers_left, 0)
 
 
@@ -497,7 +490,7 @@ class ScorersTests(GameTestCase):
         self.game.run_active = True
         self.game.score_mult = 2
         self.game._handle_block_contacts([touched])
-        self.assertEqual(self.game.score_mult, 5)  # 1 seed x +3
+        self.assertEqual(self.game.score_mult, 6)  # 1 seed x +4
 
 
     def test_drill_scorer_marks_two_locked_squares_for_continue(self):
@@ -742,11 +735,11 @@ class ScorersTests(GameTestCase):
         self.assertEqual(self.game.score_mult, 1 + 3 * 4)
 
 
-    def test_cluster_pays_four_mult_per_adjacent_block(self):
-        # +4 mult for each of the four orthogonal neighbours.
+    def test_cluster_pays_three_mult_per_adjacent_block(self):
+        # +3 mult for each of the four orthogonal neighbours.
         block = main.Block(2, 2, scorer=main.Scorer.CLUSTER)
         self._touch_cluster(block, ((1, 2), (3, 2), (2, 1), (2, 3)))
-        self.assertEqual(self.game.score_mult, 1 + 4 * 4)
+        self.assertEqual(self.game.score_mult, 1 + 3 * 4)
         self.assertEqual(block.triggers_left, 0)
 
 
@@ -763,7 +756,7 @@ class ScorersTests(GameTestCase):
         block = main.Block(2, 2, scorer=main.Scorer.CLUSTER)
         self._touch_cluster(block, ((1, 2), (2, 1), (2, 3),
                                     (1, 1), (3, 1), (1, 3), (3, 3)))
-        self.assertEqual(self.game.score_mult, 1 + 4 * 3)
+        self.assertEqual(self.game.score_mult, 1 + 3 * 3)
 
 
     def test_cluster_alone_gives_nothing(self):
@@ -843,7 +836,7 @@ class ScorersTests(GameTestCase):
 
         self.game._handle_block_contacts([block])
 
-        self.assertEqual(self.game.score_mult, 1 + 15 * 2)
+        self.assertEqual(self.game.score_mult, 1 + 30 * 2)
         self.assertEqual(block.triggers_left, 0)
 
 
@@ -893,25 +886,25 @@ class ScorersTests(GameTestCase):
 
     def test_a_resource_scorers_deviation_follows_its_point_count(self):
         # The modifier after a resource-point count belongs to THAT count, so it
-        # always adds up with the number it sits next to: a Rubble block rolled
+        # always adds up with the number it sits next to: a Picky block rolled
         # to 1.4 banks 0.7 points, which is (+0.2) over the 0.5 average — not
         # the (+0.4) its own magnitude is over 1.
-        desc = main.scorer_description(main.Scorer.RUBBLE, 1.4)
-        self.assertIn("Gives 0.7 rubble point (+0.2).", desc)
+        desc = main.scorer_description(main.Scorer.PICKY, 1.4)
+        self.assertIn("Gives 0.7 option point (+0.2).", desc)
         self.assertNotIn("+0.4", desc)
-        # A Shreds trigger's third of a point steps by a thirtieth.
-        self.assertIn("Gives 0.367 shred point (+0.033).",
+        # A whole-point scorer's count steps with its own magnitude.
+        self.assertIn("Gives 1.1 shred points (+0.1).",
                       main.scorer_description(main.Scorer.SHREDS, 1.1))
-        self.assertIn("Gives 0.3 shred point (-0.033).",
+        self.assertIn("Gives 0.9 shred point (-0.1).",
                       main.scorer_description(main.Scorer.SHREDS, 0.9))
         # An average-magnitude item reads its own count as (0)...
-        self.assertIn("Gives 0.5 rubble point (0).",
+        self.assertIn("Gives 1 rubble point (0).",
                       main.scorer_description(main.Scorer.RUBBLE, 1))
         # ...and a match-group card with a rolled resource magnitude does too.
         group = main.match_group_for_shape(main.Shape.PIPE)
-        card_text = components._match_group_description(group, main.Scorer.RUBBLE,
+        card_text = components._match_group_description(group, main.Scorer.PICKY,
                                                         1.4)
-        self.assertIn("Gives 0.7 rubble point (+0.2)", card_text)
+        self.assertIn("Gives 0.7 option point (+0.2)", card_text)
         # A catalogue card (no rolled magnitude) states no token at all.
         token = re.compile(r"\([+-]?\d+(\.\d+)?\)")
         catalogue = main.Card.description(
@@ -1345,8 +1338,8 @@ class ScorersTests(GameTestCase):
         # The shelf's kinds are drawn at their own odds (an action only 15% of
         # the time — see Pack.SHELF_WEIGHTS), so the shelf is pinned to actions
         # to be sure one is on it after the refresh.
-        with mock.patch.object(main, "SHELF_OFFER_TYPES", (main.Pack.ACTION,)):
-            with mock.patch("main.random_action_version", return_value=2):
+        with mock.patch("shop.SHELF_OFFER_TYPES", (main.Pack.ACTION,)):
+            with mock.patch("rolling.random_action_version", return_value=2):
                 self.game.shop.refresh()
         action = next(i for i in self.game.shop.items if i.kind == "action")
         self.game.actions.append(action)
@@ -1370,16 +1363,20 @@ class ScorersTests(GameTestCase):
                                                 col=1, row=1)
         self.game.unlocked_cells = {(x, 0) for x in range(main.GRID_WIDTH)}
         self.game.unlocked_cells |= {(0, y) for y in range(1, 4)}
-        self.assertEqual(len(self.game.unlocked_cells), 15)
+        units = len(self.game.unlocked_cells)
+        self.assertEqual(units, main.GRID_WIDTH + 3)
         rows = self.game._describe_item(roomy)
-        self.assertEqual(rows[-1],
-                         ("Now", "Gives +30 chips (2 x 15 unlocked units)"))
+        self.assertEqual(
+            rows[-1],
+            ("Now", f"Gives +{2 * units} chips (2 x {units} unlocked units)"))
         # ...and the row follows the board: unlock one more unit and the number
         # moves with it.
         self.game.unlocked_cells.add((5, 5))
+        units += 1
         rows = self.game._describe_item(roomy)
-        self.assertEqual(rows[-1],
-                         ("Now", "Gives +32 chips (2 x 16 unlocked units)"))
+        self.assertEqual(
+            rows[-1],
+            ("Now", f"Gives +{2 * units} chips (2 x {units} unlocked units)"))
         # A fixed scorer needs no such row: the description already says +30.
         flat = main.Component.scorer_component(main.Scorer.CHIPS_ADD, amount=30,
                                                col=1, row=1)
@@ -1476,8 +1473,8 @@ class ScorersTests(GameTestCase):
             self.assertIsNone(deviation.search(main.scorer_description(scorer)),
                               f"{main.Scorer.name(scorer)} has no magnitude")
         # A rolled xMult reads its own factor.
-        self.assertIn("by 4 (+1)", main.scorer_description(main.Scorer.SHARP, 4))
-        self.assertIn("(+1)", main.scorer_description(main.Scorer.EFFECTIVE, 3))
+        self.assertIn("by 4 (+2)", main.scorer_description(main.Scorer.SHARP, 4))
+        self.assertIn("(+0.5)", main.scorer_description(main.Scorer.EFFECTIVE, 3))
         # The amount-dependent scorers all follow their own magnitude.
         self.assertIn("Gives 2 components (+1)", main.scorer_description(main.Scorer.PARTS, 2))
         self.assertIn("Gives 1 component (0)", main.scorer_description(main.Scorer.PARTS, 1))
@@ -1490,8 +1487,13 @@ class ScorersTests(GameTestCase):
         # block keeps them when it is bought, placed, erased and returned.
         # The shelf's kinds are drawn at their own odds (a block only 20% of the
         # time — see Pack.SHELF_WEIGHTS), so one is placed on it rather than
-        # hunted for.
-        block = self._place_shop_offer("block", (0, main.SHOP_ITEM_ROW))
+        # hunted for. A portal block is bought as a PAIR of fresh blocks and so is
+        # a Key/Lock half, so the offer itself would never reach the inventory:
+        # take a plain block.
+        block = self._place_shop_offer(
+            "block", (0, main.SHOP_ITEM_ROW),
+            predicate=lambda offer: not offer.has_effect(main.Effect.PORTAL)
+            and main.paired_shape(offer.shape) is None)
         amount = block.scorer_amount
         amounts = dict(block.effect_amounts)
         self.game.toolbox.items.clear()
@@ -1527,6 +1529,9 @@ class ScorersTests(GameTestCase):
         random.seed(4242)
         amounts = set()
         self.game.toolbox.items.clear()
+        # The inventory only keeps what it has slots for, so open it right up
+        # before flooding it with grants.
+        self.game.toolbox.base_slots = 200
         for _ in range(80):
             self.game._grant_random_component()
         for item in self.game.toolbox.items:
@@ -1763,54 +1768,33 @@ class PackedScorerTests(GameTestCase):
         self.assertIn("inventory slot",
                       main.scorer_description(main.Scorer.PACKED).lower())
 
-    def test_touching_it_gives_one_inventory_slot(self):
+    def test_touching_it_unlocks_one_board_square(self):
+        # The inventory IS the board now, so "more room" means more board: a
+        # Packed trigger unlocks a locked square the way a Board Unit does.
+        self.game._reset_board_to_start()
         block = main.Block(0, 0, scorer=main.Scorer.PACKED)
-        before = self.game.toolbox.capacity()
+        before = len(self.game.unlocked_cells)
         self.assertEqual(self.game.inventory_slots_won, 0)
 
         self._card_fire(block)
 
         self.assertEqual(self.game.inventory_slots_won, 1)
         self.assertEqual(self.game.inventory_slots_run_gain, 1)
-        self.assertEqual(self.game.toolbox.capacity(), before + 1)
-        self.assertIn("Inventory grew 1 slot", self.game.shop_message)
+        self.assertEqual(len(self.game.unlocked_cells), before + 1)
+        self.assertIn("more item", self.game.shop_message)
 
-    def test_the_won_slots_really_show_more_items(self):
-        # The capacity is not decoration: it is how many of the inventory's items
-        # the panel SHOWS (the inventory itself is unbounded — see Toolbox), so
-        # the slots Packed wins bring more items out of the stash.
-        box = self.game.toolbox
-        box.items.clear()
-        box.stash.clear()
-        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
-                                main.Scorer.NONE, 0, 5, "filler")
-        for _ in range(box.capacity() + 2):
-            box.add(filler)
-        self.assertEqual(len(box.items), box.capacity())
-        self.assertEqual(len(box.stash), 2)
-        stashed = list(box.stash)
 
-        self.game._grant_inventory_slots(2)
-
-        # The panel is two cells bigger, and the stashed items filled them.
-        self.assertEqual(len(box.items), box.capacity())
-        self.assertEqual(box.stash, [])
-        self.assertEqual([id(i) for i in box.items[-2:]],
-                         [id(i) for i in stashed])
-        # ...and the panel is drawn tall enough to show them.
-        self.assertGreaterEqual(self.game.inventory_grid_rows()
-                                * box.cols, box.capacity())
-
-    def test_a_taller_magnitude_gives_more_slots(self):
+    def test_a_taller_magnitude_gives_more_room(self):
+        self.game._reset_board_to_start()
         block = main.Block(0, 0, scorer=main.Scorer.PACKED, scorer_amount=5)
         self._card_fire(block)
         self.assertEqual(self.game.inventory_slots_won, 5)
 
-    def test_a_retry_takes_back_the_slots_that_run_won(self):
-        # The slots a discarded run won are not the player's to keep, the rule
-        # Fresh's free rerolls follow.
+    def test_a_retry_takes_back_the_room_that_run_won(self):
+        # What a discarded run won is not the player's to keep, the rule Fresh's
+        # free rerolls follow.
+        self.game._reset_board_to_start()
         self.game.inventory_slots_won = 4          # won by an earlier run
-        self.game.toolbox.slot_bonus = 4
         self._card_fire(main.Block(0, 0, scorer=main.Scorer.PACKED))
         self.assertEqual(self.game.inventory_slots_won, 5)
 
@@ -1820,9 +1804,9 @@ class PackedScorerTests(GameTestCase):
 
         self.assertEqual(self.game.inventory_slots_won, 4)
         self.assertEqual(self.game.inventory_slots_run_gain, 0)
-        self.assertEqual(self.game.toolbox.slot_bonus, 4)
 
-    def test_a_continued_run_keeps_the_slots(self):
+    def test_a_continued_run_keeps_the_room(self):
+        self.game._reset_board_to_start()
         self._card_fire(main.Block(0, 0, scorer=main.Scorer.PACKED))
 
         self.game.run_complete = True
@@ -1831,17 +1815,15 @@ class PackedScorerTests(GameTestCase):
 
         self.assertEqual(self.game.inventory_slots_won, 1)
         self.assertEqual(self.game.inventory_slots_run_gain, 0)
-        self.assertEqual(self.game.toolbox.slot_bonus, 1)
-        # The next run's reset cannot take them back either.
+        # The next run's reset cannot take it back either.
         self.game.grid[(5, 6)] = main.Block(5, 6, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run(False))
         self.assertEqual(self.game.inventory_slots_won, 1)
-        self.assertEqual(self.game.toolbox.capacity(),
-                         main.INVENTORY_START_SLOTS + 1)
 
-    def test_the_card_gives_the_slots_when_it_fires(self):
+    def test_the_card_gives_the_room_when_it_fires(self):
         # The flat (match group x Packed) card pays the same gain a block does,
         # when the marble hits a block the card's group matches.
+        self.game._reset_board_to_start()
         pipe = main.match_group_for_shape(main.Shape.PIPE)
         self.game.cards = [_card_item(pipe, main.Scorer.PACKED)]
         self.assertEqual(self.game.inventory_slots_won, 0)

@@ -322,7 +322,7 @@ class SaveSystemTests(unittest.TestCase):
                          [(1 + n, main.SHOP_ITEM_ROW)
                           for n in range(main.SHOP_ITEM_SLOTS)])
         self.assertEqual([(i.col, i.row) for i in packs],
-                         [(1 + n, main.SHOP_PACK_ROW)
+                         [(main.SHOP_PACK_COL + n, main.SHOP_PACK_ROW)
                           for n in range(main.SHOP_PACK_SLOTS)])
         # Every offer is inside the panel the shop is drawn in, and the cell it
         # is drawn in is the cell the hit test finds it in.
@@ -419,7 +419,7 @@ class SaveSystemTests(unittest.TestCase):
 
 
     def test_board_unlock_state_saves_and_loads(self):
-        # A new game locks the board to the centered 2x2; squares unlocked in
+        # A new game locks the board to its start region; squares unlocked in
         # the shop and Board Units still in hand persist through a save/load
         # instead of snapping back to a fully-unlocked board.
         save_system.start_new_game_in_slot(self.game, 4)
@@ -467,8 +467,10 @@ class SaveSystemTests(unittest.TestCase):
         self.game.save_slot = 5
         save_system.save_game(self.game)
 
-        main._next_key_number = 0     # what a brand-new process starts from
-        main._next_portal_number = 0  # ...for portals too
+        # What a brand-new process starts from: the number counters live with the
+        # rolls that hand them out (see rolling.py).
+        main.rolling._next_key_number = 0
+        main.rolling._next_portal_number = 0
 
         fresh = main.Game()
         fresh.title_screen = False
@@ -848,8 +850,9 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(fresh.trial_marble_weight, 0.9)
 
         # Vertigo: the decided gravity direction comes back as the index into
-        # main.VERTIGO_DIRECTIONS the save stored, so the loaded run pulls the
-        # same way (the patched draw would give index 0).
+        # main.VERTIGO_DIRECTIONS the save stored (clamped to the list, so a save
+        # written when it had more entries still loads), so the loaded run pulls
+        # the same way (the patched draw would give index 0).
         self.game.trial_decision = {"trial": main.Trial.VERTIGO, "gravity": 5}
         data = save_system._save_data(self.game)
         self.assertEqual(data["trial_decision"]["gravity"], 5)
@@ -857,7 +860,7 @@ class SaveSystemTests(unittest.TestCase):
         fresh.current_trial = main.Trial.VERTIGO
         with mock.patch("main.random.randrange", return_value=0):
             fresh._apply_trial()
-        self.assertEqual(fresh.trial_gravity_dir, main.VERTIGO_DIRECTIONS[5])
+        self.assertEqual(fresh.trial_gravity_dir, main.VERTIGO_DIRECTIONS[-1])
 
         # A save from before any of this loads with no decision at all.
         del data["trial_decision"]
@@ -1141,14 +1144,15 @@ class SaveSystemTests(unittest.TestCase):
         self.assertTrue(self.game.title_screen)
         self.assertFalse(self.game.game_over)
 
-    def test_return_to_menu_button_rect_is_bottom_left(self):
-        # The play-screen MAIN MENU button lives in the empty bottom-left
-        # corner, clear of the board, panels, run dots, and trial box.
+    def test_return_to_menu_button_rect_is_in_the_top_bar(self):
+        # The play-screen MAIN MENU button lives in the top bar, clear of the
+        # board (which fills everything under the bar).
         btn = main.RETURN_TO_MENU_BUTTON_RECT
         self.assertTrue(btn.colliderect(
             main.pygame.Rect(0, 0, main.SCREEN_WIDTH, main.SCREEN_HEIGHT)))
-        self.assertEqual(btn.bottom, main.SCREEN_HEIGHT)
-        self.assertTrue(btn.right < main.MARBLE_BOX_COORDS[0])
+        self.assertLessEqual(btn.bottom, main.TOP_BAR_HEIGHT)
+        self.assertLess(main.TOP_BAR_HEIGHT, main.MARBLE_BOX_COORDS[1] + 1)
+        self.assertGreaterEqual(btn.top, 0)
 
     def test_clicking_return_to_menu_button_goes_to_title(self):
         # Clicking the bottom-left MAIN MENU button leaves the play screen,
@@ -1344,8 +1348,8 @@ class SaveSystemTests(unittest.TestCase):
         metagame.buy_upgrade("xmult")
         self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_chips, 1 + 30)
-        self.assertEqual(self.game.score_mult, (1 + 4) * 1.25)
+        self.assertEqual(self.game.score_chips, main.RUN_BASE_CHIPS + 30)
+        self.assertEqual(self.game.score_mult, (main.RUN_BASE_MULT + 4) * 1.25)
 
     def test_metagame_persists_across_reload(self):
         metagame.add_dice(500)
@@ -1378,8 +1382,8 @@ class SaveSystemTests(unittest.TestCase):
         self.game.upgrades_enabled = False
         self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_chips, 1)  # no +30 bonus
-        self.assertEqual(self.game.score_mult, 1)
+        self.assertEqual(self.game.score_chips, main.RUN_BASE_CHIPS)  # no +30 bonus
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT)
 
     def test_upgrades_enabled_saves_and_loads(self):
         self.game.save_slot = 2
@@ -2040,9 +2044,10 @@ class ProfileTests(unittest.TestCase):
         self.assertFalse(main.Game().action_slots_unlimited)
 
     def test_inventory_slots_won_survive_a_save_and_load(self):
-        # Packed's slots are permanent for the game, so the loaded game keeps
-        # them (and the wider inventory they buy).
+        # Packed's room is permanent for the game (it unlocks board squares), so
+        # the loaded game keeps what the save had won.
         self.game.save_slot = 2
+        self.game._reset_board_to_start()   # a new save's board is mostly locked
         self.game._grant_inventory_slots(3)
         save_system.save_game(self.game)
 
@@ -2053,12 +2058,8 @@ class ProfileTests(unittest.TestCase):
 
         self.assertEqual(fresh.inventory_slots_won, 3)
         self.assertEqual(fresh.inventory_slots_run_gain, 0)
-        self.assertEqual(fresh.toolbox.slot_bonus, 3)
-        self.assertEqual(fresh.toolbox.capacity(),
-                         self.game.toolbox.capacity())
         # An old save with none of the keys reads as an untouched game.
         self.assertEqual(main.Game().inventory_slots_won, 0)
-        self.assertEqual(main.Game().toolbox.slot_bonus, 0)
 
     def test_a_sold_card_survives_a_save_and_load(self):
         # Selling a card is a fact about the PLAYER, not about the run, so the
@@ -2101,7 +2102,7 @@ class ProfileTests(unittest.TestCase):
         self.game.save_slot = 6
         self.game.action_slots_unlimited = True
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
-                             for _ in range(main.SLOT_ROW_SLOTS + 3)]
+                             for _ in range(50)]
         save_system.save_game(self.game)
 
         fresh = main.Game()
@@ -2111,10 +2112,7 @@ class ProfileTests(unittest.TestCase):
 
         self.assertTrue(fresh.action_slots_unlimited)
         self.assertEqual(fresh.max_actions, main.ACTION_SLOTS_UNLIMITED)
-        self.assertEqual(len(fresh.actions), main.SLOT_ROW_SLOTS + 3)
-        self.assertEqual(fresh.action_area_page, 0)      # a view state, reset
-        # The paged row can still reach every loaded action.
-        self.assertTrue(fresh.action_row_window()[2])
+        self.assertEqual(len(fresh.actions), 50)
         self.assertTrue(fresh._grant_random_action())    # room for one more
 
     def test_a_banked_odyssey_item_survives_a_save_and_load(self):

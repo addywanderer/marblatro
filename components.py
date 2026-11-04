@@ -240,9 +240,9 @@ class Scorer:
     FRONTIER = 28  # +3 mult per locked unit / board border orthogonally adjacent
     GILDED = 29  # +1/6 of current chips as mult
     BOMB = 30  # touched: unlock units within 1 cell after the run, then destroyed
-    CLUSTER = 31  # +4 mult per block orthogonally adjacent to it (no diagonals)
-    COLOSSUS = 32  # +0.1 xMult per px of marble radius above the base size
-    UNDERTAKER = 33  # +15 mult per block destroyed this run
+    CLUSTER = 31  # +3 mult per block orthogonally adjacent to it (no diagonals)
+    COLOSSUS = 32  # +0.04 xMult per px of marble radius above the base size
+    UNDERTAKER = 33  # +30 mult per block destroyed this run
     DEBT = 34  # +60 chips, but the run pays no interest afterwards
     PACKED = 35  # when touched, +1 inventory slot (permanent, saved)
 
@@ -354,13 +354,10 @@ class Scorer:
     # Satanic, Effective). Their magnitude is never rolled below 1: a factor
     # under 1 would turn the block into a penalty instead of a weak payoff.
     MULTIPLIER_SCORERS: ClassVar[tuple] = (MULT_MUL, SHARP, SATANIC, EFFECTIVE)
-    # The scorers that bank RESOURCE POINTS instead of a payoff. A single
-    # trigger banks a FRACTION of a point, and one whole point converts into
-    # that scorer's reward (see RESOURCE_THRESHOLD): a Shreds trigger banks a
-    # third, the others a half, so the reward RATE is exactly what it always
-    # was (3 Shreds triggers a card, 2 Rubble triggers a block) while the bank
-    # reads as one point a reward. The fraction scales with the scorer's own
-    # magnitude, so a 3-magnitude Rubble banks 1.5 points a trigger. Parts
+    # The scorers that bank RESOURCE POINTS instead of a payoff. One whole
+    # point converts into that scorer's reward (see RESOURCE_THRESHOLD), and the
+    # rate says how many points a trigger banks per unit of its magnitude:
+    # Shreds, Rubble and Ideas bank a point a unit, Picky half a point. Parts
     # banks whole components rather than points and Fresh grants its reroll
     # immediately; neither appears here.
     RESOURCE_RATE: ClassVar[dict[int, float]] = {
@@ -1487,11 +1484,11 @@ class MAGNITUDES:
         Scorer.CASH: 15,  # $15 per trigger
         Scorer.SHARP: 2,  # 2x mult per trigger
         Scorer.PARTS: 1,  # 1 component per trigger
-        Scorer.SHREDS: 1,  # banks a third of a shred point a trigger (RESOURCE_RATE)
-        Scorer.RUBBLE: 1,  # banks half a rubble point a trigger
-        Scorer.IDEAS: 1,  # banks half an idea point a trigger
+        Scorer.SHREDS: 1,  # 1 unit; banks a shred point a trigger (RESOURCE_RATE)
+        Scorer.RUBBLE: 1,  # 1 unit; banks a rubble point a trigger
+        Scorer.IDEAS: 1,  # 1 unit; banks an idea point a trigger
         Scorer.RANDOM: 0,  # picks among fixed rewards; no single amount
-        Scorer.EFFECTIVE: 2.5,  # multiplies the multiplier by 2 (+1 xMult)
+        Scorer.EFFECTIVE: 2.5,  # multiplies the multiplier by 2.5 (+1.5 xMult)
         Scorer.FRESH: 1,  # 1 free reroll per trigger
         Scorer.PICKY: 1,  # 1 unit; banks PICKY's half an option point a trigger
         Scorer.VOYAGER: 0.01,  # mult per PIXEL the marble traveled before the touch
@@ -1509,7 +1506,7 @@ class MAGNITUDES:
         Scorer.GILDED: 0,  # 1/GILDED_DIVISOR of current chips as mult
         Scorer.BOMB: 0,  # detonates after the run (unlock radius, then destroyed)
         Scorer.CLUSTER: 3,  # +3 mult per block orthogonally adjacent to it
-        Scorer.COLOSSUS: 0.04,  # +0.1 xMult per px of radius above the base
+        Scorer.COLOSSUS: 0.04,  # +0.04 xMult per px of radius above the base
         Scorer.UNDERTAKER: 30,  # +30 mult per block destroyed this run
         Scorer.DEBT: 60,  # 60 chips per trigger
         Scorer.PACKED: 1,  # 1 inventory slot per touch
@@ -2294,14 +2291,13 @@ def points_text(points):
     """A resource-point count as a decimal, rounded to three places.
 
     The count lands on the step of a rolled magnitude, so it is not on any
-    small fraction's grid: a Rubble trigger banks 0.5 points at the average
-    (1 x 1/2), 0.55 one step up, 0.7 four steps up — and a Shreds roll of 1.1
-    banks a third of a point more than its own average. A fraction with a
-    small denominator states those dishonestly (limit_denominator(6) reads 0.7
-    as "2/3" and 1.1/3 as "1 1/6"), and the deviation printed next to the
-    count has to add up with it. Three places is finer than the smallest step
-    (a Shreds trigger's 1/30 of a point) and absorbs float noise from a bank
-    that has been added up over many triggers.
+    small fraction's grid: a Rubble trigger banks 1 point at the average
+    (1 x 1), 1.1 one step up, 1.4 four steps up — and a Picky roll of 1.1
+    banks 0.55, half a step above its own average. A fraction with a small
+    denominator states those dishonestly (limit_denominator(6) reads 1.1/3 as
+    "1 1/6"), and the deviation printed next to the count has to add up with
+    it. Three places is finer than the smallest step (a tenth of a point) and
+    absorbs float noise from a bank that has been added up over many triggers.
     """
     return f"{round(points, 3):g}"
 
@@ -2309,11 +2305,11 @@ def points_text(points):
 def resource_points_for(scorer, amount):
     """The resource points ONE trigger of a scorer banks, at its own magnitude.
 
-    A trigger banks a fraction of a point — 1/3 for Shreds and 1/2 for
-    Rubble/Ideas/Picky at the average magnitude — and one whole point converts
-    into that scorer's reward (see Scorer.RESOURCE_RATE / RESOURCE_THRESHOLD).
-    The reward RATE is therefore what it always was (3 Shreds triggers a card,
-    2 Rubble triggers a block): the bank now just reads as one point a reward.
+    A trigger banks its magnitude times its scorer's rate — a point a unit
+    for Shreds, Rubble and Ideas, half a point a unit for Picky (see
+    Scorer.RESOURCE_RATE) — and one whole point converts into that scorer's
+    reward (see RESOURCE_THRESHOLD). So an average Rubble block banks a point a
+    trigger and a rolled 1.4 banks 1.4.
     """
     return (amount or 0) * Scorer.RESOURCE_RATE.get(scorer, 0.0)
 
@@ -2589,8 +2585,9 @@ class Component:
         self.amount = amount
         self.price = price
         self.name = name
-        self.col = col
+        self.col = col  # the SHOP cell the offer is drawn in (never a board cell)
         self.row = row
+        self.board_cell = None  # the board square the owned component lies on
 
     @property
     def shape(self):
@@ -3225,7 +3222,7 @@ NAMED_CONDITION_RATIO = {
     # Island is 2x the base, so its canonical xMult pairing multiplies by 1.5
     # per island — "+0.5 xMult for each unconnected group of unlocked board
     # units" (+Chips pays 60 a group, +Mult 8). The count is of GROUPS, not
-    # units, so it is the same 1 on the starter 2x2 board as on a board that
+    # units, so it is the same 1 on the starter board as on a board that
     # has been unlocked into one big continent: what it rewards is a board left
     # broken into separate islands.
     Condition.ISLAND: 2.0,

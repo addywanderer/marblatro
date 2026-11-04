@@ -28,6 +28,7 @@ else:  # pragma: no cover - only when ui.py is imported standalone
     import main as _ui_source
 
 BG_COLOR = _ui_source.BG_COLOR
+BAR_COLOR = _ui_source.BAR_COLOR
 BLACK = _ui_source.BLACK
 BLOCK_INTERIOR_COLOR = _ui_source.BLOCK_INTERIOR_COLOR
 BLUE = _ui_source.BLUE
@@ -35,13 +36,8 @@ BORD_WIDTH = _ui_source.BORD_WIDTH
 BOARD_UNIT_COL = _ui_source.BOARD_UNIT_COL
 BOARD_UNIT_PRICE = _ui_source.BOARD_UNIT_PRICE
 BOARD_UNIT_ROW = _ui_source.BOARD_UNIT_ROW
-INVENTORY_SLOT_COL = _ui_source.INVENTORY_SLOT_COL
-INVENTORY_SLOT_PRICE = _ui_source.INVENTORY_SLOT_PRICE
-INVENTORY_SLOT_ROW = _ui_source.INVENTORY_SLOT_ROW
-ACTION_AREA_COORDS = _ui_source.ACTION_AREA_COORDS
 ACTION_UPGRADE_COST = _ui_source.ACTION_UPGRADE_COST
 ACTION_UPGRADE_RECT = _ui_source.ACTION_UPGRADE_RECT
-CARD_AREA_COORDS = _ui_source.CARD_AREA_COORDS
 CARD_COLOR = _ui_source.CARD_COLOR
 Difficulty = _ui_source.Difficulty
 GRAY = _ui_source.GRAY
@@ -53,7 +49,6 @@ INACCESSIBLE_COORDS = _ui_source.INACCESSIBLE_COORDS
 MARBLE_BOX_COLOR = _ui_source.MARBLE_BOX_COLOR
 MARBLE_BOX_COORDS = _ui_source.MARBLE_BOX_COORDS
 MARBLE_RADIUS = _ui_source.MARBLE_RADIUS
-MAX_ACTIONS = _ui_source.MAX_ACTIONS
 ORANGE = _ui_source.ORANGE
 PEG_RADIUS = _ui_source.PEG_RADIUS
 points_text = _ui_source.points_text
@@ -67,6 +62,9 @@ RUN_DOT_RADIUS = _ui_source.RUN_DOT_RADIUS
 RUNS_PER_ROUND = _ui_source.RUNS_PER_ROUND
 SCREEN_HEIGHT = _ui_source.SCREEN_HEIGHT
 SCREEN_WIDTH = _ui_source.SCREEN_WIDTH
+SCORE_PANEL_RECT = _ui_source.SCORE_PANEL_RECT
+SHOP_COORDS = _ui_source.SHOP_COORDS
+TOP_BAR_HEIGHT = _ui_source.TOP_BAR_HEIGHT
 SHOP_REFRESH_COST = _ui_source.SHOP_REFRESH_COST
 TOTAL_RUNS = _ui_source.TOTAL_RUNS
 TRAIL_LIFE = _ui_source.TRAIL_LIFE
@@ -246,82 +244,103 @@ def _draw_locked_boundary(game):
     that never finish anything, so they must not claim to.
     """
     def locked(cx, cy):
-        """True when that square exists and is still locked.
+        """True when that square is still locked.
 
-        Squares outside the grid read False, so the box's own edges are left to
-        the outer border instead of collecting a band of their own.
+        The board is infinite, so any square that is not unlocked is locked —
+        there is no edge of the board to leave alone any more (the window's own
+        edge is just where the drawing stops).
         """
-        return (0 <= cx < GRID_WIDTH and 0 <= cy < GRID_HEIGHT
-                and game.is_cell_locked(cx, cy))
+        return game.is_cell_locked(cx, cy)
 
-    x0, y0 = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
-    for gy in range(GRID_HEIGHT):
-        for gx in range(GRID_WIDTH):
-            if game.is_cell_locked(gx, gy):
-                continue
-            left = x0 + gx * GRID_SIZE
-            top = y0 + gy * GRID_SIZE
-            right = left + GRID_SIZE
-            bottom = top + GRID_SIZE
-            # The four squares diagonal to this one: a band covers the 6x6
-            # corner square at one of its ends only when that diagonal square
-            # is locked, so no band ever reaches onto the playable region.
-            over_up = BORD_WIDTH if locked(gx, gy - 1) else 0
-            over_down = BORD_WIDTH if locked(gx, gy + 1) else 0
-            over_left = BORD_WIDTH if locked(gx - 1, gy) else 0
-            over_right = BORD_WIDTH if locked(gx + 1, gy) else 0
-            up_left = BORD_WIDTH if locked(gx - 1, gy - 1) else 0
-            up_right = BORD_WIDTH if locked(gx + 1, gy - 1) else 0
-            down_left = BORD_WIDTH if locked(gx - 1, gy + 1) else 0
-            down_right = BORD_WIDTH if locked(gx + 1, gy + 1) else 0
-            bands = []
-            if over_left:
-                bands.append((left - BORD_WIDTH, top - up_left, BORD_WIDTH,
-                              GRID_SIZE + up_left + down_left))
-            if over_right:
-                bands.append((right, top - up_right, BORD_WIDTH,
-                              GRID_SIZE + up_right + down_right))
-            if over_up:
-                bands.append((left - up_left, top - BORD_WIDTH,
-                              GRID_SIZE + up_left + up_right, BORD_WIDTH))
-            if over_down:
-                bands.append((left - down_left, bottom,
-                              GRID_SIZE + down_left + down_right, BORD_WIDTH))
-            for band in bands:
-                pygame.draw.rect(game.screen, (30, 30, 30), band)
+    x0, y0 = game.cell_to_screen(0, 0)
+    for gx, gy in game.visible_cells():
+        if game.is_cell_locked(gx, gy):
+            continue
+        left = x0 + gx * GRID_SIZE
+        top = y0 + gy * GRID_SIZE
+        right = left + GRID_SIZE
+        bottom = top + GRID_SIZE
+        # The four squares diagonal to this one: a band covers the 6x6
+        # corner square at one of its ends only when that diagonal square
+        # is locked, so no band ever reaches onto the playable region.
+        over_up = BORD_WIDTH if locked(gx, gy - 1) else 0
+        over_down = BORD_WIDTH if locked(gx, gy + 1) else 0
+        over_left = BORD_WIDTH if locked(gx - 1, gy) else 0
+        over_right = BORD_WIDTH if locked(gx + 1, gy) else 0
+        up_left = BORD_WIDTH if locked(gx - 1, gy - 1) else 0
+        up_right = BORD_WIDTH if locked(gx + 1, gy - 1) else 0
+        down_left = BORD_WIDTH if locked(gx - 1, gy + 1) else 0
+        down_right = BORD_WIDTH if locked(gx + 1, gy + 1) else 0
+        bands = []
+        if over_left:
+            bands.append((left - BORD_WIDTH, top - up_left, BORD_WIDTH,
+                          GRID_SIZE + up_left + down_left))
+        if over_right:
+            bands.append((right, top - up_right, BORD_WIDTH,
+                          GRID_SIZE + up_right + down_right))
+        if over_up:
+            bands.append((left - up_left, top - BORD_WIDTH,
+                          GRID_SIZE + up_left + up_right, BORD_WIDTH))
+        if over_down:
+            bands.append((left - down_left, bottom,
+                          GRID_SIZE + down_left + down_right, BORD_WIDTH))
+        for band in bands:
+            pygame.draw.rect(game.screen, (30, 30, 30), band)
+
+
+def _draw_block_camera(game, block):
+    """Draw a board block where the CAMERA puts it.
+
+    Blocks live in world pixels (see Block.rect), so a block is drawn with the
+    camera offset applied. The rect is moved for the length of the call and
+    restored immediately, so the simulation's idea of where the block is never
+    changes — only where it is seen.
+    """
+    cam = game.camera
+    if cam == (0, 0):
+        draw_block(block, game.screen)
+        return
+    block.rect.move_ip(-cam[0], -cam[1])
+    try:
+        draw_block(block, game.screen)
+    finally:
+        block.rect.move_ip(cam[0], cam[1])
 
 
 def draw_board(game, border_color=(30, 30, 30)):
-    """Draw the dynamic marble box (the board), same look as draw_marble_box.
+    """Draw the board across the whole window, as far as the camera can see.
 
-    Unlocked squares get the normal board fill; LOCKED squares are painted
-    locked_fill(game) — a darker shade of the same colour while a trial runs, so
-    they stay in the run's palette, and the red void when there is no trial, so
-    the board reads as floating. While the Explorer card is owned, every board
-    unit a marble has BEEN IN this run (game.visited_cells) is repainted in
-    BG_COLOR instead — the very colour the title screen's background is filled
-    with — so the player watches the card's measure fill up square by square.
-    The original thin grid overlay stays across the whole 10x15 area — including
-    over locked squares — so the player can see every unit they can expand the
-    board into. The boundary between the playable region and the locked squares
-    gets a thick border of its own (see _draw_locked_boundary), and the thick
-    outer border is drawn last exactly like draw_marble_box.
+    The board is infinitely large, so there is no box to draw: the WINDOW is
+    filled with the two kinds of square and the player drags the view across the
+    rest (see Game.pan_board).
+
+    * An UNLOCKED square gets the normal board fill (the running trial's own
+      colour, lightened — see panel_fill).
+    * A LOCKED square keeps the BACKGROUND's pattern — the very tessellation the
+      screen behind the board is painted with (see draw_background), or the flat
+      background colour when no trial is running — so the locked region reads as
+      "not board" rather than as a different-coloured board (user request:
+      "locked board squares having the background's pattern on them").
+
+    While the Explorer card is owned, every board unit a marble has BEEN IN this
+    run (game.visited_cells) is repainted in BG_COLOR instead — so the player
+    watches the card's measure fill up square by square. The thin grid overlay
+    stays across the whole window, locked squares included, so the player can
+    see every unit they can expand the board into. The boundary between the
+    playable region and the locked squares gets a thick border of its own (see
+    _draw_locked_boundary).
     """
-    x, y = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
-    width = GRID_SIZE * GRID_WIDTH
-    height = GRID_SIZE * GRID_HEIGHT
-    # Normal board fill over the whole box (the running trial's own colour,
-    # lightened — see panel_fill), then the locked squares repainted a step
-    # darker (see locked_fill) so the playable region looks like it floats.
-    pygame.draw.rect(game.screen, panel_fill(game), (x, y, width, height))
-    if game.board_locked():
-        locked = locked_fill(game)
-        for gy in range(GRID_HEIGHT):
-            for gx in range(GRID_WIDTH):
-                if game.is_cell_locked(gx, gy):
-                    pygame.draw.rect(game.screen, locked,
-                                     (x + gx * GRID_SIZE, y + gy * GRID_SIZE,
-                                      GRID_SIZE, GRID_SIZE))
+    view = game.board_viewport()
+    # The locked region first: it covers the window, and the unlocked squares
+    # are painted over it, so the two meet exactly on the grid lines.
+    _draw_locked_backdrop(game, view)
+    cells = game.visible_cells()
+    unlocked_fill = panel_fill(game)
+    for gx, gy in cells:
+        if game.is_cell_locked(gx, gy):
+            continue
+        pygame.draw.rect(game.screen, unlocked_fill,
+                         game._board_item_rect(gx, gy))
     # Explorer's visited units, painted exactly as the card is measured: the
     # same set Game._note_visited_cell fills in (a unit per board cell a
     # marble's centre has been in this run, cleared by every new run). Painted
@@ -333,36 +352,50 @@ def draw_board(game, border_color=(30, 30, 30)):
     if game._has_card(Card.EXPLORER):
         for gx, gy in getattr(game, "visited_cells", ()):
             pygame.draw.rect(game.screen, BG_COLOR,
-                             (x + gx * GRID_SIZE, y + gy * GRID_SIZE,
-                              GRID_SIZE, GRID_SIZE))
+                             game._board_item_rect(gx, gy))
     # Thin interior grid lines (same style as draw_marble_box), across locked
     # squares too so their unit boundaries stay visible.
-    for gx in range(1, GRID_WIDTH):
-        gx_x = x + gx * GRID_SIZE
-        pygame.draw.line(game.screen, (30, 30, 30), (gx_x, y), (gx_x, y + height), 1)
-    for gy in range(1, GRID_HEIGHT):
-        gy_y = y + gy * GRID_SIZE
-        pygame.draw.line(game.screen, (30, 30, 30), (x, gy_y), (x + width - 1, gy_y), 1)
+    gx0, gy0 = game.screen_to_cell(view.topleft)
+    left = game.cell_to_screen(gx0, gy0)[0]
+    top = game.cell_to_screen(gx0, gy0)[1]
+    pygame.draw.line(game.screen, (30, 30, 30),
+                     (view.left, top + 1), (view.right, top + 1), 1)
+    for dx in range(1, GRID_WIDTH + 2):
+        gx_x = left + dx * GRID_SIZE
+        pygame.draw.line(game.screen, (30, 30, 30),
+                         (gx_x, view.top), (gx_x, view.bottom), 1)
+    for dy in range(1, GRID_HEIGHT + 2):
+        gy_y = top + dy * GRID_SIZE
+        pygame.draw.line(game.screen, (30, 30, 30),
+                         (view.left, gy_y), (view.right, gy_y), 1)
     # The locked squares make a wall around the playable region, outlined with
     # the board's own thick border: it lies just outside the region, so the
     # blocks, marbles and particles drawn after the board (see draw) can never
-    # cover it. Drawn over the thin lines above, under the outer border below.
+    # cover it.
     if game.board_locked():
         _draw_locked_boundary(game)
-    # The thick outer border, drawn last so it sits in front of the inner
-    # lines at the box's edges (mirrors draw_marble_box).
-    for gx in (0, GRID_WIDTH):
-        gx_x = x + gx * GRID_SIZE
-        bord = -BORD_WIDTH // 2 - 1 if gx == 0 else BORD_WIDTH // 2
-        line_w = BORD_WIDTH if gx == 0 else BORD_WIDTH + 1
-        pygame.draw.line(game.screen, border_color, (gx_x + bord, y - BORD_WIDTH),
-                         (gx_x + bord, y + height + BORD_WIDTH), line_w)
-    for gy in (0, GRID_HEIGHT):
-        gy_y = y + gy * GRID_SIZE
-        bord = -BORD_WIDTH // 2 - 1 if gy == 0 else BORD_WIDTH // 2
-        line_w = BORD_WIDTH if gy == 0 else BORD_WIDTH + 1
-        pygame.draw.line(game.screen, border_color, (x, gy_y + bord),
-                         (x + width - 1, gy_y + bord), line_w)
+    # The window's own frame: the dark board border, or the all-finishes trial's
+    # finish colour, which is the edge a marble finishes on.
+    pygame.draw.rect(game.screen, border_color, view, BORD_WIDTH)
+
+
+def _draw_locked_backdrop(game, view):
+    """Fill the window with the background's pattern: the locked squares' look.
+
+    A locked square is not board — it is the void the board floats in — so it is
+    painted with exactly what the screen behind the board is painted with (see
+    draw_background): the run's tessellation while a modifier is in play, and the
+    flat background colour otherwise. Blitting the tiled backdrop once over the
+    window keeps the pattern CONTINUOUS across squares, so the locked region
+    reads as one surface rather than a mosaic of tiles.
+    """
+    source, value = game.tile_source
+    if source is None:
+        pygame.draw.rect(game.screen, BG_COLOR, view)
+        return
+    # Blitted from the SCREEN's own origin, so the pattern behind the board and
+    # the pattern on the locked squares are the same pattern, in phase.
+    game.screen.blit(_tile_background(source, value), view.topleft, view)
 
 
 def draw_shop_item(screen, item, rect):
@@ -574,188 +607,6 @@ def draw_pack_overlay(game):
 
 
 # ---------------------------------------------------------------------------
-# The whole-inventory pop-up (see Game._toggle_inventory_view)
-# ---------------------------------------------------------------------------
-# The inventory holds everything the player owns, but its panel only ever shows
-# one selection of it (see main.Toolbox). The 1x1 button on the panel's right
-# edge opens the WHOLE inventory in this pop-up, drawn in the same style as an
-# opened pack: a dimmed backdrop, a bordered panel, and a grid of the item art
-# with its name under it. It is a viewer that PAGES (the inventory is
-# unbounded), so the page buttons and CLOSE live in its footer.
-INVENTORY_VIEW_COLS = 8
-INVENTORY_VIEW_ROWS = 4
-INVENTORY_VIEW_CELL = 78
-INVENTORY_VIEW_GAP = 8
-INVENTORY_VIEW_HEADER = 46
-INVENTORY_VIEW_FOOTER = 44
-INVENTORY_VIEW_PAD = 20
-INVENTORY_VIEW_PAGER = 30
-INVENTORY_VIEW_CLOSE = (104, 24)
-# The footer's own gap: the page buttons sit either side of CLOSE (see
-# inventory_pager_rect), so the panel is never drawn narrower than the footer
-# needs — a small inventory used to squeeze the buttons on top of each other.
-INVENTORY_VIEW_FOOTER_GAP = 8
-INVENTORY_VIEW_MIN_WIDTH = (2 * INVENTORY_VIEW_PAD
-                            + INVENTORY_VIEW_CLOSE[0]
-                            + 2 * (INVENTORY_VIEW_FOOTER_GAP
-                                   + INVENTORY_VIEW_PAGER))
-
-
-def inventory_view_pages(game):
-    """How many pages the whole-inventory pop-up holds (at least one)."""
-    per_page = INVENTORY_VIEW_COLS * INVENTORY_VIEW_ROWS
-    return max(1, -(-len(game.toolbox.every_item()) // per_page))
-
-
-def inventory_view_items(game):
-    """The whole inventory's items on the pop-up's current page, in order.
-
-    The order is the inventory's own (the displayed part first, then the stash —
-    see main.Toolbox.every_item), so a page is a window onto it. The page index
-    is clamped by wrapping, so a stale page (an item left the inventory) still
-    lands on a real page.
-    """
-    items = game.toolbox.every_item()
-    per_page = INVENTORY_VIEW_COLS * INVENTORY_VIEW_ROWS
-    page = game.inventory_page % inventory_view_pages(game)
-    return items[page * per_page:(page + 1) * per_page]
-
-
-def inventory_panel_rect(game):
-    """The panel the whole-inventory pop-up is drawn in.
-
-    Its width follows the items the page holds, but never falls below what the
-    footer needs (see INVENTORY_VIEW_MIN_WIDTH): the page buttons and CLOSE are
-    laid out from the panel's own edges, so a two-item inventory would otherwise
-    draw them on top of each other.
-    """
-    count = max(1, len(inventory_view_items(game)))
-    cols = min(INVENTORY_VIEW_COLS, count)
-    rows = max(1, -(-count // INVENTORY_VIEW_COLS))
-    width = cols * INVENTORY_VIEW_CELL + (cols - 1) * INVENTORY_VIEW_GAP + 40
-    width = max(width, INVENTORY_VIEW_MIN_WIDTH)
-    height = (rows * INVENTORY_VIEW_CELL + (rows - 1) * INVENTORY_VIEW_GAP
-              + INVENTORY_VIEW_HEADER + INVENTORY_VIEW_FOOTER)
-    return pygame.Rect((SCREEN_WIDTH - width) // 2,
-                       (SCREEN_HEIGHT - height) // 2, width, height)
-
-
-def inventory_item_rects(game):
-    """One rect per item of the pop-up's current page, in draw order.
-
-    Index i of this list is index i of ``inventory_view_items(game)``, so a
-    click (or a hover read-out) can be mapped straight back to the item.
-    """
-    panel = inventory_panel_rect(game)
-    rects = []
-    for index in range(len(inventory_view_items(game))):
-        col = index % INVENTORY_VIEW_COLS
-        row = index // INVENTORY_VIEW_COLS
-        rects.append(pygame.Rect(
-            panel.x + INVENTORY_VIEW_PAD
-            + col * (INVENTORY_VIEW_CELL + INVENTORY_VIEW_GAP),
-            panel.y + INVENTORY_VIEW_HEADER
-            + row * (INVENTORY_VIEW_CELL + INVENTORY_VIEW_GAP),
-            INVENTORY_VIEW_CELL, INVENTORY_VIEW_CELL))
-    return rects
-
-
-def inventory_pager_rect(game, direction):
-    """The pop-up's page buttons: ``direction`` -1 is back, +1 is forwards.
-
-    They sit at the footer's two ends — flush with its padding, either side of
-    CLOSE — so they can never be drawn over it or over each other, whatever the
-    panel's width. They are only DRAWN (and clickable) while the pop-up has more
-    than one page (see inventory_view_pages).
-    """
-    panel = inventory_panel_rect(game)
-    size = INVENTORY_VIEW_PAGER
-    y = panel.bottom - INVENTORY_VIEW_FOOTER + (INVENTORY_VIEW_FOOTER - size) // 2
-    if direction < 0:
-        x = panel.x + INVENTORY_VIEW_PAD
-    else:
-        x = inventory_close_rect(game).left - INVENTORY_VIEW_FOOTER_GAP - size
-    return pygame.Rect(x, y, size, size)
-
-
-def inventory_close_rect(game):
-    """The pop-up's CLOSE button (the pack pop-up's SKIP button's cousin)."""
-    panel = inventory_panel_rect(game)
-    width, height = INVENTORY_VIEW_CLOSE
-    return pygame.Rect(panel.right - INVENTORY_VIEW_PAD - width,
-                       panel.bottom - INVENTORY_VIEW_FOOTER
-                       + (INVENTORY_VIEW_FOOTER - height) // 2,
-                       width, height)
-
-
-def draw_inventory_overlay(game):
-    """Draw the whole-inventory pop-up (see Game._toggle_inventory_view).
-
-    Same language as an opened pack (see draw_pack_overlay): a dimmed backdrop
-    over the play screen, a panel in the panel colour with an accent border, the
-    item art in a grid with its name under it, and the footer's page buttons and
-    CLOSE. The items the panel is currently SHOWING are green-framed, so the
-    player can tell at a glance which part of the inventory is within reach
-    without a discard; everything else is what a reshuffle or a discard can
-    bring out.
-    """
-    if not getattr(game, "inventory_open", False):
-        return
-    backdrop = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
-    backdrop.fill((0, 0, 0, 150))
-    game.screen.blit(backdrop, (0, 0))
-    panel = inventory_panel_rect(game)
-    items = inventory_view_items(game)
-    total = len(game.toolbox.every_item())
-    pages = inventory_view_pages(game)
-    page = game.inventory_page % pages
-    pygame.draw.rect(game.screen, (28, 28, 34), panel, border_radius=10)
-    pygame.draw.rect(game.screen, WHITE, panel, 3, border_radius=10)
-    title = font("small").render("WHOLE INVENTORY", True, WHITE)
-    game.screen.blit(title, title.get_rect(midtop=(panel.centerx, panel.y + 8)))
-    shown = len(game.toolbox.items)
-    rule = (f"{total} item{'s' if total != 1 else ''} — {shown} on panel — "
-            f"page {page + 1}/{pages}")
-    rule_surf = font("tiny").render(rule, True, (215, 215, 215))
-    game.screen.blit(rule_surf,
-                     rule_surf.get_rect(midtop=(panel.centerx, panel.y + 26)))
-    mouse = pygame.mouse.get_pos()
-    for item, rect in zip(items, inventory_item_rects(game)):
-        hovered = rect.collidepoint(mouse)
-        pygame.draw.rect(game.screen, (46, 46, 54), rect, border_radius=6)
-        pygame.draw.rect(game.screen, WHITE if hovered else (90, 90, 100),
-                         rect, 2, border_radius=6)
-        inner = pygame.Rect(rect.centerx - GRID_SIZE // 2,
-                            rect.y + 6, GRID_SIZE, GRID_SIZE)
-        draw_shop_item(game.screen, item, inner)
-        for line in game._wrap_text(game._item_name(item), font("tiny"),
-                                    rect.width - 8)[:2]:
-            text = font("tiny").render(line, True, (235, 235, 235))
-            game.screen.blit(text, text.get_rect(midtop=(rect.centerx, inner.bottom + 2)))
-        # Green frame: this item is one the panel is showing right now.
-        if any(item is shown_item for shown_item in game.toolbox.items):
-            pygame.draw.rect(game.screen, GREEN, rect, 2, border_radius=6)
-    # Only a pop-up with more than one page shows (or needs) the arrows: with a
-    # small inventory they used to be drawn over CLOSE and over each other.
-    if pages > 1:
-        for direction, glyph in ((-1, "<"), (1, ">")):
-            button = inventory_pager_rect(game, direction)
-            hovered = button.collidepoint(mouse)
-            pygame.draw.rect(game.screen,
-                             (70, 70, 80) if not hovered else (96, 96, 108),
-                             button, border_radius=6)
-            pygame.draw.rect(game.screen, WHITE, button, 2, border_radius=6)
-            label = font("tiny").render(glyph, True, (255, 255, 255))
-            game.screen.blit(label, label.get_rect(center=button.center))
-    close = inventory_close_rect(game)
-    hovered = close.collidepoint(mouse)
-    pygame.draw.rect(game.screen, (70, 70, 80) if not hovered else (96, 96, 108),
-                     close, border_radius=6)
-    pygame.draw.rect(game.screen, WHITE, close, 2, border_radius=6)
-    label = font("tiny").render("CLOSE", True, (255, 255, 255))
-    game.screen.blit(label, label.get_rect(center=close.center))
-
-
 def _draw_condition_mini(screen, shape, effect, center, size):
     """Draw a miniature image of a shape or effect, centered at ``center``.
 
@@ -1630,20 +1481,6 @@ def panel_fill(game):
     return MARBLE_BOX_COLOR if tint is None else tint
 
 
-def locked_fill(game):
-    """The fill for a LOCKED board square in a run.
-
-    The run modifier's tile colour again, a step darker than the panels (see
-    components.TileArt.locked_color), so the squares the board cannot be played
-    on yet stay inside the run's palette instead of showing the red void through
-    it, while still reading as unlit next to the unlocked ones. With no modifier
-    it is the void itself, exactly as before: there is no tile colour to match.
-    """
-    source, value = game.tile_source
-    tint = None if source is None else source.locked_color(value)
-    return BG_COLOR if tint is None else tint
-
-
 def draw_background(game):
     """Paint the screen behind everything the game draws onto it.
 
@@ -2218,8 +2055,8 @@ def draw_card_back(screen, rect):
     empty slot looks the same wherever it is — and its corners are SQUARE: a
     slot is a cell of the tray panel (see draw_marble_box), not a card face.
 
-    The slot's own background is BLACK (the tray panels are black too, see
-    draw_cards / draw_action_area), so the empty slots read as black cells with
+    The slot's own background is BLACK (the shop panels are black too), so the
+    empty slots read as black cells with
     the back's border and dot pattern on them, matching the trays they sit in.
     """
     pygame.draw.rect(screen, BLACK, rect)
@@ -2355,21 +2192,23 @@ class TrailParticle:
     def dead(self):
         return self.age >= self.life
 
-    def draw(self, screen):
+    def draw(self, screen, camera=(0, 0)):
         t = min(self.age / self.life, 1.0)
         radius = self.radius * (1.0 - t)
         if radius < 0.5:
             return
+        x = self.x - camera[0]
+        y = self.y - camera[1]
         if self.fire > 0.01:
             # A burning dot IS its flame: drawing the marble-coloured dot under
             # it would only put a coloured rim around the fire.
-            _draw_trail_flame(screen, self.x, self.y, radius, self.direction,
+            _draw_trail_flame(screen, x, y, radius, self.direction,
                               self.fire)
             return
         size = max(2, int(radius * 2) + 2)
         surf = pygame.transform.smoothscale(self._surf, (size, size))
         surf.set_alpha(int(255 * (1.0 - t)))
-        screen.blit(surf, surf.get_rect(center=(int(self.x), int(self.y))))
+        screen.blit(surf, surf.get_rect(center=(int(x), int(y))))
 
 
 class ScoreParticle:
@@ -2402,13 +2241,14 @@ class ScoreParticle:
     def dead(self):
         return self.age >= self.life
 
-    def draw(self, screen):
+    def draw(self, screen, camera=(0, 0)):
         # Fade by scaling the whole SRCALPHA text surface's alpha with its
         # remaining life (0 at the end -> fully gone).
         t = min(self.age / self.life, 1.0)
         alpha = int(255 * (1.0 - t))
         self._surf.set_alpha(alpha)
-        screen.blit(self._surf, self._surf.get_rect(center=(int(self.x), int(self.y))))
+        screen.blit(self._surf, self._surf.get_rect(
+            center=(int(self.x - camera[0]), int(self.y - camera[1]))))
         self._surf.set_alpha(255)  # reset so the cached surface is reusable
 
 
@@ -3360,7 +3200,7 @@ def _draw_gondola_cables(game):
     have one pair of cables stretching the whole way down it (see
     Game._gondola_solids).
     """
-    cars = [block for block in game.grid.values()
+    cars = [block for block in game.board_blocks()
             if block.has_effect(Effect.GONDOLA)]
     if not cars:
         return
@@ -3372,19 +3212,19 @@ def _draw_gondola_cables(game):
         # the cables end where the car's own rect can end.
         near = math.floor(low)
         far = math.floor(high)
-        # The pair sits a few pixels inside the lane's own edges: on the edges
-        # exactly, the cables landed on the board's thin grid lines and read as
-        # part of the grid rather than as the track.
+        # The rect is in WORLD pixels, so the camera offset is taken off here —
+        # the cables are drawn through the same window as everything else.
+        cam = game.camera
         if axis == "x":
             for y in (home.top + 3, home.bottom - 3):
                 pygame.draw.line(game.screen, GONDOLA_CABLE_COLOR,
-                                 (home.left + near, y),
-                                 (home.right - 1 + far, y), 2)
+                                 (home.left + near - cam[0], y - cam[1]),
+                                 (home.right - 1 + far - cam[0], y - cam[1]), 2)
         else:
             for x in (home.left + 3, home.right - 3):
                 pygame.draw.line(game.screen, GONDOLA_CABLE_COLOR,
-                                 (x, home.top + near),
-                                 (x, home.bottom - 1 + far), 2)
+                                 (x - cam[0], home.top + near - cam[1]),
+                                 (x - cam[0], home.bottom - 1 + far - cam[1]), 2)
 
 
 def draw(game):
@@ -3405,8 +3245,8 @@ def draw(game):
         draw_collection(game)
         return
     draw_background(game)
-    # The all-finishes trial paints the marble-box border in the finish
-    # scorer color so its edges read as a finish. Read from active_trial, not
+    # The all-finishes trial paints the board's frame in the finish scorer
+    # colour so its edges read as a finish. Read from active_trial, not
     # current_trial: a game with the trial system switched off holds an id it
     # does not play (see Game.active_trial), and it must not get a finish
     # border for a trial it is not running.
@@ -3415,49 +3255,93 @@ def draw(game):
     draw_board(game, box_border)
     draw_run_dots(game)
 
+    # Everything the board holds is drawn through the CAMERA: the board is
+    # infinitely large, so a square (or a marble) is drawn wherever the window
+    # shows it (see Game.cell_to_screen / Game.pan_board).
+    cam = game.camera
+
     # The cables a cable car rides (see _draw_gondola_cables) go under the
     # blocks, so each car rides along its own lane.
     _draw_gondola_cables(game)
-    for block in game.grid.values():
-        draw_block(block, game.screen)
+    # The board holds EVERY item the player owns (see Game.ensure_board_cells):
+    # a block is drawn as a block, and a component, card, action or Spirit token
+    # lying on a square is drawn as the item it is. Only the blocks are physical
+    # — the marble never meets the rest (see Game.board_blocks).
+    for item in game.board_items():
+        if isinstance(item, Block):
+            _draw_block_camera(game, item)
+        elif getattr(item, "kind", None) in (None, "token"):
+            continue          # a Spirit token draws itself (see draw_tokens)
+        else:
+            cell = game.item_cell(item)
+            rect = game._board_item_rect(*cell)
+            if not game.board_viewport().colliderect(rect):
+                continue
+            draw_shop_item(game.screen, item, rect)
+            if (getattr(item, "kind", None) == "card"
+                    and game._card_disabled(item)):
+                # A card the Card cutter trial cut is dimmed, so the player can
+                # see which one stopped working for the run.
+                shade = pygame.Surface(rect.size, pygame.SRCALPHA)
+                shade.fill((0, 0, 0, 140))
+                game.screen.blit(shade, rect.topleft)
+    # A selected item wears a green frame — thick for the one IN HAND, thin for
+    # the rest — so one selection reads the same wherever the player clicked it
+    # (see Game._toggle_item_selection).
+    for item in game.selection:
+        cell = game.item_cell(item)
+        if cell is None:
+            continue
+        rect = game._board_item_rect(*cell)
+        pygame.draw.rect(game.screen, GREEN, rect, 3)
+        if item is game.selected_toolbox_item:
+            pygame.draw.rect(game.screen, WHITE, rect.inflate(-8, -8), 1)
 
-    # The subject of an active action (a placed grid block) is gold-outlined.
+    # The subject of an active action (a block or a card) is gold-outlined.
     subject = game.selected_action_subject
-    if (game.selected_action is not None and isinstance(subject, Block)
-            and (subject.x, subject.y) in game.grid):
-        pygame.draw.rect(game.screen, (255, 215, 0), subject.rect, 3)
+    subject_cell = game.item_cell(subject) if subject is not None else None
+    if game.selected_action is not None and subject_cell is not None:
+        pygame.draw.rect(game.screen, (255, 215, 0),
+                         game._board_item_rect(*subject_cell), 3)
 
-    # The board title sits at the bottom-left of the panel. It hides while
+    # The board title sits at the top-left of the window. It hides while
     # the mouse is over the board so it never sits under the cursor.
     if game._show_marble_box_title():
         title = game.font.render("BOARD", True, WHITE)
-        game.screen.blit(title, (MARBLE_BOX_COORDS[0] + 8,
-                                 MARBLE_BOX_COORDS[1] + MARBLE_BOX_COORDS[3] - 26))
+        game.screen.blit(title, (MARBLE_BOX_COORDS[0] + 8, MARBLE_BOX_COORDS[1] + 6))
 
-    # Fire along the top edge of the box while the score passes the run.
+    # Fire along the top edge of the board while the score passes the run.
     draw_fire(game)
 
     mouse_pos = pygame.mouse.get_pos()
-    grid_x = (mouse_pos[0] - MARBLE_BOX_COORDS[0]) // GRID_SIZE
-    grid_y = (mouse_pos[1] - MARBLE_BOX_COORDS[1]) // GRID_SIZE
-    inside_grid = (
-        MARBLE_BOX_COORDS[0] <= mouse_pos[0] < MARBLE_BOX_COORDS[0] + MARBLE_BOX_COORDS[2]
-        and MARBLE_BOX_COORDS[1] <= mouse_pos[1] < MARBLE_BOX_COORDS[1] + MARBLE_BOX_COORDS[3]
-    )
-    if (inside_grid and 0 <= grid_x < GRID_WIDTH and 0 <= grid_y < GRID_HEIGHT
-            and game.has_selected and not game.is_cell_locked(grid_x, grid_y)):
-        ghost = Block(
-            grid_x,
-            grid_y,
-            shape=game.selected_shape,
-            effect=game.selected_effect,
-            scorer=game.selected_scorer,
-            scorer_amount=game.selected_scorer_amount,
-            angle=game.current_block_angle,
-            portal_number=getattr(game.selected_toolbox_item, "portal_number", 0),
-            key_number=getattr(game.selected_toolbox_item, "key_number", 0),
-        )
-        draw_block(ghost, game.screen, ghost=True)
+    inside_grid = game.board_viewport().collidepoint(mouse_pos)
+    if inside_grid:
+        grid_x, grid_y = game.screen_to_cell(mouse_pos)
+    else:
+        grid_x = grid_y = None
+    if (inside_grid and game.in_hand
+            and not game.is_cell_locked(grid_x, grid_y)):
+        held = game.selected_toolbox_item
+        if not (isinstance(held, Block) or getattr(held, "kind", None) == "block"):
+            # Any other item is MOVED to the cell as itself (see Game._move_item_to), so
+            # the preview is the item in the cell, not a block built from it.
+            cell = game._board_item_rect(grid_x, grid_y)
+            draw_shop_item(game.screen, held, cell)
+            pygame.draw.rect(game.screen, WHITE, cell, 1)
+        else:
+            ghost = Block(
+                grid_x,
+                grid_y,
+                shape=game.selected_shape,
+                effect=game.selected_effect,
+                scorer=game.selected_scorer,
+                scorer_amount=game.selected_scorer_amount,
+                angle=game.current_block_angle,
+                portal_number=getattr(game.selected_toolbox_item, "portal_number", 0),
+                key_number=getattr(game.selected_toolbox_item, "key_number", 0),
+                origin=(MARBLE_BOX_COORDS[0] - cam[0], MARBLE_BOX_COORDS[1] - cam[1]),
+            )
+            draw_block(ghost, game.screen, ghost=True)
 
     # The X-ray trial: the marble and its trail are still SIMULATED (they score
     # and leave their dots) but nothing of them is drawn, so the player has to
@@ -3465,34 +3349,37 @@ def draw(game):
     hidden = game.active_trial == Trial.X_RAY
     if not hidden:
         for particle in game.trail_particles:
-            particle.draw(game.screen)
+            particle.draw(game.screen, cam)
         for marble in game.marbles:
-            draw_marble(marble, game.screen, fire=game.fire_intensity)
+            _draw_marble_camera(game, marble)
     for particle in game.score_particles:
-        particle.draw(game.screen)
-    draw_score_display(game)
-    draw_trial_box(game)
-    draw_toolbox(game)
-    draw_cards(game)
-    draw_action_area(game)
+        particle.draw(game.screen, cam)
     draw_tokens(game)
-    draw_inaccessible(game)
-    draw_sell_overlay(game)
-    draw_upgrade_overlay(game)
-    draw_shop(game)
+    draw_top_bar(game)
+    # Everything that lives IN the bar is clipped to it, so no panel border,
+    # price label or message can ever spill onto the board below.
+    previous_clip = game.screen.get_clip()
+    game.screen.set_clip(pygame.Rect(0, 0, SCREEN_WIDTH, TOP_BAR_HEIGHT))
+    try:
+        draw_score_display(game)
+        draw_trial_box(game)
+        draw_inaccessible(game)
+        draw_action_upgrade_button(game)
+        draw_shop(game)
+        # The MAIN MENU button in the top bar: clicking it returns to the title
+        # screen.
+        btn = RETURN_TO_MENU_BUTTON_RECT
+        pygame.draw.rect(game.screen, (60, 60, 80), btn, border_radius=8)
+        pygame.draw.rect(game.screen, WHITE, btn, 2, border_radius=8)
+        label = game.small_font.render("MAIN MENU", True, WHITE)
+        game.screen.blit(label, label.get_rect(center=btn.center))
+    finally:
+        game.screen.set_clip(previous_clip)
     # An OPEN PACK's overlay goes over the play screen but UNDER the sidebar:
     # the sidebar is the info box that follows the mouse, so hovering an option
     # in the overlay reads out what that option is (see draw_pack_overlay).
     draw_pack_overlay(game)
-    # The whole-inventory pop-up opens the same way (see draw_inventory_overlay).
-    draw_inventory_overlay(game)
     draw_sidebar(game)
-    # The bottom-left MAIN MENU button: clicking it returns to the title screen.
-    btn = RETURN_TO_MENU_BUTTON_RECT
-    pygame.draw.rect(game.screen, (60, 60, 80), btn, border_radius=8)
-    pygame.draw.rect(game.screen, WHITE, btn, 2, border_radius=8)
-    label = game.small_font.render("MAIN MENU", True, WHITE)
-    game.screen.blit(label, label.get_rect(center=btn.center))
     draw_game_over(game)
     # The bottom popups (achievement unlocks, collection discoveries) draw
     # last so they sit on top of the HUD.
@@ -3512,7 +3399,10 @@ def draw_fire(game):
     if game.fire_intensity <= 0.01:
         return
     intensity = game.fire_intensity
-    x0, y0 = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1] - BORD_WIDTH
+    # The flames rise from the board's TOP edge — the seam between the top bar
+    # and the board — and burn downward into the board, so they never cover the
+    # bar's own furniture.
+    x0, y0 = MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1]
     width = MARBLE_BOX_COORDS[2]
     now = pygame.time.get_ticks() / 1000.0
     scale = min(intensity, FIRE_VISUAL_CAP)
@@ -3525,16 +3415,31 @@ def draw_fire(game):
         inner_h = outer_h * 0.55
         # A strong fire's flames are as wide as they are tall, so the flames at
         # the two ends are narrowed to the room they actually have: the fire
-        # hugs the box's top edge instead of burning over its left and right
-        # sides. The box's own pixels span x0 .. x0 + width - 1, so the base
+        # hugs the board's top edge instead of burning over its left and right
+        # sides. The board's own pixels span x0 .. x0 + width - 1, so the base
         # stops on the last of them.
         w = max(0.0, min(base, cx - x0, x0 + width - 1 - cx))
         # Outer orange flame with a smaller yellow core (the fire's palette,
         # shared with the marbles' own fire — see FIRE_BODY_COLOR).
         pygame.draw.polygon(game.screen, FIRE_BODY_COLOR,
-                            [(cx - w, y0), (cx + w, y0), (cx, y0 - outer_h)])
+                            [(cx - w, y0), (cx + w, y0), (cx, y0 + outer_h)])
         pygame.draw.polygon(game.screen, FIRE_CORE_COLOR,
-                            [(cx - w * 0.5, y0), (cx + w * 0.5, y0), (cx, y0 - inner_h)])
+                            [(cx - w * 0.5, y0), (cx + w * 0.5, y0), (cx, y0 + inner_h)])
+
+
+def draw_top_bar(game):
+    """Draw the strip along the top of the screen that holds the game's furniture.
+
+    The shop, the score readout, the trial box, the run/round display and the
+    MAIN MENU button all live here (user request), and the board fills the rest
+    of the screen, so the bar gets a backplate of its own to sit on.
+    """
+    bar = pygame.Rect(0, 0, SCREEN_WIDTH, TOP_BAR_HEIGHT)
+    pygame.draw.rect(game.screen, BAR_COLOR, bar)
+    # A dark seam between the bar and the board, so the two read as separate
+    # surfaces without an outline around the whole window.
+    pygame.draw.line(game.screen, (18, 18, 22),
+                     (0, bar.bottom - 1), (bar.right, bar.bottom - 1), BORD_WIDTH - 4)
 
 
 def draw_trial_box(game):
@@ -3603,67 +3508,78 @@ def draw_trial_options(game, box):
 
 
 def draw_score_display(game):
-    """Draw the chips / mult / total / required score panel above the marble box."""
-    cx = MARBLE_BOX_COORDS[0] + MARBLE_BOX_COORDS[2] // 2  # center of the marble box
-    top = MARBLE_BOX_COORDS[1]
+    """Draw the chips / mult / total / required score readout in the top bar.
 
-    # Required score sits above the total, with distance and time on either side.
+    The readout used to sit above the board; the board now fills everything
+    under the bar, so the score takes a fixed slice of the BAR itself (between
+    the run dots and the trial box) and is laid out inside it.
+    """
+    region = SCORE_PANEL_RECT
+    cx = region.centerx
+
+    # Required score sits at the top of the readout, with distance and time on
+    # either side of it.
     required = game.required_font.render(f"{game.required_score}", True, (255, 215, 0))
-    required_rect = required.get_rect(center=(cx, top - 84))
+    required_rect = required.get_rect(center=(cx, region.top + 26))
     game.screen.blit(required, required_rect)
+    label = game.tiny_font.render("REQUIRED", True, (255, 215, 0))
+    game.screen.blit(label, label.get_rect(midbottom=(cx, region.top + 6)))
 
     total_distance = sum(getattr(marble, "distance", 0.0) for marble in game.marbles)
     distance = game.small_font.render(f"DIST {int(total_distance)}", True, GREEN)
-    game.screen.blit(distance, distance.get_rect(midright=(cx - required_rect.width // 2 - 16, top - 84)))
+    game.screen.blit(distance, distance.get_rect(
+        midright=(region.centerx - required_rect.width // 2 - 10,
+                  required_rect.centery)))
 
     time_text = game.small_font.render(f"TIME {game.run_time:.1f}s", True, BLUE)
-    game.screen.blit(time_text, time_text.get_rect(midleft=(cx + required_rect.width // 2 + 16, top - 84)))
+    game.screen.blit(time_text, time_text.get_rect(
+        midleft=(region.centerx + required_rect.width // 2 + 10,
+                 required_rect.centery)))
 
     # Total score is the centerpiece (rounded to a tenth for display).
     total = game.total_font.render(_fmt_tenth(game.score_total), True, WHITE)
-    total_rect = total.get_rect(center=(cx, top - 50))
+    total_rect = total.get_rect(center=(cx, region.top + 66))
     game.screen.blit(total, total_rect)
 
     # Chips sit left of the total, mult sits right of it.
     chips = game.small_font.render(f"CHIPS {_fmt_tenth(game.score_chips)}", True, GREEN)
-    game.screen.blit(chips, chips.get_rect(midright=(cx - total_rect.width // 2 - 16, top - 50)))
+    game.screen.blit(chips, chips.get_rect(
+        midright=(region.centerx - total_rect.width // 2 - 10, total_rect.centery)))
 
     mult = game.small_font.render(f"MULT {_fmt_tenth(game.score_mult)}", True, BLUE)
-    game.screen.blit(mult, mult.get_rect(midleft=(cx + total_rect.width // 2 + 16, top - 50)))
+    game.screen.blit(mult, mult.get_rect(
+        midleft=(region.centerx + total_rect.width // 2 + 10, total_rect.centery)))
 
     # Unique component types touched and each score factor's normalized
-    # (0..1) effect on the exponent: distance, time, and uniqueness, shown
-    # directly above the marble box.
+    # (0..1) effect on the exponent: distance, time, and uniqueness.
     time_good, dist_good, uniq_good, unique_types = game._score_factors()
     uniq_label = game.small_font.render(f"UNIQUE {unique_types}", True, (255, 215, 0))
-    game.screen.blit(uniq_label, uniq_label.get_rect(center=(cx, top - 24)))
+    game.screen.blit(uniq_label, uniq_label.get_rect(center=(cx, region.top + 92)))
     factors = game.small_font.render(
         f"D {dist_good:.2f}  T {time_good:.2f}  U {uniq_good:.2f}", True, WHITE)
-    game.screen.blit(factors, factors.get_rect(center=(cx, top - 10)))
+    game.screen.blit(factors, factors.get_rect(center=(cx, region.top + 112)))
 
     # Resource points: "[N] points to next [block/card/component/action]" for
-    # each owned Parts/Shreds/Rubble/Ideas scorer. (The total cash and the last
-    # run's cash gain now live on the shop panel — see draw_shop.) The lines
-    # sit in the left margin, right-aligned to the board's left edge.
-    res_x = MARBLE_BOX_COORDS[0] - 10
-    y = MARBLE_BOX_COORDS[1] + 8
+    # each owned Parts/Shreds/Rubble/Ideas scorer, stacked under the readout.
+    y = region.top + 134
     for to_next, label in game._resource_display():
         res = game.tiny_font.render(
             f"{points_text(to_next)} point{'' if to_next <= 1 else 's'} "
             f"to next {label}", True, ORANGE)
-        game.screen.blit(res, res.get_rect(midright=(res_x, y)))
-        y += res.get_height() + 3
+        game.screen.blit(res, res.get_rect(center=(cx, y)))
+        y += res.get_height() + 2
 
 
 def draw_run_dots(game):
-    """Draw the 8x3 grid of run indicators above the actions display.
+    """Draw the 8x3 grid of run indicators in the top bar.
 
     Rounds go across (8 columns), each round's 3 runs go down (3 rows), and the
     24th (last) run therefore sits at the bottom right. A dot is gray when its
     run hasn't been played, green when the score target was met, and red when it
     wasn't. Every run reads alike now: the 24th used to be a boss run and stood
     out (black, gold or a deeper red), but it is an ordinary run since the
-    bosses became trials.
+    bosses became trials. The round/run count is spelled out under the dots, so
+    the bar says where the player is as well as how they got there.
     """
     x0, y0 = RUN_DOT_GRID
     for run_index in range(TOTAL_RUNS):
@@ -3678,238 +3594,15 @@ def draw_run_dots(game):
             color = GRAY
         pygame.draw.circle(game.screen, color, (cx, cy), RUN_DOT_RADIUS)
         pygame.draw.circle(game.screen, WHITE, (cx, cy), RUN_DOT_RADIUS, 1)
-
-
-def draw_toolbox(game):
-    """Draw the inventory panel: its grid, title, and its own furniture.
-
-    The panel is exactly as big as the inventory needs it — one cell per owned
-    slot, up to main.INVENTORY_MAX_COLS x main.INVENTORY_MAX_ROWS and never
-    larger — with the Spirit tokens in the entries right after the items (see
-    Game._token_rect), so a token always reads as part of the inventory rather
-    than something sitting beside it. The panel grows UP from its bottom edge
-    (see Toolbox.rect), so the SELL/UPGRADE buttons under it never move.
-
-    Three things frame it, all of them part of the panel rather than of the
-    play area:
-
-    * the SELECTION on the title strip: how many items are selected, and the
-      discards left this run. Every selected item is green-framed — thick for
-      the one IN HAND (the block a board click places, the piece just clicked),
-      thin for the rest (see Game._toggle_toolbox_selection), because a click
-      toggles an item and F discards the whole selection;
-    * the ARROW box on the panel's top-right edge (see
-      Game.inventory_page_button_rect), which turns the page while the
-      inventory holds more than the panel can show;
-    * the 1x1 box DIRECTLY BELOW that arrow (Game.inventory_view_button_rect),
-      which opens the whole inventory (see draw_inventory_overlay).
-    """
-    box = game.toolbox
-    rect = box.rect
-    draw_marble_box(game.screen, rect.x, rect.y, box.cols, box.rows,
-                    fill=panel_fill(game))
-
-    # Cells past the panel's capacity are NOT owned yet — a save starts at
-    # main.INVENTORY_START_SLOTS and the shop's Inventory Slot tile sells more
-    # (see Game._buy_inventory_slot) — so they are shaded rather than drawn as
-    # empty slots the player could fill.
-    first = box.first_shown()
-    for panel in range(box.per_page):
-        if first + panel >= box.capacity():
-            shade = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-            shade.fill((0, 0, 0, 110))
-            game.screen.blit(shade, box.cell_rect(panel))
-
-    # The inventory title sits left of the panel's TOP edge, the way the card
-    # and action areas label the rows above them (CARDS / ACTIONS), and it
-    # STAYS there while the mouse is over the inventory: the label is part of
-    # the panel's own furniture rather than a hint that has to get out of the
-    # cursor's way (only the board's title does that — see
-    # Game._show_marble_box_title).
-    title = game.small_font.render("INVENTORY", True, WHITE)
-    game.screen.blit(title, (rect.x + 8, rect.y - 14))
-    # The discards left this run (right-aligned on the same strip), and — left of
-    # it — how many items are SELECTED (see Game._toggle_toolbox_selection).
-    discards = getattr(game, "discards_left", 0)
-    selected = len(getattr(game, "selection", ()))
-    label = game.tiny_font.render(f"{discards} DISCARD", True,
-                                  (150, 150, 160) if discards <= 0 else WHITE)
-    right = rect.right - label.get_width() - 2
-    game.screen.blit(label, (right, rect.y - 13))
-    if selected:
-        picked = game.tiny_font.render(f"{selected} selected", True, GREEN)
-        game.screen.blit(picked, (right - picked.get_width() - 8,
-                                  rect.y - 13))
-
-    # Green border cells: every SELECTED item — the whole toggle selection, which
-    # is what F discards and what S assembles — with the item IN HAND (the block
-    # a board click places, the piece just clicked) marked by an inner ring so it
-    # is clear which of several selected items the action verbs act on. A
-    # component the code assigned directly (see Game._use_component) is framed
-    # too, exactly as it was before selection became a toggle. Index-based, so a
-    # duplicated component only lights up the exact cell that was clicked or
-    # assigned — not every cell holding the same object.
-    framed = [item for item in box.items if game.is_toolbox_selected(item)]
-    framed += list(game.assigned_toolbox_indexes)
-    active_index = None
-    si = game.selected_toolbox_index
-    if (si is not None and 0 <= si < len(box.items)
-            and box.items[si] is game.selected_toolbox_item):
-        active_index = si
-    elif game.selected_toolbox_item is not None:
-        active_index = next((index for index, item in enumerate(box.items)
-                             if item is game.selected_toolbox_item), None)
-    selected_indexes = {active_index} - {None}
-    for item in framed:
-        index = game.assigned_toolbox_indexes.get(item)
-        if not (index is not None and 0 <= index < len(box.items)
-                and box.items[index] is item):
-            index = next((i for i, shown in enumerate(box.items) if shown is item),
-                         None)
-        if index is not None:
-            selected_indexes.add(index)
-
-    # Gold border cells: the condition + scorer assigned to the card builder.
-    gold_indexes = set()
-    for comp, idx in getattr(game, "card_builder_indexes", {}).items():
-        if 0 <= idx < len(box.items) and box.items[idx] is comp:
-            gold_indexes.add(idx)
-        else:
-            try:
-                gold_indexes.add(box.items.index(comp))
-            except ValueError:
-                pass
-
-    # Only the page being shown has cells; an item on another page is reachable
-    # through the arrow box.
-    for panel, item in enumerate(box.shown_items()):
-        index = first + panel
-        cell = box.cell_rect(panel)
-        draw_shop_item(game.screen, item, cell)
-        if index in selected_indexes:
-            pygame.draw.rect(game.screen, GREEN, cell, 3)
-            # The item IN HAND wears an inner white ring on top of the green, so
-            # a multi-item selection still shows which one D/B/G and a click on
-            # the board act on.
-            if index == active_index:
-                pygame.draw.rect(game.screen, WHITE, cell.inflate(-8, -8), 1)
-        elif index in gold_indexes:
-            pygame.draw.rect(game.screen, (255, 215, 0), cell, 3)
-        # The subject of an active action (a toolbox block) is gold-outlined.
-        if (game.selected_action is not None and getattr(item, "kind", None) == "block"
-                and game.selected_action_subject is item):
-            pygame.draw.rect(game.screen, (255, 215, 0), cell, 3)
-
-    # The page arrow: the top-right cell of the panel, shown only while the
-    # inventory holds more than the panel can display. Clicking it (see
-    # Game._turn_inventory_page) shows the next page.
-    pages = box.page_count()
-    mouse = pygame.mouse.get_pos()
-    if pages > 1:
-        arrow = game.inventory_page_button_rect()
-        hovered = arrow.collidepoint(mouse)
-        _draw_inventory_side_box(game, arrow, draw_bottom=False)
-        pygame.draw.polygon(
-            game.screen, WHITE if hovered else (200, 200, 200),
-            ((arrow.centerx - 3, arrow.top + 7),
-             (arrow.centerx + 5, arrow.top + 13),
-             (arrow.centerx - 3, arrow.top + 19)))
-        count = game.tiny_font.render(f"{box.page + 1}/{pages}", True, WHITE)
-        game.screen.blit(count, count.get_rect(center=(arrow.centerx,
-                                                       arrow.bottom - 10)))
-
-    # The whole-inventory button: the cell directly below the arrow box, drawn
-    # as a panel cell of its own with a little grid on it (it shows the
-    # inventory, which is a grid). Hovering it lights the edges it owns — never
-    # the left one, which is the panel's own border (see
-    # _draw_inventory_side_box).
-    button = game.inventory_view_button_rect()
-    hovered = button.collidepoint(mouse)
-    _draw_inventory_side_box(game, button, hovered=hovered)
-    for gx in range(3):
-        for gy in range(3):
-            pygame.draw.rect(
-                game.screen, WHITE if hovered else (200, 200, 200),
-                (button.x + 9 + gx * 8, button.y + 9 + gy * 8, 5, 5))
-
-
-def _draw_inventory_side_box(game, rect, draw_bottom=True, hovered=False):
-    """Draw one of the inventory's own 1x1 boxes hanging off its right edge.
-
-    Only the edges the box OWNS are drawn. Its LEFT edge is the panel's own
-    right edge — user request: don't draw it, so the two boxes never stack a
-    second wall of border on top of the inventory box ("including the left edge
-    of the box for showing the full inventory"). The line between the page arrow
-    and the whole-inventory box below it is drawn ONCE, by the box underneath:
-    the arrow passes ``draw_bottom=False`` and the view box's top edge is that
-    shared line.
-
-    ``hovered`` lights those same edges white. The highlight runs along the very
-    rows/columns the thick border is drawn on (the box's own outer edge, not a
-    second rectangle inset from it), so it frames the box instead of floating
-    inside it.
-    """
-    pygame.draw.rect(game.screen, panel_fill(game), rect)
-    edge = (30, 30, 30)
-    highlight = WHITE if hovered else edge
-    # The three edges as (row, column, thickness) so the border and the hover
-    # highlight can never drift apart.
-    right_x = rect.right + BORD_WIDTH // 2
-    top_y = rect.top - BORD_WIDTH // 2 - 1
-    bottom_y = rect.bottom + BORD_WIDTH // 2
-    pygame.draw.line(game.screen, edge, (right_x, rect.top - BORD_WIDTH),
-                     (right_x, rect.bottom + BORD_WIDTH), BORD_WIDTH + 1)
-    pygame.draw.line(game.screen, edge, (rect.left, top_y),
-                     (rect.right, top_y), BORD_WIDTH)
-    if draw_bottom:
-        pygame.draw.line(game.screen, edge, (rect.left, bottom_y),
-                         (rect.right, bottom_y), BORD_WIDTH + 1)
-    if not hovered:
-        return
-    # White lines on the middle of each band: 2px, so they read on top of the
-    # 6-7px border they trace.
-    pygame.draw.line(game.screen, highlight, (right_x, rect.top - BORD_WIDTH),
-                     (right_x, rect.bottom + BORD_WIDTH), 2)
-    pygame.draw.line(game.screen, highlight, (rect.left, top_y),
-                     (rect.right, top_y), 2)
-    if draw_bottom:
-        pygame.draw.line(game.screen, highlight, (rect.left, bottom_y),
-                         (rect.right, bottom_y), 2)
-
-
-def draw_cards(game):
-    """Draw the owned cards in the area above the toolbox (max game.max_cards).
-
-    Owned cards render as mini playing cards; empty slots show a card back.
-    The card currently selected for selling gets a green outline. The area is
-    one slot smaller while the Essence card is owned (see Game.max_cards), so
-    the tray and the slots both follow the game's own size.
-
-    The tray's own background is BLACK (rather than the marble-box colour the
-    other panels use), and so are the empty slots' backs (see draw_card_back),
-    so nothing but the cards and the back design shows in the area.
-    """
-    x, y = CARD_AREA_COORDS[0], CARD_AREA_COORDS[1]
-    slots = game.max_cards
-    draw_marble_box(game.screen, x, y, slots, 1, fill=BLACK)
-    title = game.small_font.render("CARDS", True, WHITE)
-    game.screen.blit(title, (x + 8, y - 14))
-    for i in range(slots):
-        rect = pygame.Rect(x + i * GRID_SIZE, y, GRID_SIZE, GRID_SIZE)
-        if i < len(game.cards):
-            draw_card(game.screen, game.cards[i], rect,
-                      selected=game.selected_toolbox_item is game.cards[i])
-            # The subject of an active action (an owned card) is gold-outlined.
-            if (game.selected_action is not None
-                    and game.selected_action_subject is game.cards[i]):
-                pygame.draw.rect(game.screen, (255, 215, 0), rect, 3, border_radius=6)
-            # A card disabled by the Card cutter / deal breaker trial is dimmed.
-            if game._card_disabled(game.cards[i]):
-                overlay = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-                overlay.fill((0, 0, 0, 120))
-                game.screen.blit(overlay, rect)
-        else:
-            draw_card_back(game.screen, rect)
+    heading = game.tiny_font.render("ROUND / RUN", True, WHITE)
+    game.screen.blit(heading, heading.get_rect(
+        midbottom=(RUN_DOT_GRID[0] + 4 * RUN_DOT_DX, RUN_DOT_GRID[1] - 14)))
+    where = game.small_font.render(
+        f"Round {min(game.round_index + 1, ROUND_COUNT)}/{ROUND_COUNT}  "
+        f"Run {min(game.run_in_round + 1, RUNS_PER_ROUND)}/{RUNS_PER_ROUND}",
+        True, (255, 215, 0))
+    game.screen.blit(where, where.get_rect(
+        midtop=(RUN_DOT_GRID[0] + 4 * RUN_DOT_DX, RUN_DOT_GRID[1] + 3 * RUN_DOT_DY + 6)))
 
 
 def draw_token(screen, token, rect):
@@ -3952,22 +3645,40 @@ def _token_visual(token, rect):
 
 
 def draw_tokens(game):
-    """Draw the Spirit tokens, in the inventory entries after the items.
+    """Draw the Spirit tokens where they lie on the board.
 
-    A token is part of the inventory rather than an area of its own (see
-    Game._token_rect), so each is drawn in its own cell of the inventory grid,
-    which draw_toolbox has already drawn the panel for. One block per token
-    (see ScorerToken) — the block the token kept, drawn as it was on the
-    board. Each fires once per run it covers, as if the marble had collided
-    with it: the payoffs that belong to the run's start fire then, and a
-    multiplier block is held for the run's END instead (see ScorerToken).
-    A token on a page the panel is not showing has no cell to draw in (see
-    Game._token_rect) and is skipped until its page is turned to.
+    A token is part of what the player owns, so it stands on a board square like
+    every other item (see Game._token_rect) and is drawn there as the block it
+    kept (see ScorerToken). Each fires once per run it covers, as if the marble
+    had collided with it: the payoffs that belong to the run's start fire then,
+    and a multiplier block is held for the run's END instead (see ScorerToken).
     """
     for i, token in enumerate(game.tokens):
         rect = game._token_rect(i)
         if rect is not None:
             draw_token(game.screen, token, rect)
+
+
+def draw_action_upgrade_button(game):
+    """Draw the UPGRADE button for the selected action (see Game._upgrade_action).
+
+    The action row it used to sit beside is gone — actions lie on the board now
+    — so the button keeps its own small tile in the right-hand column, and it is
+    drawn only while an action is selected, which is exactly when it can be
+    clicked.
+    """
+    action = game.selected_action
+    if action is None:
+        return
+    rect = ACTION_UPGRADE_RECT
+    pygame.draw.rect(game.screen, (60, 60, 90), rect)
+    pygame.draw.rect(game.screen, WHITE, rect, 2)
+    label = game.tiny_font.render("UP", True, WHITE)
+    game.screen.blit(label, label.get_rect(center=(rect.centerx, rect.centery - 4)))
+    price = game.tiny_font.render(f"${game._inflated(ACTION_UPGRADE_COST)}", True,
+                                  WHITE if game.cash >= game._inflated(ACTION_UPGRADE_COST)
+                                  else RED)
+    game.screen.blit(price, price.get_rect(center=(rect.centerx, rect.centery + 9)))
 
 
 def draw_inaccessible(game):
@@ -3989,149 +3700,36 @@ def draw_inaccessible(game):
     game.screen.blit(label, (x, y + len(game.inaccessible) * GRID_SIZE + 4))
 
 
-def draw_action_area(game):
-    """Draw the owned actions above the toolbox (max game.max_actions).
-
-    Owned actions render as mini cards with a v1/v2 tag (a gold frame and a
-    gold plate for the upgraded ones — see draw_action); empty slots show the
-    same slot back the card tray uses (see draw_card_back). The selected action
-    gets a green outline, and its upgrade button appears beside the area
-    (v1 -> v2 for ACTION_UPGRADE_COST).
-
-    The row is its own line in the panel column, left-aligned with the card tray
-    and growing rightwards as the Foresight action widens it (see
-    Game.action_area_x), so the upgrade button beside it never has to move. When
-    the player holds more actions than fit on the line — the slots up to that
-    button, see ACTION_BAND_SLOTS — the last slot is a PAGER instead of an
-    action, which keeps a widened or unlimited action area usable (see
-    Game.action_row_window).
-
-    The row's own background is BLACK, the same as the card tray's (see
-    draw_cards), so the two trays read as one black panel column behind their
-    cards and slot backs.
-    """
-    x, y = game.action_area_x(), ACTION_AREA_COORDS[1]
-    slots = game.action_slots_shown()
-    start, count, paging = game.action_row_window()
-    draw_marble_box(game.screen, x, y, slots, 1, fill=BLACK)
-    title = game.small_font.render("ACTIONS", True, WHITE)
-    game.screen.blit(title, (x + 8, y - 14))
-    for i in range(slots):
-        rect = game.action_slot_rect(i)
-        if i < count:
-            action = game.actions[start + i]
-            draw_action(game.screen, action, rect,
-                        selected=game.selected_action is action)
-        elif paging and i == slots - 1:
-            # The pager, on the same slot back the empty slots use: a forward
-            # arrow and which page of how many is on show. Clicking it turns
-            # the row (see Game.action_area_pager_at / _page_action_row).
-            draw_card_back(game.screen, rect)
-            mid = rect.center
-            pygame.draw.polygon(game.screen, YELLOW,
-                                [(mid[0] - 4, mid[1] - 7),
-                                 (mid[0] + 6, mid[1] - 1),
-                                 (mid[0] - 4, mid[1] + 5)])
-            pages = -(-len(game.actions) // max(1, slots - 1))
-            label = game.tiny_font.render(f"{game.action_area_page % pages + 1}/{pages}",
-                                          True, YELLOW)
-            game.screen.blit(label, (rect.right - label.get_width() - 1,
-                                     rect.bottom - label.get_height() - 1))
-        else:
-            draw_card_back(game.screen, rect)
-    # The upgrade button shows while an action is selected.
-    action = game.selected_action
-    if action is not None and action in game.actions:
-        btn = ACTION_UPGRADE_RECT
-        if action.version >= 2:
-            text, affordable = "MAXED (v2)", False
-        else:
-            # The inflation trial raises the action-upgrade fee.
-            cost = game._inflated(ACTION_UPGRADE_COST)
-            text = f"UPGRADE ${cost}"
-            affordable = game.cash >= cost
-        pygame.draw.rect(game.screen, (70, 70, 200) if affordable else (90, 90, 90), btn)
-        pygame.draw.rect(game.screen, WHITE, btn, 2)
-        label = game.small_font.render(text, True,
-                                       WHITE if affordable else (255, 120, 120))
-        game.screen.blit(label, label.get_rect(center=btn.center))
-
-
-def draw_sell_overlay(game):
-    """Draw a SELL overlay on the toolbox's bottom-right cell when an item is selected."""
-    item = game.selected_toolbox_item
-    if item is None:
-        return
-    if item not in game.toolbox.items:
-        return  # a placed block selected in the marble box isn't sellable
-    rect = game.sell_overlay_rect()
-    overlay = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-    # The run's role blocks (Start/Finish) can never be sold: their cell shows
-    # a plain refusal instead of a price (see Game._unsellable).
-    unsellable = game._unsellable(item)
-    overlay.fill((90, 90, 95, 200) if unsellable else (200, 30, 30, 200))
-    game.screen.blit(overlay, rect)
-    pygame.draw.rect(game.screen, WHITE, rect, 2)
-    text1 = game.tiny_font.render("SELL[B]", True, WHITE)
-    if unsellable:
-        price_text, price_color = "NO SALE", (200, 200, 200)
-    else:
-        total_price = game._total_price(item)
-        total_price = total_price if total_price else item.price
-        price_text = f"${int(total_price * game._sell_fraction())}"
-        price_color = YELLOW
-    text2 = game.tiny_font.render(price_text, True, price_color)
-    game.screen.blit(text1, text1.get_rect(center=(rect.centerx, rect.top + 13)))
-    game.screen.blit(text2, text2.get_rect(center=(rect.centerx, rect.bottom - 13)))
-
-
-def draw_upgrade_overlay(game):
-    """Draw an UPGRADE overlay (trigger-limit cost) on the toolbox cell left of
-    the SELL cell when a block is selected."""
-    item = game.selected_toolbox_item
-    if item is None or not isinstance(item, (Block, BlockItem)):
-        return
-    if item not in game.toolbox.items:
-        return  # a placed block selected in the marble box isn't sellable/upgradeable here
-    rect = game.upgrade_overlay_rect()
-    cost = game._trigger_upgrade_cost(item)
-    affordable = game.cash >= cost
-    overlay = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
-    overlay.fill((70, 70, 200, 200) if affordable else (90, 90, 90, 200))
-    game.screen.blit(overlay, rect)
-    pygame.draw.rect(game.screen, WHITE, rect, 2)
-    text1 = game.tiny_font.render("UP[D]", True, WHITE)
-    text2 = game.tiny_font.render(f"${cost}", True, YELLOW if affordable else (255, 120, 120))
-    game.screen.blit(text1, text1.get_rect(center=(rect.centerx, rect.top + 13)))
-    game.screen.blit(text2, text2.get_rect(center=(rect.centerx, rect.bottom - 13)))
-
-
 def last_run_cash_rect(game):
     """The screen rect of the shop's "Last run cash gained" readout.
 
     The readout is what the player hovers to see where the last run's cash
     came from (Game._info_target_at turns it into a hover target), so the rect
-    is measured here and shared by the drawing and the hit test.
+    is measured here and shared by the drawing and the hit test. It sits on the
+    cash header row, right-aligned to the re-roll button so the two never
+    overlap.
     """
     text = game.small_font.render(
         f"Last run cash gained: {game.last_run_cash_gained}", True, GREEN)
-    return text.get_rect(topright=(game.shop.rect.right - 8, game.shop.rect.y + 8))
+    return text.get_rect(topright=(SHOP_REFRESH_BUTTON_RECT.left - 8,
+                                   game.shop.rect.y + 8))
 
 
 def shop_message_layout(game, message):
     """Lay a shop message out in the shop panel's bottom strip.
 
     The message lives in the band between the SHOP title (bottom-left) and the
-    REFRESH button (bottom-right), so it never covers the cash header or the
-    shop items. A message that fits the gap is one small-font line; a wider one
-    wraps onto up to two tiny-font lines. Returns (lines, rect): the rendered
-    line surfaces and the rect they are centred on.
+    panel's right edge, on the panel's last row, so it never covers the cash
+    header, the offers or their prices. A message that fits the gap is one
+    small-font line; a wider one wraps onto up to two tiny-font lines. Returns
+    (lines, rect): the rendered line surfaces and the rect they are centred on.
     """
     shop = game.shop.rect
     left = shop.x + 8 + game.font.size("SHOP")[0] + 8
-    right = SHOP_REFRESH_BUTTON_RECT.left - 8
+    right = shop.right - 8
     gap = max(60, right - left)
-    center = ((left + right) // 2, SHOP_REFRESH_BUTTON_RECT.centery)
+    strip_y = shop.bottom - GRID_SIZE // 2 - 2
+    center = ((left + right) // 2, strip_y)
     msg = game.small_font.render(message, True, YELLOW)
     if msg.get_width() <= gap:
         return [msg], msg.get_rect(center=center)
@@ -4242,28 +3840,6 @@ def draw_shop(game):
     bu_center_x = bcell.centerx
     bu_price_y = shop.rect.y + (BOARD_UNIT_ROW + 1) * GRID_SIZE + GRID_SIZE // 2
     game.screen.blit(bu_price, bu_price.get_rect(center=(bu_center_x, bu_price_y)))
-
-    # The shop's always-present Inventory Slot tile (the cell right of the Board
-    # Unit tile): $30 buys the inventory panel one more slot, for good (see
-    # Game._buy_inventory_slot). The little grid on it reads as inventory cells,
-    # and the current slot count sits under the price.
-    icell = pygame.Rect(shop.rect.x + INVENTORY_SLOT_COL * GRID_SIZE,
-                        shop.rect.y + INVENTORY_SLOT_ROW * GRID_SIZE,
-                        GRID_SIZE, GRID_SIZE)
-    pygame.draw.rect(game.screen, (60, 70, 110), icell)
-    pygame.draw.rect(game.screen, WHITE, icell, 2)
-    for gx in range(2):
-        for gy in range(2):
-            pygame.draw.rect(game.screen, (255, 255, 255),
-                             (icell.x + 9 + gx * 11, icell.y + 8 + gy * 11, 9, 9), 1)
-    pygame.draw.line(game.screen, (255, 255, 255), (icell.centerx, icell.y + 30),
-                     (icell.centerx, icell.y + 36), 2)
-    pygame.draw.line(game.screen, (255, 255, 255), (icell.centerx - 3, icell.y + 33),
-                     (icell.centerx + 3, icell.y + 33), 2)
-    is_price = game.small_font.render(f"${INVENTORY_SLOT_PRICE}", True, WHITE)
-    game.screen.blit(is_price, is_price.get_rect(
-        center=(icell.centerx, shop.rect.y + (INVENTORY_SLOT_ROW + 1) * GRID_SIZE
-                + GRID_SIZE // 2)))
 
     if game.shop_message:
         lines, rect = shop_message_layout(game, game.shop_message)
@@ -4470,6 +4046,25 @@ def _draw_difficulty_picker(game):
         surf = game.tiny_font.render(line, True, (220, 220, 220))
         game.screen.blit(surf, (30, y))
         y += 14
+
+
+def _draw_marble_camera(game, marble):
+    """Draw a marble where the CAMERA puts it (see Game.camera).
+
+    The marble's position is world pixels, so the camera offset is applied to it
+    for the length of the call and taken off again straight after: the
+    simulation's idea of where the marble is never changes, only where it is
+    seen.
+    """
+    cam = game.camera
+    if cam == (0, 0):
+        draw_marble(marble, game.screen, fire=game.fire_intensity)
+        return
+    marble.position = marble.position - np.array(cam, dtype=float)
+    try:
+        draw_marble(marble, game.screen, fire=game.fire_intensity)
+    finally:
+        marble.position = marble.position + np.array(cam, dtype=float)
 
 
 def draw_marble_select(game):

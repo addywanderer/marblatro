@@ -249,24 +249,25 @@ class RunsTests(GameTestCase):
         self.game.touched_scorers = {main.Scorer.CHIPS_ADD}  # 3 unique types
 
         time_good, dist_good, uniq_good, _ = self.game._score_factors()
-        exponent = (time_good / 2 + dist_good + uniq_good) * (4 / 5)
+        # The exponent is half the three factors plus a flat 0.5, so it runs
+        # from 0.5 (nothing) to 2 (everything, all three at their ceiling).
+        exponent = 0.5 + (time_good + dist_good + uniq_good) / 2
 
         # The total keeps its fractional value internally (rounded only on
         # display), so it equals the raw float base ** exponent.
         self.assertEqual(self.game._compute_total_score(), 300 ** exponent)
 
 
-    def test_compute_total_score_floor_is_base_to_min_exponent(self):
-        # No time/distance/uniqueness -> the exponent drops to ~0, so the
-        # score is base ** ~0, essentially 1 (the minimum a run can score).
-        # The total is a float now (rounded only on display), so it can sit a
-        # hair above 1.0 rather than truncating to exactly 1.
+    def test_compute_total_score_collapses_on_a_hopelessly_slow_run(self):
+        # Time is the only factor the run itself can push negative: far past the
+        # ideal time the quadratic penalty drags the exponent under 0, so the
+        # total collapses toward zero and the run cannot clear any real target.
         self.game.score_chips = 50
         self.game.score_mult = 2
         self.game.run_time = 1e6  # far from the ideal time
         total = self.game._compute_total_score()
-        self.assertAlmostEqual(total, 1.0)
-        self.assertGreaterEqual(total, 1.0)
+        self.assertLess(total, 1.0)
+        self.assertGreaterEqual(total, 0.0)
 
 
     def test_compute_total_score_guards_zero_base(self):
@@ -310,23 +311,19 @@ class RunsTests(GameTestCase):
 
         self.assertEqual(unique_types,
                          len(main.Shape.ORDER) + len(main.Effect.ORDER) + len(main.Scorer.ORDER))
-        # Time peaks just below 1.0 (its modulator makes a zero-length run
-        # score 0 on time) and distance saturates toward (but never exceeds)
-        # 1.0 via arctan. Uniqueness is LINEAR: uniq_good = unique_types /
-        # UNIQUE_SCALE, so it can exceed 1.0 when more than UNIQUE_SCALE types
-        # are touched (UNIQUE_SCALE is 1/2 the total component count).
-        self.assertAlmostEqual(time_good, 875 / 884, places=6)
-        for value in (time_good, dist_good):
+        # Every factor is normalized to 0..1: time is 1 across its whole
+        # ideal window, and distance and uniqueness saturate toward (but never
+        # reach) 1.0 via arctan.
+        self.assertEqual(time_good, 1.0)
+        for value in (time_good, dist_good, uniq_good):
             self.assertGreaterEqual(value, 0.0)
             self.assertLessEqual(value, 1.0)
-        self.assertEqual(uniq_good, unique_types / main.UNIQUE_SCALE)
         self.assertGreater(dist_good, 0.0)
-        self.assertLess(dist_good, 1.0)
-        self.assertGreater(uniq_good, 1.0)  # more than UNIQUE_SCALE types touched
-        # A zero-length run scores 0 on time (the modulator's purpose).
+        self.assertGreater(uniq_good, 0.0)
+        # A zero-length run counts as the fastest possible run.
         self.game.run_time = 0.0
         time_zero, _, _, _ = self.game._score_factors()
-        self.assertAlmostEqual(time_zero, 0.0, places=6)
+        self.assertAlmostEqual(time_zero, 1.0, places=6)
 
 
     def test_marble_accumulates_distance(self):
@@ -826,26 +823,24 @@ class RunsTests(GameTestCase):
         self.assertIn((cx, cy), self.game.visited_cells)
 
 
-    def test_visited_units_ignore_the_off_board_and_clear_each_run(self):
+    def test_visited_units_follow_the_marble_across_every_square(self):
         marble = self._add_marble(
             position=(main.MARBLE_BOX_COORDS[0] + 20, main.MARBLE_BOX_COORDS[1] + 20))
         self.game._note_visited_cell(marble)
         self.assertEqual(self.game.visited_cells, {(0, 0)})
-        # A unit outside the grid is not a board unit, and a marble flung past
-        # an edge records only the units its BODY still reaches into — here, with
-        # its centre 5px past the left edge, only the edge unit it is still
-        # hanging into (see _marble_overlaps_cell).
+        # The board is infinitely large, so a unit past the window's left edge
+        # is a real unit: a marble hanging over the edge records both the unit
+        # its body is still in and the one it has just reached.
         marble.position = np.array(
             [main.MARBLE_BOX_COORDS[0] - 5.0, main.MARBLE_BOX_COORDS[1] + 20.0])
         self.game._note_visited_cell(marble)
-        self.assertEqual(self.game.visited_cells, {(0, 0)})
-        # A whole marble's width clear of the board is in no unit at all, so it
-        # records nothing.
+        self.assertEqual(self.game.visited_cells, {(0, 0), (-1, 0)})
+        # However far it is flung, the units it reaches into are recorded.
         marble.position = np.array(
-            [main.MARBLE_BOX_COORDS[0] - 2 * main.MARBLE_RADIUS,
+            [main.MARBLE_BOX_COORDS[0] - 3 * main.GRID_SIZE + 20.0,
              main.MARBLE_BOX_COORDS[1] + 20.0])
         self.game._note_visited_cell(marble)
-        self.assertEqual(self.game.visited_cells, {(0, 0)})
+        self.assertIn((-3, 0), self.game.visited_cells)
 
     def test_visited_units_are_every_unit_the_marble_reaches_into(self):
         # The measure is the user's "any point of the marble inside any point of
@@ -988,17 +983,21 @@ class RunsTests(GameTestCase):
 
 
     def test_long_run_doubles_ideal_time(self):
-        # With Long run, the time factor peaks at double the ideal time and is
-        # off-peak at the normal ideal time.
+        # With Long run the full-credit window lasts twice as long, so a run at
+        # double the normal ideal time still earns the whole time contribution
+        # where a normal run has already started to pay for its length.
+        self.game.run_time = main.TIME_IDEAL * 2
+        normal, _, _, _ = self.game._score_factors()
         self.game.trials_enabled = True
         self.game.current_trial = main.Trial.LONG_RUN
-        self.game.run_time = main.TIME_IDEAL * 2
         peak, _, _, _ = self.game._score_factors()
-        self.game.run_time = main.TIME_IDEAL
-        off_peak, _, _, _ = self.game._score_factors()
-        self.assertGreater(peak, 0.9)
-        self.assertGreater(peak, off_peak)
-        self.assertLess(off_peak, 0.5)
+        self.assertEqual(peak, 1.0)
+        self.assertGreater(peak, normal)
+        # Past the doubled window it pays for its length too, just more slowly.
+        self.game.run_time = main.TIME_IDEAL * 3
+        long_off_peak, _, _, _ = self.game._score_factors()
+        self.assertLess(long_off_peak, peak)
+        self.assertGreater(long_off_peak, 0.5)
 
 
     def test_repeats_only_counts_types_only_once_touched_twice(self):

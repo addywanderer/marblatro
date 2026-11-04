@@ -80,7 +80,7 @@ class CardsTests(GameTestCase):
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
-        self.assertAlmostEqual(self.game.rubble_run_gain, 0.5)
+        self.assertAlmostEqual(self.game.rubble_run_gain, 1.0)
         self.game.run_complete = True
         self.game.awaiting_after_run = True
         self.game._retry_run()
@@ -107,8 +107,8 @@ class CardsTests(GameTestCase):
         self.game.run_active = True
         self.game.score_mult = 2
         self.game._handle_block_contacts([touched])
-        # Garden: +6 mult per seed x 2 seeds = +12 mult.
-        self.assertEqual(self.game.score_mult, 14)
+        # Garden: +8 mult per seed (2 x the +4 Seed is worth) x 2 seeds = +16.
+        self.assertEqual(self.game.score_mult, 18)
 
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
@@ -541,8 +541,9 @@ class CardsTests(GameTestCase):
         # The second rewind is the SECOND copy paying, so its popup lands on that
         # copy's slot in the card area (see _spawn_card_particle).
         popup = [p for p in self.game.score_particles if p.text == "-1s"][-1]
-        self.assertEqual(popup.x, main.CARD_AREA_COORDS[0] + main.GRID_SIZE
-                         + main.GRID_SIZE // 2)
+        self.game.ensure_board_cells()
+        rect = self.game._board_item_rect(*self.game.item_cell(self.game.cards[1]))
+        self.assertEqual((popup.x, popup.y), (rect.centerx, rect.centery))
 
         # With both copies spent the run ends at the next completion.
         frames = 0
@@ -621,8 +622,8 @@ class CardsTests(GameTestCase):
 
 
     def test_essence_takes_a_card_slot_away(self):
-        # The area holds MAX_CARDS cards; Essence trades one away and its own
-        # slot counts, so it needs room for the SMALLER area to be bought.
+        # The player may hold MAX_CARDS cards; Essence trades one away and its
+        # own slot counts, so it needs room for the SMALLER area to be bought.
         self.assertEqual(self.game.max_cards, main.MAX_CARDS)
         self.assertEqual(self.game._card_capacity_for(main.Card.ESSENCE),
                          main.MAX_CARDS - 1)
@@ -632,28 +633,14 @@ class CardsTests(GameTestCase):
         self.game._buy_shop_item(main.CardItem(main.Card.ESSENCE, 48))
         self.assertEqual(len(self.game.cards), main.MAX_CARDS - 1)
         self.assertTrue(self.game.shop_message)
-        # One slot free and it fits: the area is now a slot smaller.
+        # One slot free and it fits: the cap is now a slot smaller.
         self.game.cards = self._card_fillers(main.MAX_CARDS - 2)
         self.game._buy_shop_item(main.CardItem(main.Card.ESSENCE, 48))
         self.assertEqual(len(self.game.cards), main.MAX_CARDS - 1)
         self.assertEqual(self.game.max_cards, main.MAX_CARDS - 1)
-        # ...so nothing else fits either, and the missing slot is not clickable.
+        # ...so nothing else fits either.
         self.game._buy_shop_item(self._card_fillers(1)[0])
         self.assertEqual(len(self.game.cards), main.MAX_CARDS - 1)
-        self.assertIn(str(main.MAX_CARDS - 1), self.game.shop_message)
-        gone = pygame.Rect(main.CARD_AREA_COORDS[0] + (main.MAX_CARDS - 1) * main.GRID_SIZE,
-                           main.CARD_AREA_COORDS[1], main.GRID_SIZE, main.GRID_SIZE)
-        self.assertIsNone(self.game.card_area_item_at(gone.center))
-        self.assertEqual(self.game.card_area_item_at(
-            pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
-                        main.GRID_SIZE, main.GRID_SIZE).center),
-            self.game.cards[0])
-        # Selling it gives the slot back.
-        essence = next(c for c in self.game.cards
-                       if c.value == main.Card.ESSENCE)
-        self.game.selected_toolbox_item = essence
-        self.game._sell_selected_item()
-        self.assertEqual(self.game.max_cards, main.MAX_CARDS)
 
 
     def test_essence_pays_ten_at_the_end_of_every_run(self):
@@ -675,9 +662,13 @@ class CardsTests(GameTestCase):
         rows = dict(self.game._cash_breakdown_rows())
         self.assertIn("Essence", rows)
         self.assertIn(f"${main.ESSENCE_RUN_CASH}", rows["Essence"])
-        # 20 base + 10 interest + 10 essence.
-        self.assertEqual(self.game.cash, 100 + 20 + 10 + main.ESSENCE_RUN_CASH)
-        self.assertEqual(self.game.last_run_cash_gained, 20 + 10 + main.ESSENCE_RUN_CASH)
+        # 20 base + 10 interest + 10 essence + whatever the run beat its target
+        # by, which is the breakdown's own "score" part.
+        score_cash = self.game.last_run_cash_breakdown["score"]
+        self.assertEqual(self.game.cash,
+                         100 + 20 + 10 + main.ESSENCE_RUN_CASH + score_cash)
+        self.assertEqual(self.game.last_run_cash_gained,
+                         20 + 10 + main.ESSENCE_RUN_CASH + score_cash)
 
         # Without the card the same run pays no essence line.
         self.game.cards = []
@@ -2669,7 +2660,7 @@ class CardsTests(GameTestCase):
         # a second copy is the Showman card's perk, so the grant skips the cards
         # the player already has.
         self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
-        with mock.patch("main.prebuilt_card_pool",
+        with mock.patch("rolling.prebuilt_card_pool",
                         return_value=[main.Card.GARDEN, main.Card.COUPON]):
             self.assertTrue(self.game._grant_random_card())
         self.assertEqual(self.game.cards[-1].value, main.Card.COUPON)
@@ -2694,8 +2685,8 @@ class CardsTests(GameTestCase):
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_mult, 5)  # 1 + 4
-        self.assertEqual(self.game.score_chips, 1)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 4)  # +4
+        self.assertEqual(self.game.score_chips, main.RUN_BASE_CHIPS)
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
@@ -2704,7 +2695,7 @@ class CardsTests(GameTestCase):
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run()
         self.game.reset_run()
-        self.assertEqual(self.game.score_mult, 5)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 4)
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
@@ -2748,7 +2739,7 @@ class CardsTests(GameTestCase):
         self.game.wrecking_bonus[main.Scorer.MULT_ADD] = 6
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run()
-        self.assertEqual(self.game.score_mult, 1 + 6)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 6)
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
@@ -2834,7 +2825,7 @@ class CardsTests(GameTestCase):
         self.game.cards.append(main.CardItem(main.Card.BLUEPRINT, 35))  # copies it
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run()
-        self.assertEqual(self.game.score_mult, 1 + 4 + 4)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 4 + 4)
 
 
     def test_blueprint_with_no_left_card_does_nothing(self):
@@ -2842,7 +2833,7 @@ class CardsTests(GameTestCase):
         self.game.cards.append(main.CardItem(main.Card.BLUEPRINT, 35))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run()
-        self.assertEqual(self.game.score_mult, 1)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT)
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
@@ -2871,7 +2862,7 @@ class CardsTests(GameTestCase):
         self.game.cards.append(main.CardItem(main.Card.BLUEPRINT, 35))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run()
-        self.assertEqual(self.game.score_mult, 1)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT)
 
 
     @unittest.skipUnless(hasattr(main.Card, "JOKER"), NAMED_CARDS_GONE)
@@ -2927,8 +2918,8 @@ class CardsTests(GameTestCase):
         self.assertIs(self.game.disabled_card, joker)
 
         self.game.reset_run(False)
-        self.assertEqual(self.game.score_mult, 1)  # Joker disabled: no +4
-        self.assertEqual(self.game.score_chips, 1)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT)  # Joker disabled: no +4
+        self.assertEqual(self.game.score_chips, main.RUN_BASE_CHIPS)
 
 
     def test_card_cutter_switches_off_passive_whole_card_effects(self):

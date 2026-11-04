@@ -93,7 +93,8 @@ class NewTrialTests(GameTestCase):
         # Every compass direction but down (the default gravity already pulls
         # that way, so "randomised" would mean nothing there).
         self.assertNotIn((0.0, 1.0), main.VERTIGO_DIRECTIONS)
-        self.assertGreater(len(main.VERTIGO_DIRECTIONS), 3)
+        self.assertEqual(set(main.VERTIGO_DIRECTIONS),
+                         {(0.0, -1.0), (-1.0, 0.0), (1.0, 0.0)})
         marble = self._run_under(main.Trial.VERTIGO)
         self.assertEqual(self.game.trial_gravity_dir, main.VERTIGO_DIRECTIONS[0])
         self.assertEqual(marble.base_gravity_dir, main.VERTIGO_DIRECTIONS[0])
@@ -824,18 +825,21 @@ class TrialsTests(GameTestCase):
 
 
     def test_speedrun_trial_halves_ideal_time(self):
-        # With Speedrun the time factor peaks at half the ideal time, so a run
-        # that takes TIME_IDEAL/2 scores the full time contribution while one
-        # taking the normal ideal time scores much less.
+        # With Speedrun the full-credit window is only half as long, so a run
+        # at the normal ideal time pays for its length where a normal run would
+        # still be at full credit.
+        self.game.run_time = main.TIME_IDEAL
+        normal, _, _, _ = self.game._score_factors()
+        self.assertEqual(normal, 1.0)
         self.game.trials_enabled = True
         self.game.current_trial = main.Trial.SPEEDRUN
+        off_peak, _, _, _ = self.game._score_factors()
+        self.assertLess(off_peak, normal)
+        # Half the ideal time is still full credit.
         self.game.run_time = main.TIME_IDEAL / 2
         peak, _, _, _ = self.game._score_factors()
-        self.game.run_time = main.TIME_IDEAL * 2  # well off the halved ideal
-        off_peak, _, _, _ = self.game._score_factors()
-        self.assertGreater(peak, 0.9)
+        self.assertEqual(peak, 1.0)
         self.assertGreater(peak, off_peak)
-        self.assertLess(off_peak, 0.5)
 
 
     def test_trial_change_never_offers_the_trial_already_running(self):

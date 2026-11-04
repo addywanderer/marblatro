@@ -201,7 +201,7 @@ def _named_card_units(game, measure):
     if measure == "fragile_breaks":
         return 1.0
     if measure == "few_blocks":
-        return 1.0 if len(game.grid) <= 5 else 0.0
+        return 1.0 if len(game.board_blocks()) <= 5 else 0.0
     if measure == "cozy":
         return 1.0 if len(getattr(game, "unlocked_cells", set())) <= 10 else 0.0
     if measure == "painting":
@@ -368,8 +368,8 @@ def island_group_count(game):
     An island is a group of unlocked units that reach each other through shared
     SIDES (up/down/left/right). Two groups that only touch at a CORNER are
     different islands — the corner between them is water — so a board cut along
-    a diagonal counts as two. The count is of GROUPS, not units: the starter
-    2x2 region is one island, and so is the whole board once it has been
+    a diagonal counts as two. The count is of GROUPS, not units: the starting
+    region is one island, and so is the whole board once it has been
     unlocked into one continent. A board with nothing unlocked has none.
 
     Counted with a flood fill rather than by walking the board in order, so a
@@ -416,7 +416,7 @@ def plain_rect_count(game):
     Game.grid at all (see Game._board_wall_blocks). A block with nothing but a
     scorer, or nothing but an effect, is not plain and pays nothing here.
     """
-    return sum(1 for block in game.grid.values()
+    return sum(1 for block in game.board_blocks()
                if block.shape == Shape.RECT
                and block.scorer == Scorer.NONE
                and all(effect == Effect.NONE for effect in block.effects))
@@ -454,7 +454,7 @@ def board_sell_total(game):
     (they are free, so they normally add nothing).
     """
     total = 0
-    for block in game.grid.values():
+    for block in game.board_blocks():
         # The block's own stored price; the helper materializes one for a block
         # that never got a stored value (see main.block_resale_price).
         total += max(0, block_resale_price(block))
@@ -605,7 +605,7 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         per_seed = amount
         if game._has_card(Card.GARDEN):
             per_seed *= 2
-        gained = per_seed * sum(1 for b in game.grid.values()
+        gained = per_seed * sum(1 for b in game.board_blocks()
                                 if b.scorer == Scorer.SEED)
         if gained <= 0:
             return
@@ -743,7 +743,7 @@ def _fire_block_payoff(game, card, scorer, amount, block, marble=None, air=None,
         _fire_airball(game, card, streak, fx, fy, block=block, amount=amount)
         return
     if scorer == Scorer.POWERLINE:
-        gained = amount * sum(1 for b in game.grid.values() if b.y == block.y)
+        gained = amount * sum(1 for b in game.board_blocks() if b.y == block.y)
         if gained > 0:
             game.score_chips += gained
             _pop(game, card, game._particle_amount_text(gained), GREEN, block, fx, fy)
@@ -762,8 +762,9 @@ def _fire_block_payoff(game, card, scorer, amount, block, marble=None, air=None,
             _pop(game, card, game._particle_amount_text(gained), BLUE, block, fx, fy)
         return
     if scorer == Scorer.CLUSTER:
+        neighbours = {(near.x, near.y) for near in game.board_blocks()}
         adjacent = sum(1 for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1))
-                       if (block.x + dx, block.y + dy) in game.grid)
+                       if (block.x + dx, block.y + dy) in neighbours)
         gained = amount * adjacent
         if gained > 0:
             game.score_mult += gained
@@ -1059,8 +1060,8 @@ def fullest_column_count(game):
     most blocks in it. The Pillar card grants +1 mult per block there.
     """
     counts = {}
-    for (gx, _) in game.grid:
-        counts[gx] = counts.get(gx, 0) + 1
+    for block in game.board_blocks():
+        counts[block.x] = counts.get(block.x, 0) + 1
     return max(counts.values()) if counts else 0
 
 
@@ -1075,7 +1076,7 @@ def owned_slippery_block_count(game):
     for item in game.toolbox.items:
         if getattr(item, "kind", None) == "block" and item.has_effect(Effect.SLIPPERY):
             count += 1
-    for block in game.grid.values():
+    for block in game.board_blocks():
         if block.has_effect(Effect.SLIPPERY):
             count += 1
     return count

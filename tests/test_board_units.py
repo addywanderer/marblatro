@@ -8,7 +8,7 @@ from tests.game_test_case import *  # noqa: F401,F403
 
 
 class BoardTests(unittest.TestCase):
-    """The dynamic board: a new game starts with a centered 2x2 unlocked region,
+    """The dynamic board: a new game starts with a centered unlocked region,
     locked squares are solid walls, and Board Units bought in the shop
     (BOARD_UNIT_PRICE) unlock any square. The unlocked state resets when a NEW
     game starts but
@@ -53,7 +53,7 @@ class BoardTests(unittest.TestCase):
             self.game.handle_events()
 
     def _start_locked_game(self):
-        """A brand-new game whose board is locked to the centered 2x2 region."""
+        """A brand-new game whose board is locked to its centered start region."""
         # Mirrors save_system.start_new_game_in_slot (no files are written).
         self.game.title_screen = False
         self.game.trials_enabled = False
@@ -94,10 +94,12 @@ class BoardTests(unittest.TestCase):
         self.assertFalse(g.is_cell_locked(0, 0))
         self.assertFalse(g.is_cell_locked(*self._far_corner()))
 
-    def test_new_game_locks_board_to_centered_2x2(self):
+    def test_new_game_locks_board_to_its_centered_start_region(self):
         g = self._start_locked_game()
-        self.assertEqual(main.BOARD_START_WIDTH, 2)
-        self.assertEqual(main.BOARD_START_HEIGHT, 2)
+        # The region is a real subset of the board, so there is a locked ring to
+        # buy open with Board Units.
+        self.assertLess(main.BOARD_START_WIDTH, main.GRID_WIDTH)
+        self.assertLess(main.BOARD_START_HEIGHT, main.GRID_HEIGHT)
         self.assertEqual(g.unlocked_cells, self._start_region())
         self.assertTrue(g.board_locked())
         self.assertEqual(g.board_units, 0)
@@ -117,6 +119,14 @@ class BoardTests(unittest.TestCase):
             abs(y0 - (main.GRID_HEIGHT - main.BOARD_START_HEIGHT - y0)), 1)
         self.assertLessEqual(
             abs(x0 - (main.GRID_WIDTH - main.BOARD_START_WIDTH - x0)), 1)
+        # Every item a new game hands the player lies on an unlocked square: the
+        # board IS the inventory, and a locked square can hold nothing.
+        self.assertTrue(g.owned_items())
+        for item in g.owned_items():
+            cell = g.item_cell(item)
+            self.assertIsNotNone(cell, item)
+            self.assertFalse(g.is_cell_locked(*cell), item)
+        self.assertEqual(g.toolbox.stash, [])
 
     def test_unlock_cell_works_on_any_square_and_rebuilds_walls(self):
         g = self._start_locked_game()
@@ -127,16 +137,15 @@ class BoardTests(unittest.TestCase):
         self.assertFalse(g.is_cell_locked(*far))
         # Unlocking an already-unlocked square reports False.
         self.assertFalse(g._unlock_cell(*far))
-        # The wall cache now covers every still-locked square (and none of the
-        # unlocked ones).
+        # The wall cache covers the FRONTIER: every locked square that shares an
+        # edge with an unlocked one. The board is infinite, so walling every
+        # locked square is impossible (and pointless) — a marble can only reach
+        # a locked square through the frontier.
         walls = g._board_wall_blocks()
-        locked = main.GRID_WIDTH * main.GRID_HEIGHT - len(g.unlocked_cells)
-        self.assertEqual(len(walls), locked)
         wall_cells = {(w.x, w.y) for w in walls}
-        self.assertEqual(wall_cells, {(x, y)
-                                      for x in range(main.GRID_WIDTH)
-                                      for y in range(main.GRID_HEIGHT)}
-                          - g.unlocked_cells)
+        self.assertEqual(wall_cells, set(g._locked_adjacent_cells()))
+        self.assertTrue(wall_cells)
+        self.assertFalse(wall_cells & g.unlocked_cells)
         self.assertTrue(all(getattr(w, "is_board_wall", False) for w in walls))
 
     def test_buy_board_unit_costs_eight_and_stacks_in_hand(self):
@@ -172,33 +181,41 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.board_units, 2)
         self.assertEqual(g.cash, 52)
 
-    def test_shop_layout_items_top_packs_and_board_unit_bottom(self):
+    def test_shop_layout_items_and_packs_share_the_offer_row(self):
         g = self._start_locked_game()
         g.shop.refresh()
-        # The top row is the shelf's "any item" slots: five of them, from the
+        # The offer row is the shelf's "any item" slots: five of them, from the
         # second column, each one offer of a drawn kind (see Pack.SHELF_WEIGHTS).
-        items = [i for i in g.shop.items if i.row == main.SHOP_ITEM_ROW]
+        items = [i for i in g.shop.items
+                 if getattr(i, "kind", None) != "pack"]
         self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
+        self.assertEqual([i.row for i in items], [main.SHOP_ITEM_ROW] * 5)
         self.assertTrue(all(
             getattr(i, "kind", None) in (main.Component.SHAPE,
                                           main.Component.EFFECT,
                                           main.Component.SCORER,
                                           "block", "card", "action")
             for i in items))
-        # The three packs sit on the lower row, left of the Board Unit.
-        packs = [i for i in g.shop.items if i.row == main.SHOP_PACK_ROW]
-        self.assertEqual([i.col for i in packs], [1, 2, 3])
-        self.assertTrue(all(i.kind == "pack" for i in packs))
-        # The middle row stays empty.
-        self.assertEqual([i for i in g.shop.items if i.row == 2], [])
-        # The Board Unit is on that lower row, and its cell holds no shop item.
+        # The three packs sit on the same row, to the right of the items and
+        # left of the Board Unit (the bar has room for one row of tiles).
+        packs = [i for i in g.shop.items if getattr(i, "kind", None) == "pack"]
+        self.assertEqual([i.col for i in packs],
+                         [main.SHOP_PACK_COL + n
+                          for n in range(main.SHOP_PACK_SLOTS)])
+        self.assertEqual([i.row for i in packs], [main.SHOP_PACK_ROW] * 3)
+        # The row under the offers carries the prices, and stays empty of stock.
+        self.assertEqual([i for i in g.shop.items
+                          if i.row == main.SHOP_ITEM_ROW + 1], [])
+        # The Board Unit shares the offer row, right of the packs, and its cell
+        # holds no shop item.
         tile = g._board_unit_tile()
         self.assertEqual((tile.x - g.shop.rect.x) // main.GRID_SIZE,
                          main.BOARD_UNIT_COL)
         self.assertEqual((tile.y - g.shop.rect.y) // main.GRID_SIZE,
                          main.BOARD_UNIT_ROW)
         self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
-        self.assertEqual(main.BOARD_UNIT_COL, main.SHOP_PACK_SLOTS + 1)
+        self.assertEqual(main.BOARD_UNIT_COL,
+                         main.SHOP_PACK_COL + main.SHOP_PACK_SLOTS)
         self.assertIsNone(g.shop.item_at((tile.centerx, tile.centery)))
 
     def test_clicking_locked_square_spends_a_board_unit(self):
@@ -217,6 +234,43 @@ class BoardTests(unittest.TestCase):
         self.assertTrue(g.is_cell_locked(1, 1))  # still locked
         self.assertEqual(g.board_units, 0)
         self.assertTrue(g.shop_message)  # a "buy a Board Unit" hint
+
+    def test_clicking_locked_square_unlocks_even_with_a_block_in_hand(self):
+        # A locked square is always an "unlock this" click: holding a block must
+        # not shadow it, or the player could never buy the board open.
+        g = self._start_locked_game()
+        g.cash = 60
+        g._buy_board_unit()
+        block = g.owned_items()[0]
+        g._equip_block(block)
+        self.assertTrue(g.has_selected)
+        self._click(self._cell_center(0, 0))
+        self.assertFalse(g.is_cell_locked(0, 0))
+        self.assertEqual(g.board_units, 0)
+        self.assertNotIn((0, 0), g.grid)  # nothing was put down
+        self.assertTrue(g.has_selected)   # the block stays in hand
+
+    def test_a_bought_offer_is_laid_out_on_the_board_not_on_its_shop_cell(self):
+        # An offer keeps the SHOP cell it was drawn in (its col/row) after it is
+        # bought, so laying items out from those numbers would drop a purchase
+        # onto whatever board square its price tag hung over — the board's locked
+        # top-left corner, for a block built at (0, 0). Every bought item gets a
+        # real board square instead (see Game.item_cell).
+        g = self._start_locked_game()
+        g.cash = 9999
+        bought = 0
+        for _ in range(3):
+            for offer in list(g.shop.items):
+                if getattr(offer, "kind", None) == "pack":
+                    continue
+                g._buy_shop_item(offer)
+                bought += 1
+                for owned in g.owned_items():
+                    cell = g.item_cell(owned)
+                    self.assertIsNotNone(cell, owned)
+                    self.assertFalse(g.is_cell_locked(*cell), owned)
+            g.shop.refresh()
+        self.assertGreater(bought, 0)
 
     def test_cannot_place_block_on_locked_square(self):
         g = self._start_locked_game()
@@ -242,9 +296,9 @@ class BoardTests(unittest.TestCase):
         g._unlock_cell(*self._far_corner())
         g.board_units = 3
         self.assertEqual(len(g.unlocked_cells), len(self._start_region()) + 2)
-        # Starting a NEW game returns the board to the centered 2x2 (units and
-        # expansions reset here; they only persist when the game is saved and
-        # its slot loaded).
+        # Starting a NEW game returns the board to its starting region (units
+        # and expansions reset here; they only persist when the game is saved
+        # and its slot loaded).
         save_system.start_new_game_in_slot(g, 1)
         self.assertEqual(g.unlocked_cells, self._start_region())
         self.assertEqual(g.board_units, 0)
@@ -283,7 +337,7 @@ class BoardTests(unittest.TestCase):
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_cozy_magnitude_card_fires_3x_base_on_a_small_board(self):
         g = self._start_locked_game()
-        # The 2x2 start is 4 unlocked units (10 or fewer), so a Cozy +Mult card
+        # A start region is 10 or fewer unlocked units, so a Cozy +Mult card
         # fires at the start of the run with its 3x base (+12 mult).
         value = main.condition_scorer_card(main.Condition.COZY, main.Scorer.MULT_ADD)
         g.cards.append(main.CardItem(value, 50))
@@ -309,7 +363,7 @@ class BoardTests(unittest.TestCase):
     def test_locked_adjacent_cells_are_the_reachable_frontier(self):
         g = self._start_locked_game()
         frontier = g._locked_adjacent_cells()
-        self.assertTrue(frontier)  # the 2x2 region has locked neighbors
+        self.assertTrue(frontier)  # the start region has locked neighbors
         for x, y in frontier:
             self.assertTrue(g.is_cell_locked(x, y))
             # Each candidate shares an edge with an unlocked square.
@@ -340,7 +394,7 @@ class BoardTests(unittest.TestCase):
         # run; the Conquistador card adds 4 more after each run. (Board stays
         # locked, so the grants expand the frontier.)
         g = self._start_locked_game()
-        before = len(g.unlocked_cells)  # the 4-cell 2x2 start
+        before = len(g.unlocked_cells)  # the start region
         g.drill_run_units = 2
         g.cards.append(main.CardItem(main.Card.CONQUISTADOR, 56))
         g.run_complete = True
@@ -430,7 +484,10 @@ class BoardTests(unittest.TestCase):
         # avoids.
         g = self._start_locked_game()
         before = set(g.unlocked_cells)
-        bomb = (5, 7)  # the start region's right-middle square
+        # A square on the edge of the start region, so the blast has locked
+        # neighbours of its own to open.
+        corner = self._start_cell()
+        bomb = (corner[0], corner[1] + 1)
         g.bomb_cells = {bomb}
         g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
         g.drill_run_units = 2
@@ -535,36 +592,32 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.screen.get_at(self._cell_center(*cell))[:3],
                          main.MARBLE_BOX_COLOR)
         # The grid overlay stays across locked squares so the player can see
-        # the unit boundaries: the vertical line between the locked column left
-        # of the region and the region itself is the thin grid-line color.
-        line_x = main.MARBLE_BOX_COORDS[0] + cell[0] * main.GRID_SIZE
+        # the unit boundaries: a grid line between two locked squares of the
+        # margin left of the region is the thin grid-line color.
+        line_x = main.MARBLE_BOX_COORDS[0] + 1 * main.GRID_SIZE
         self.assertEqual(g.screen.get_at((line_x,
                                           self._cell_center(*cell)[1]))[:3],
                          (30, 30, 30))
 
-    def test_locked_squares_take_the_trials_colour_a_step_darker(self):
-        # While a trial runs, a locked square is filled with the SAME colour
-        # family as the board it sits in — the trial's colour, a step below the
-        # panel tint — instead of punching the red void through the palette.
-        # It must still read as unlit next to an unlocked square, so locked is
-        # darker than the panel for every trial, the near-white all-finishes
-        # one included (whose panel is darkened rather than lightened, which is
-        # why the locked shade is derived from the panel and not from the tile).
+    def test_locked_squares_wear_the_backgrounds_pattern(self):
+        # A locked square is not board — it is the void the board floats in — so
+        # it is painted with exactly what the screen behind the board is painted
+        # with (user request: "locked board squares having the background's
+        # pattern on them"). An unlocked square keeps the trial's panel tint, so
+        # the playable region still reads as raised.
         g = self._start_locked_game()
         g.trials_enabled = True
         cell = self._start_cell()
+        locked_centre = self._cell_center(0, 0)
         for trial in main.Trial.ORDER:
             g.current_trial = trial
-            panel = components.Trial.panel_color(trial)
-            locked = components.Trial.locked_color(trial)
-            self.assertIsNotNone(locked, trial)
-            self.assertTrue(all(lo < pa for lo, pa in zip(locked, panel)),
-                            (trial, locked, panel))
+            main.ui.draw_background(g)
+            behind = g.screen.get_at(locked_centre)[:3]
             main.ui.draw_board(g)
-            self.assertEqual(g.screen.get_at(self._cell_center(0, 0))[:3], locked,
-                             trial)
+            self.assertEqual(g.screen.get_at(locked_centre)[:3], behind, trial)
             self.assertEqual(
-                g.screen.get_at(self._cell_center(*cell))[:3], panel, trial)
+                g.screen.get_at(self._cell_center(*cell))[:3],
+                components.Trial.panel_color(trial), trial)
 
     def test_draw_board_borders_the_playable_region_thickly(self):
         # Every side of an unlocked square that faces a LOCKED one gets the
@@ -616,8 +669,8 @@ class BoardTests(unittest.TestCase):
         # squares away from the playable region only the line's own pixel is
         # dark, and its neighbours are still the void colour (sampled mid-cell
         # so the perpendicular grid line is not in the way).
-        far_x = x0 + 2 * main.GRID_SIZE
-        far_y = y0 + 2 * main.GRID_SIZE + 5
+        far_x = x0 + 1 * main.GRID_SIZE
+        far_y = y0 + main.GRID_SIZE + 5
         self.assertEqual(g.screen.get_at((far_x, far_y))[:3], border)
         self.assertEqual(g.screen.get_at((far_x - 1, far_y))[:3], main.BG_COLOR)
         self.assertEqual(g.screen.get_at((far_x + 1, far_y))[:3], main.BG_COLOR)
@@ -637,7 +690,7 @@ class BoardTests(unittest.TestCase):
                                  (30, 30, 30), (dx, dy))
 
     def test_the_all_finishes_trial_keeps_the_locked_boundary_dark(self):
-        # The all-finishes trial paints the box's OUTER border in the finish
+        # The all-finishes trial paints the WINDOW's outer border in the finish
         # colour, because that is the edge a marble finishes on. The walls
         # against the locked squares are invisible physics walls that never
         # finish anything (see Game._board_wall_blocks), so the boundary between
@@ -645,14 +698,14 @@ class BoardTests(unittest.TestCase):
         g = self._start_locked_game()
         finish = main.Scorer.color(main.Scorer.FINISH)
         main.ui.draw_board(g, finish)
-        box_x, box_y = main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1]
-        self.assertEqual(
-            g.screen.get_at((box_x + 20, box_y - main.BORD_WIDTH // 2))[:3],
-            finish)
+        view = g.board_viewport()
+        # The frame is drawn inside the window's own edge.
+        self.assertEqual(g.screen.get_at((view.left + 2, view.top + 30))[:3],
+                         finish)
         cell_x, cell_y = self._start_cell()
-        left = box_x + cell_x * main.GRID_SIZE
+        left, top = g.cell_to_screen(cell_x, cell_y)
         right = left + main.BOARD_START_WIDTH * main.GRID_SIZE
-        cy = box_y + cell_y * main.GRID_SIZE + 20
+        cy = top + 20
         self.assertEqual(g.screen.get_at((left - 1, cy))[:3], (30, 30, 30))
         self.assertEqual(g.screen.get_at((right + 1, cy))[:3], (30, 30, 30))
         self.assertEqual(g.screen.get_at((left + 1, cy))[:3],

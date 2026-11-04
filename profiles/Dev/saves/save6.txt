@@ -23,6 +23,10 @@
       "placed": false,
       "col": 0,
       "row": 0,
+      "board_cell": [
+        11,
+        3
+      ],
       "shape": 0,
       "effects": [],
       "effect_amounts": {},
@@ -44,6 +48,10 @@
       "placed": false,
       "col": 0,
       "row": 1,
+      "board_cell": [
+        12,
+        3
+      ],
       "shape": 0,
       "effects": [],
       "effect_amounts": {},
@@ -62,8 +70,6 @@
     }
   ],
   "toolbox_stash": [],
-  "discards_left": 2,
-  "inventory_slots_bought": 0,
   "grid": [],
   "shop": [
     {
@@ -71,15 +77,14 @@
       "placed": false,
       "col": 1,
       "row": 1,
-      "shape": 3,
-      "effects": [
-        9
-      ],
+      "board_cell": null,
+      "shape": 15,
+      "effects": [],
       "effect_amounts": {},
-      "scorer": 1,
-      "scorer_amount": 34.17,
-      "price": 31,
-      "name": "None +Chips",
+      "scorer": 3,
+      "scorer_amount": 1.515,
+      "price": 25,
+      "name": "Corner xMult",
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -88,246 +93,189 @@
       "triggers_left": null,
       "random_rolls": null,
       "placed_cell": null
-    },
-    {
-      "kind": "card",
-      "value": 88,
-      "price": 44,
-      "amount": 0,
-      "col": 2,
-      "row": 1,
-      "name": "Factory",
-      "random_rolls": null
     },
     {
       "kind": "scorer",
-      "value": 23,
-      "amount": 0,
+      "value": 24,
+      "amount": 1.257,
       "price": 24,
-      "name": "Lucky",
+      "name": "Roomy",
+      "col": 2,
+      "row": 1,
+      "board_cell": null
+    },
+    {
+      "kind": "action",
+      "value": 9,
+      "price": 36,
+      "version": 1,
       "col": 3,
-      "row": 1
+      "row": 1,
+      "board_cell": null,
+      "name": "Mass production"
+    },
+    {
+      "kind": "scorer",
+      "value": 18,
+      "amount": 11.544,
+      "price": 32,
+      "name": "Satanic",
+      "col": 4,
+      "row": 1,
+      "board_cell": null
     },
     {
       "kind": "card",
-      "value": 98,
-      "price": 44,
+      "value": 6,
+      "price": 27,
       "amount": 0,
-      "col": 4,
-      "row": 1,
-      "name": "Concert",
-      "random_rolls": null
-    },
-    {
-      "kind": "block",
-      "placed": false,
       "col": 5,
       "row": 1,
-      "shape": 5,
-      "effects": [
-        10
-      ],
-      "effect_amounts": {},
-      "scorer": 12,
-      "scorer_amount": 1.602,
-      "price": 37,
-      "name": "Curved Slope Ideas",
-      "portal_number": 0,
-      "key_number": 0,
-      "trigger_limit": 1,
-      "trigger_paid": 0,
-      "angle": null,
-      "triggers_left": null,
-      "random_rolls": null,
-      "placed_cell": null
+      "board_cell": null,
+      "name": "Wrecking Ball",
+      "random_rolls": null
     },
     {
       "kind": "pack",
       "pack_type": 5,
+      "size": 1,
+      "keep": 1,
+      "kept": 0,
+      "price": 21,
+      "col": 6,
+      "row": 1,
+      "name": "Big Card Pack",
+      "options": [
+        {
+          "kind": "card",
+          "value": 95,
+          "price": 42,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "1000-handed",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 9,
+          "price": 19,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "[ERR 404: CARD NOT FOUND]",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 16,
+          "price": 42,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "Swashbuckler",
+          "random_rolls": null
+        },
+        {
+          "kind": "card",
+          "value": 85,
+          "price": 46,
+          "amount": 0,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "Doppelganger",
+          "random_rolls": null
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 7,
       "size": 0,
       "keep": 1,
       "kept": 0,
-      "price": 15,
-      "col": 1,
-      "row": 3,
-      "name": "Normal Card Pack",
+      "price": 36,
+      "col": 7,
+      "row": 1,
+      "name": "Normal Resource Pack",
       "options": [
         {
-          "kind": "card",
-          "value": 12,
-          "price": 34,
-          "amount": 0,
-          "col": 0,
-          "row": 0,
-          "name": "Fountain",
-          "random_rolls": null
+          "kind": "resource",
+          "scorer": 16,
+          "amount": 1.064,
+          "points": 1.064,
+          "name": "1.064 option points"
         },
         {
-          "kind": "card",
-          "value": 3730,
-          "price": 22,
-          "amount": 18.23,
-          "col": 0,
-          "row": 0,
-          "name": "Conveyor card (Cash)",
-          "random_rolls": null
-        },
-        {
-          "kind": "card",
-          "value": 79,
-          "price": 23,
-          "amount": 0,
-          "col": 0,
-          "row": 0,
-          "name": "Cozy",
-          "random_rolls": null
-        }
-      ]
-    },
-    {
-      "kind": "pack",
-      "pack_type": 0,
-      "size": 4,
-      "keep": 2,
-      "kept": 0,
-      "price": 33,
-      "col": 2,
-      "row": 3,
-      "name": "Giga Shape Pack",
-      "options": [
-        {
-          "kind": "shape",
-          "value": 14,
-          "amount": 0,
-          "price": 8,
-          "name": "Platform",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "shape",
-          "value": 6,
-          "amount": 0,
-          "price": 9,
-          "name": "Pipe",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "shape",
-          "value": 4,
-          "amount": 0,
-          "price": 8,
-          "name": "Circle",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "shape",
-          "value": 12,
-          "amount": 0,
-          "price": 12,
-          "name": "Half Pipe",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "shape",
-          "value": 19,
-          "amount": 0,
-          "price": 9,
-          "name": "Bump",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "shape",
-          "value": 16,
-          "amount": 0,
-          "price": 7,
-          "name": "Peg",
-          "col": 0,
-          "row": 0
-        }
-      ]
-    },
-    {
-      "kind": "pack",
-      "pack_type": 8,
-      "size": 4,
-      "keep": 2,
-      "kept": 0,
-      "price": 56,
-      "col": 3,
-      "row": 3,
-      "name": "Giga Random Pack",
-      "options": [
-        {
-          "kind": "scorer",
-          "value": 11,
-          "amount": 1.72,
-          "price": 12,
-          "name": "Rubble",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "shape",
-          "value": 4,
-          "amount": 0,
-          "price": 8,
-          "name": "Circle",
-          "col": 0,
-          "row": 0
-        },
-        {
-          "kind": "block",
-          "placed": false,
-          "col": 0,
-          "row": 0,
-          "shape": 5,
-          "effects": [
-            4,
-            9
-          ],
-          "effect_amounts": {},
-          "scorer": 20,
-          "scorer_amount": 11.33,
-          "price": 57,
-          "name": "Curved Slope Airball",
-          "portal_number": 0,
-          "key_number": 0,
-          "trigger_limit": 1,
-          "trigger_paid": 0,
-          "angle": null,
-          "triggers_left": null,
-          "random_rolls": null,
-          "placed_cell": null
-        },
-        {
-          "kind": "shape",
-          "value": 16,
-          "amount": 0,
-          "price": 7,
-          "name": "Peg",
-          "col": 0,
-          "row": 0
+          "kind": "resource",
+          "scorer": 10,
+          "amount": 0.717,
+          "points": 1.434,
+          "name": "1.434 shred points"
         },
         {
           "kind": "resource",
           "scorer": 11,
-          "amount": 0.838,
-          "points": 1.676,
-          "name": "1.676 rubble points"
+          "amount": 0.771,
+          "points": 1.542,
+          "name": "1.542 rubble points"
+        }
+      ]
+    },
+    {
+      "kind": "pack",
+      "pack_type": 6,
+      "size": 1,
+      "keep": 1,
+      "kept": 0,
+      "price": 24,
+      "col": 8,
+      "row": 1,
+      "name": "Big Action Pack",
+      "options": [
+        {
+          "kind": "action",
+          "value": 6,
+          "price": 70,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "Cleansweep"
         },
         {
           "kind": "action",
-          "value": 8,
+          "value": 11,
+          "price": 24,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "Inaction"
+        },
+        {
+          "kind": "action",
+          "value": 4,
+          "price": 28,
+          "version": 1,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "name": "Strength"
+        },
+        {
+          "kind": "action",
+          "value": 7,
           "price": 25,
           "version": 1,
           "col": 0,
           "row": 0,
-          "name": "Brainstorm"
+          "board_cell": null,
+          "name": "Expansion"
         }
       ]
     }
@@ -381,20 +329,260 @@
   "last_run_cash_breakdown": {},
   "unlocked_cells": [
     [
-      6,
-      6
+      12,
+      4
     ],
     [
-      6,
+      12,
       7
     ],
     [
-      5,
+      14,
+      4
+    ],
+    [
+      12,
+      10
+    ],
+    [
+      14,
+      7
+    ],
+    [
+      14,
+      10
+    ],
+    [
+      17,
+      3
+    ],
+    [
+      17,
+      9
+    ],
+    [
+      17,
       6
     ],
     [
-      5,
+      11,
+      5
+    ],
+    [
+      11,
+      8
+    ],
+    [
+      13,
+      5
+    ],
+    [
+      16,
+      4
+    ],
+    [
+      13,
+      8
+    ],
+    [
+      15,
+      5
+    ],
+    [
+      16,
       7
+    ],
+    [
+      18,
+      4
+    ],
+    [
+      16,
+      10
+    ],
+    [
+      15,
+      8
+    ],
+    [
+      18,
+      7
+    ],
+    [
+      18,
+      10
+    ],
+    [
+      12,
+      3
+    ],
+    [
+      12,
+      9
+    ],
+    [
+      14,
+      6
+    ],
+    [
+      12,
+      6
+    ],
+    [
+      14,
+      3
+    ],
+    [
+      14,
+      9
+    ],
+    [
+      17,
+      5
+    ],
+    [
+      17,
+      8
+    ],
+    [
+      11,
+      4
+    ],
+    [
+      11,
+      7
+    ],
+    [
+      13,
+      4
+    ],
+    [
+      11,
+      10
+    ],
+    [
+      13,
+      7
+    ],
+    [
+      15,
+      4
+    ],
+    [
+      16,
+      3
+    ],
+    [
+      13,
+      10
+    ],
+    [
+      15,
+      7
+    ],
+    [
+      16,
+      9
+    ],
+    [
+      16,
+      6
+    ],
+    [
+      18,
+      3
+    ],
+    [
+      15,
+      10
+    ],
+    [
+      18,
+      9
+    ],
+    [
+      18,
+      6
+    ],
+    [
+      12,
+      5
+    ],
+    [
+      12,
+      8
+    ],
+    [
+      14,
+      5
+    ],
+    [
+      17,
+      4
+    ],
+    [
+      14,
+      8
+    ],
+    [
+      17,
+      7
+    ],
+    [
+      17,
+      10
+    ],
+    [
+      11,
+      3
+    ],
+    [
+      11,
+      9
+    ],
+    [
+      11,
+      6
+    ],
+    [
+      13,
+      3
+    ],
+    [
+      13,
+      9
+    ],
+    [
+      15,
+      6
+    ],
+    [
+      13,
+      6
+    ],
+    [
+      15,
+      3
+    ],
+    [
+      15,
+      9
+    ],
+    [
+      16,
+      5
+    ],
+    [
+      16,
+      8
+    ],
+    [
+      18,
+      5
+    ],
+    [
+      18,
+      8
     ]
   ],
   "board_units": 0

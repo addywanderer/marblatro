@@ -926,10 +926,15 @@ class BlocksTests(GameTestCase):
 
     def test_new_shapes_stop_a_falling_marble(self):
         # A marble dropped onto each new shape is caught: it never passes below
-        # the block's cell.
+        # the block's cell. A sawtooth is a row of teeth with GAPS between them,
+        # so it is aimed at a tooth: dropped on the cell's centre it may fall
+        # between two teeth, which is the shape doing its job.
         for shape in self._new_shapes():
             block = main.Block(5, 5, shape=shape, scorer=main.Scorer.NONE)
-            marble = main.Marble(block.rect.centerx, block.rect.top - 70)
+            x = block.rect.centerx
+            if shape == main.Shape.SAWTOOTH:
+                x = block.rect.left + block.rect.width / (2 * main.SAWTOOTH_TEETH)
+            marble = main.Marble(x, block.rect.top - 70)
             for _ in range(300):
                 marble.physics.update(marble, main.DT, [block])
                 self.assertLess(marble.position[1], block.rect.bottom,
@@ -1498,19 +1503,20 @@ class BlocksTests(GameTestCase):
         # A piece built without a magnitude (an old save, or code that predates
         # the roll) is the average-strength piece, and says so.
         piece = main.Component.effect_component(main.Effect.REPULSOR)
-        self.assertEqual(piece.effect_magnitude, main.BLACK_HOLE_FORCE)
+        average = main.Effect.MAGNITUDE[main.Effect.REPULSOR]
+        self.assertEqual(piece.effect_magnitude, average)
         rows = dict(self.game._describe_item(piece))
-        self.assertIn("3000 px/s^2 of force (0)", rows["Effect - Repulsor"])
+        self.assertIn(f"{average:g} px/s^2 of force (0)", rows["Effect - Repulsor"])
         self.assertNotIn(" 0 px/s", rows["Effect - Repulsor"])
         self.assertNotIn(" 0 px/s", main.effect_description(main.Effect.REPULSOR, 0))
-        self.assertIn("3000 px/s^2 of force (0)",
+        self.assertIn(f"{average:g} px/s^2 of force (0)",
                       main.effect_description(main.Effect.REPULSOR, 0))
         # A stored 0 can never shadow the average on a block either.
         block = main.Block(0, 0, effect=main.Effect.REPULSOR,
                            effects=[main.Effect.REPULSOR],
                            effect_amounts={main.Effect.REPULSOR: 0})
         self.assertEqual(block.effect_magnitude(main.Effect.REPULSOR),
-                         main.BLACK_HOLE_FORCE)
+                         main.Effect.MAGNITUDE[main.Effect.REPULSOR])
         # An on/off effect is still zero, and states no magnitude at all.
         fragile = main.Component.effect_component(main.Effect.FRAGILE)
         self.assertEqual(fragile.effect_magnitude, 0)
@@ -2028,7 +2034,7 @@ class GondolaTests(GameTestCase):
         self.assertEqual(main.Effect.name(main.Effect.GONDOLA), "Gondola")
         self.assertIn(main.Effect.GONDOLA, main.Effect.REAL_ORDER)
         self.assertIn(main.Effect.GONDOLA, main.Effect.ORDER)
-        self.assertEqual(main.Effect.magnitude(main.Effect.GONDOLA), 60)
+        self.assertEqual(main.Effect.magnitude(main.Effect.GONDOLA), 100)
         self.assertEqual(main.Effect.MAGNITUDE_UNIT[main.Effect.GONDOLA], "px/s")
         # It is offered by the shop like any other real effect, and its own
         # magnitude is rolled onto the block when it is built.
@@ -2051,9 +2057,11 @@ class GondolaTests(GameTestCase):
 
     def test_it_slides_at_its_own_speed(self):
         car = self._place(2, 7, angle=90)
+        # Pin the rolled speed so the travel is exact: 120 px/s is 2 px a frame.
+        car.effect_amounts[main.Effect.GONDOLA] = 120
         start = car.rect.topleft
-        self._slide(30)                          # half a second at 60 px/s
-        self.assertEqual(car.rect.left - start[0], 30)
+        self._slide(30)                           # half a second at 120 px/s
+        self.assertEqual(car.rect.left - start[0], 60)
         self.assertEqual(car.rect.top, start[1])  # it stays on its lane
         # Its cell never changes: the rect moves, the key it is stored under
         # does not (so erasing, scoring and rebuilding all still find it).
@@ -2149,12 +2157,16 @@ class GondolaTests(GameTestCase):
 
     def test_it_turns_back_at_the_board_border(self):
         car = self._place(2, 7, angle=90)
-        right_edge = main.MARBLE_BOX_COORDS[0] + main.MARBLE_BOX_COORDS[2]
-        self._slide(600)
+        # 60 px/s (a pixel a frame), so the frames needed are the lane's own
+        # length: the board is as wide as the window now, not the old box.
+        car.effect_amounts[main.Effect.GONDOLA] = 60
+        _low, high = self.game._gondola_lane(car)
+        right_edge = car.rect.right + high
+        self._slide(int(high) + 40)
         self.assertEqual(car.gondola_dir, -1)     # it came off the wall
         self.assertLessEqual(car.rect.right, right_edge)
         # And it turns again at the other side: a car left alone patrols.
-        self._slide(1200)
+        self._slide(int(2 * high) + 80)
         self.assertGreaterEqual(car.rect.left, main.MARBLE_BOX_COORDS[0])
         self.assertLessEqual(car.rect.right, right_edge)
 
@@ -2175,7 +2187,9 @@ class GondolaTests(GameTestCase):
         # With the board locked, the locked squares' walls (see
         # _board_wall_blocks) are what turns the car, so it stays inside the
         # playable region like every marble does.
-        self.game._reset_board_to_start()
+        self.game.unlocked_cells = {(4, 7)}
+        self.game._board_walls = []
+        self.game._board_walls_dirty = True
         self.game.grid = {}
         car = main.Block(4, 7, shape=main.Shape.RECT, effect=main.Effect.GONDOLA,
                          scorer=main.Scorer.NONE, angle=90)

@@ -106,7 +106,7 @@ class ShopTests(GameTestCase):
         self.assertIn(main.Scorer.SHARP, main.Scorer.ORDER)
         self.assertIn(main.Scorer.SHARP, main.Scorer.SHOP_ORDER)
         self.assertEqual(main.Scorer.name(main.Scorer.SHARP), "Sharp")
-        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.SHARP], 3)
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.SHARP], 2)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.SHARP)], 0)
         self.assertIn("destroy", main.scorer_description(main.Scorer.SHARP).lower())
 
@@ -203,8 +203,10 @@ class ShopTests(GameTestCase):
         self.game.bonus_slots = 3
         self.game.shop.bonus_slots = 3
         self.game.shop.refresh()
-        standard = [i for i in self.game.shop.items if i.row < 5]
-        bonus = [i for i in self.game.shop.items if i.row >= 5]
+        standard = [i for i in self.game.shop.items
+                    if i.row < main.SHOP_BONUS_ROW]
+        bonus = [i for i in self.game.shop.items
+                 if i.row >= main.SHOP_BONUS_ROW]
         self.assertEqual(len(standard), main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
         self.assertEqual(len(bonus), 3)
         allowed = {"shape", "effect", "scorer", "block", "card", "action"}
@@ -360,7 +362,7 @@ class ShopTests(GameTestCase):
         self.assertIn(main.Scorer.SEED, main.Scorer.ORDER)
         self.assertIn(main.Scorer.SEED, main.Scorer.SHOP_ORDER)
         self.assertEqual(main.Scorer.name(main.Scorer.SEED), "Seed")
-        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.SEED], 3)
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.SEED], 4)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.SEED)], 0)
         self.assertIn("Seed block", main.scorer_description(main.Scorer.SEED))
 
@@ -479,11 +481,11 @@ class ShopTests(GameTestCase):
         self.assertIn(main.Scorer.CLUSTER, main.Scorer.ORDER)
         self.assertIn(main.Scorer.CLUSTER, main.Scorer.SHOP_ORDER)
         self.assertEqual(main.Scorer.name(main.Scorer.CLUSTER), "Cluster")
-        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.CLUSTER], 4)
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.CLUSTER], 3)
         self.assertGreater(
             main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.CLUSTER)], 0)
-        desc = main.scorer_description(main.Scorer.CLUSTER, 4)
-        self.assertIn("4 mult", desc)
+        desc = main.scorer_description(main.Scorer.CLUSTER, 3)
+        self.assertIn("3 mult", desc)
         self.assertIn("adjacent", desc)
         # Like its geometry siblings (Powerline/Frontier), Cluster is a block
         # scorer, so it builds no magnitude card — but it IS a card scorer: a
@@ -532,29 +534,25 @@ class ShopTests(GameTestCase):
         self.assertGreater(halves[0].key_number, 0)
 
 
-    def test_a_key_lock_pair_fits_even_when_the_panel_is_full(self):
-        # Unbounded inventory: the pair fills the last free cell and stashes the
-        # other half instead of being refused (see Toolbox).
+    def test_a_key_lock_pair_still_joins_a_full_board(self):
         self.game.toolbox.items.clear()
         self.game.toolbox.stash.clear()
-        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
-                                main.Scorer.NONE, 0, 5, "filler")
-        capacity = self.game.toolbox.capacity()
-        while len(self.game.toolbox.items) < capacity - 1:
-            self.game.toolbox.add(filler)
+        for x in range(main.GRID_WIDTH):
+            for y in range(main.GRID_HEIGHT):
+                self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE)
+        self.game.ensure_board_cells()
         lock = main.BlockItem(0, 0, main.Shape.LOCK, main.Effect.NONE,
-                              main.Scorer.NONE, 0, 30, "Lock Block")
+                              main.Scorer.NONE, 0, 50, "Lock Block")
         self.game.cash = 1000
 
         self.game._buy_shop_item(lock)
 
-        self.assertEqual(len(self.game.toolbox.items), capacity)
-        self.assertEqual(len(self.game.toolbox.stash), 1)
         halves = [i for i in self.game.toolbox.every_item()
                   if getattr(i, "key_number", 0)]
-        self.assertEqual(len(halves), 2)                  # a matched pair
-        self.assertEqual(halves[0].key_number, halves[1].key_number)
-        self.assertEqual(self.game.cash, 1000 - lock.price)
+        self.assertEqual(len(halves), 2)
+        self.assertEqual({h.shape for h in halves},
+                         {main.Shape.LOCK, main.Shape.KEY})
+        self.assertEqual(self.game.cash, 1000 - self.game._buy_price(lock))
 
 
     def test_assembling_a_lock_shape_adds_its_key_half(self):
@@ -626,8 +624,8 @@ class ShopTests(GameTestCase):
     # --- Colossus / Undertaker / Debt ---------------------------------------
 
     def test_new_scorers_are_defined_and_shop_available(self):
-        for scorer, name, amount in ((main.Scorer.COLOSSUS, "Colossus", 0.1),
-                                     (main.Scorer.UNDERTAKER, "Undertaker", 15),
+        for scorer, name, amount in ((main.Scorer.COLOSSUS, "Colossus", 0.04),
+                                     (main.Scorer.UNDERTAKER, "Undertaker", 30),
                                      (main.Scorer.DEBT, "Debt", 60)):
             self.assertIn(scorer, main.Scorer.ORDER)
             self.assertIn(scorer, main.Scorer.SHOP_ORDER)
@@ -1100,7 +1098,7 @@ class ShopTests(GameTestCase):
         self.assertIn(main.Scorer.EFFECTIVE, main.Scorer.ORDER)
         self.assertIn(main.Scorer.EFFECTIVE, main.Scorer.SHOP_ORDER)
         self.assertEqual(main.Scorer.name(main.Scorer.EFFECTIVE), "Effective")
-        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.EFFECTIVE], 2.0)
+        self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.EFFECTIVE], 2.5)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.EFFECTIVE)], 0)
         self.assertIn("2 or more effects", main.scorer_description(main.Scorer.EFFECTIVE))
 
@@ -1245,12 +1243,16 @@ class ShopTests(GameTestCase):
 
         self.game._assemble_block()
 
-        self.assertTrue(self.game.has_selected)  # fresh block stays selected
+        # The fresh block stays in hand: the one just built is the one the
+        # player is holding (it may already stand on the board — see
+        # _finish_assembly — but it is the selection either way).
+        self.assertTrue(self.game.has_selected)
         self.assertIsNotNone(self.game.selected_toolbox_item)
-        self.assertEqual(self.game.selected_toolbox_item.kind, "block")
+        self.assertIsInstance(self.game.selected_toolbox_item,
+                              (main.Block, main.BlockItem))
 
 
-    def test_info_target_at_finds_shop_toolbox_and_grid(self):
+    def test_info_target_at_finds_shop_items_and_board_items(self):
         shop = self.game.shop.items[0]
         target, source = self.game._info_target_at(
             (self.game.shop.rect.x + shop.col * main.GRID_SIZE + 5,
@@ -1258,17 +1260,18 @@ class ShopTests(GameTestCase):
         self.assertIs(target, shop)
         self.assertEqual(source, "shop")
 
-        tb = self.game.toolbox.items[0]
-        target, source = self.game._info_target_at(
-            (self.game.toolbox.rect.x + 5, self.game.toolbox.rect.y + 5))
-        self.assertIs(target, tb)
-        self.assertEqual(source, "toolbox")
+        # An owned item lies on a board square now, so hovering it reports the
+        # board (see Game._info_target_at).
+        owned = self.game.toolbox.items[0]
+        target, source = self.game._info_target_at(self._item_pos(owned))
+        self.assertIs(target, owned)
+        self.assertEqual(source, "board")
 
         block = main.Block(2, 3, scorer=main.Scorer.CHIPS_ADD)
         self.game.grid[(2, 3)] = block
-        target, source = self.game._info_target_at((block.rect.centerx, block.rect.centery))
+        target, source = self.game._info_target_at(self._grid_pos(2, 3))
         self.assertIs(target, block)
-        self.assertEqual(source, "grid")
+        self.assertEqual(source, "board")
 
 
     def test_left_clicking_shop_item_buys_it(self):
@@ -1361,13 +1364,12 @@ class ShopTests(GameTestCase):
 
     def test_clicking_owned_card_selects_it_for_selling(self):
         # Left-clicking an owned card selects it as the active item, so pressing
-        # B sells it for half its original price.
+        # B sells it for half its original price. The card lies on a board square
+        # (see Game.ensure_board_cells).
         card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
                           main.Scorer.MULT_ADD)
         self.game.cards.append(card)
-        x = main.CARD_AREA_COORDS[0] + main.GRID_SIZE // 2
-        y = main.CARD_AREA_COORDS[1] + main.GRID_SIZE // 2
-        self._click((x, y))
+        self._click(self._item_pos(card))
         self.assertIs(self.game.selected_toolbox_item, card)
 
 
@@ -1682,8 +1684,10 @@ class ShopTests(GameTestCase):
 
 
     def test_shop_shelf_is_five_item_slots_and_three_packs(self):
-        items = [i for i in self.game.shop.items if i.row == main.SHOP_ITEM_ROW]
-        packs = [i for i in self.game.shop.items if i.row == main.SHOP_PACK_ROW]
+        items = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) != "pack"]
+        packs = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) == "pack"]
         self.assertEqual(len(self.game.shop.items),
                          main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
         # Five "any item" slots along the top row, one offer each of a drawn
@@ -1698,9 +1702,12 @@ class ShopTests(GameTestCase):
         keys = [main.offer_key(i) for i in items]
         self.assertNotIn(None, keys)
         self.assertEqual(len(set(keys)), len(keys))
-        # Three packs on the lower row, beside the fixed Board Unit tile.
+        # Three packs on the same row, right of the item offers and beside the
+        # fixed Board Unit tile.
         self.assertEqual(len(packs), main.SHOP_PACK_SLOTS)
-        self.assertEqual([p.col for p in packs], [1, 2, 3])
+        self.assertEqual([p.col for p in packs],
+                         [main.SHOP_PACK_COL + n
+                          for n in range(main.SHOP_PACK_SLOTS)])
         for pack in packs:
             with self.subTest(pack=pack.name):
                 self.assertEqual(pack.kind, "pack")
@@ -1734,7 +1741,7 @@ class ShopTests(GameTestCase):
                          [(1 + n, main.SHOP_ITEM_ROW)
                           for n in range(main.SHOP_ITEM_SLOTS)] + bonus[:2])
         self.assertEqual([(i.col, i.row) for i in packs],
-                         [(1 + n, main.SHOP_PACK_ROW)
+                         [(main.SHOP_PACK_COL + n, main.SHOP_PACK_ROW)
                           for n in range(main.SHOP_PACK_SLOTS)] + bonus[2:3])
         for item in shop.items:
             cell = pygame.Rect(shop.rect.x + item.col * main.GRID_SIZE,
@@ -2107,7 +2114,7 @@ class ShopTests(GameTestCase):
         self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
         self.game.cards.append(main.CardItem(main.Card.SHOWMAN, 48))
         self.assertEqual(self.game.shop.owned_cards(), set())
-        with mock.patch("main.random_card_option_value",
+        with mock.patch("rolling.random_card_option_value",
                         return_value=main.Card.GARDEN):
             self.game.shop.refresh()
         self.assertIn(main.Card.GARDEN,
@@ -2281,7 +2288,7 @@ class ShopTests(GameTestCase):
         def actions_only(shop, col, row):
             return shop._offer_of(main.Pack.ACTION, col, row)
 
-        with mock.patch("main.random_action_version", return_value=2), \
+        with mock.patch("rolling.random_action_version", return_value=2), \
                 mock.patch.object(main.Shop, "_roll_random_offer",
                                   actions_only):
             self.game._refresh_shop()
@@ -2292,7 +2299,7 @@ class ShopTests(GameTestCase):
                 self.assertIn(f"{item.name} v2", self.game.shop_message)
 
         # A shelf of plain v1 actions gets the ordinary message back.
-        with mock.patch("main.random_action_version", return_value=1), \
+        with mock.patch("rolling.random_action_version", return_value=1), \
                 mock.patch.object(main.Shop, "_roll_random_offer",
                                   actions_only):
             self.game._refresh_shop()
@@ -3286,29 +3293,26 @@ class ShopTests(GameTestCase):
         self.assertIn(block, self.game.toolbox.items)
 
 
-    def test_a_portal_pair_fits_even_when_the_panel_is_full(self):
-        # The inventory is unbounded: buying a portal pair with only one free
-        # cell fills that cell and stashes the partner, rather than refusing the
-        # purchase (see Toolbox).
+    def test_a_portal_pair_still_joins_a_full_board(self):
+        # The board can be full, but a purchase is never refused: both halves are
+        # owned, and whichever squares free up later takes them (see Toolbox.add).
         self.game.toolbox.items.clear()
         self.game.toolbox.stash.clear()
-        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE, main.Scorer.NONE, 0, 5, "filler")
-        capacity = self.game.toolbox.capacity()
-        while len(self.game.toolbox.items) < capacity - 1:
-            self.game.toolbox.add(filler)
+        for x in range(main.GRID_WIDTH):
+            for y in range(main.GRID_HEIGHT):
+                self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE)
+        self.game.ensure_board_cells()
         portal = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.PORTAL,
                                 main.Scorer.NONE, 0, 50, "Portal Block")
         self.game.cash = 1000
 
         self.game._buy_shop_item(portal)
 
-        self.assertEqual(len(self.game.toolbox.items), capacity)
-        self.assertEqual(len(self.game.toolbox.stash), 1)
         portals = [i for i in self.game.toolbox.every_item()
                    if getattr(i, "effect", None) == main.Effect.PORTAL]
         self.assertEqual(len(portals), 2)
         self.assertEqual(portals[0].portal_number, portals[1].portal_number)
-        self.assertEqual(self.game.cash, 1000 - portal.price)  # charged
+        self.assertEqual(self.game.cash, 1000 - self.game._buy_price(portal))
 
 
     def test_assembling_portal_block_adds_two_copies_with_same_number(self):
@@ -3322,12 +3326,16 @@ class ShopTests(GameTestCase):
 
         self.game._assemble_block()
 
-        portals = [i for i in self.game.toolbox.items if i.effect == main.Effect.PORTAL]
+        portals = [i for i in self.game.toolbox.items
+                   if getattr(i, "effect", None) == main.Effect.PORTAL]
         self.assertEqual(len(portals), 2)
         self.assertEqual(portals[0].portal_number, portals[1].portal_number)
         self.assertGreater(portals[0].portal_number, 0)
-        self.assertTrue(self.game.has_selected)  # one of the pair is equipped
-        self.assertIn(self.game.selected_toolbox_item, portals)
+        # One of the pair is equipped, and it is a block built from that pair.
+        self.assertTrue(self.game.has_selected)
+        held = self.game.selected_toolbox_item
+        self.assertEqual(getattr(held, "portal_number", 0),
+                         portals[0].portal_number)
 
 
     def test_assembling_multi_effect_block_preserves_all_effects(self):
@@ -3586,7 +3594,7 @@ class EarthquakeTests(GameTestCase):
         # kinds are pinned to effects and scorers here: that is the comparison
         # the old fixed component rows made possible.
         only_components = (main.Pack.EFFECT, main.Pack.SCORER)
-        with mock.patch.object(main, "SHELF_OFFER_TYPES", only_components):
+        with mock.patch("shop.SHELF_OFFER_TYPES", only_components):
             random.seed(11)
             self.game.shop.refresh()
             plain = self._offers()

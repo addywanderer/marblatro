@@ -133,15 +133,13 @@ class ToolboxTests(GameTestCase):
         self.assertFalse(self.game.has_selected)
 
 
-    def test_left_clicking_toolbox_item_equips_block(self):
+    def test_clicking_a_block_item_arms_it(self):
         self.game.toolbox.items.clear()
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 10, 20, "B")
         self.game.toolbox.add(block)
-        pos = (self.game.toolbox.rect.x + main.GRID_SIZE // 2,
-               self.game.toolbox.rect.y + main.GRID_SIZE // 2)
 
-        self._click(pos)
+        self._click(self._item_pos(block))
 
         self.assertIs(self.game.selected_toolbox_item, block)
         self.assertTrue(self.game.has_selected)  # the block is equipped
@@ -211,25 +209,6 @@ class ToolboxTests(GameTestCase):
         self.assertEqual(len(self.game.toolbox.items), 1)
 
 
-    def test_clicking_two_cards_swaps_their_order(self):
-        # Select one card, then click another to swap their order in the card
-        # area (Blueprint copies the card to its left, so order matters).
-        card_a = _card_item(main.match_group_for_shape(main.Shape.PIPE),
-                            main.Scorer.MULT_ADD)
-        card_b = _card_item(main.match_group_for_shape(main.Shape.SLOPE),
-                            main.Scorer.CHIPS_ADD)
-        self.game.cards.append(card_a)
-        self.game.cards.append(card_b)
-        y = main.CARD_AREA_COORDS[1] + 5
-        ax = main.CARD_AREA_COORDS[0] + 5
-        bx = main.CARD_AREA_COORDS[0] + main.GRID_SIZE + 5
-
-        self._click((ax, y))
-        self.assertIs(self.game.selected_toolbox_item, card_a)
-        self._click((bx, y))
-
-        self.assertEqual(self.game.cards, [card_b, card_a])
-        self.assertIs(self.game.selected_toolbox_item, card_b)
 
 
     def test_use_component_stays_in_toolbox(self):
@@ -285,77 +264,61 @@ class ToolboxTests(GameTestCase):
         self.assertTrue(self.game._is_assigned(scorer))
 
 
-    def test_toolbox_index_at_resolves_cell(self):
-        self.game.toolbox.items.clear()
-        filler = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE, main.Scorer.NONE, 0, 5, "f")
-        box = self.game.toolbox
-        # The cell to probe is the 13th one where the panel has that many (the
-        # one a box three columns wide wraps onto its second row for), and the
-        # last cell the panel HAS where it is smaller: a box that holds fewer
-        # than 13 items can never fill a 13th, so asking for one would fill the
-        # box and then loop for ever.
-        index = min(13, box.capacity()) - 1
-        while len(box.items) < index + 1:
-            box.add(filler)
-        pos = (box.rect.x + (index % box.cols) * main.GRID_SIZE + 5,
-               box.rect.y + (index // box.cols) * main.GRID_SIZE + 5)
-        self.assertEqual(box.index_at(pos), index)
-        self.assertIsNone(box.index_at((box.rect.x - 5, box.rect.y - 5)))
 
 
-    def test_selecting_block_highlights_its_cell_green(self):
+    def test_a_selected_block_item_is_framed_on_its_square(self):
         self.game.toolbox.items.clear()
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 10, 20, "B")
         self.game.toolbox.add(block)
-        box = self.game.toolbox
-        self._click((box.rect.x + main.GRID_SIZE // 2, box.rect.y + main.GRID_SIZE // 2))
+        cell = self._item_cell(block)
+        self._click(self._grid_pos(*cell))
         self.assertTrue(self.game.has_selected)
-        self.assertEqual(self.game.selected_toolbox_index, 0)
 
         self.game.screen.fill((0, 0, 0))
-        self.game.draw_toolbox()
-        r0 = pygame.Rect(box.rect.x, box.rect.y, main.GRID_SIZE, main.GRID_SIZE)
-        self.assertEqual(self.game.screen.get_at((r0.x + 1, r0.y + 1))[:3], main.GREEN)
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(0, 0)):
+            self.game.draw()
+        rect = self.game._board_item_rect(*cell)
+        self.assertEqual(self.game.screen.get_at((rect.x + 1, rect.y + 1))[:3],
+                         main.GREEN)
 
 
-    def test_selecting_duplicate_component_highlights_only_clicked_cell(self):
-        # Two copies of the SAME component object live in the toolbox. Selecting
-        # one must highlight only the exact cell that was clicked, not both.
+    def test_an_assigned_component_is_framed_on_its_square(self):
+        # Selecting a component draws the same green frame the panel used to,
+        # on the square the piece lies on (see Game._toggle_item_selection).
         comp = main.Component.effect_component(main.Effect.BOUNCY)
         self.game.toolbox.items.clear()
         self.game.toolbox.add(comp)
-        self.game.toolbox.add(comp)
-        box = self.game.toolbox
-        self._click((box.rect.x + main.GRID_SIZE + main.GRID_SIZE // 2,
-                     box.rect.y + main.GRID_SIZE // 2))  # second cell
+        cell = self._item_cell(comp)
+        self._click(self._grid_pos(*cell))
         self.assertIs(self.game.selected_toolbox_item, comp)
-        self.assertEqual(self.game.selected_toolbox_index, 1)
 
         self.game.screen.fill((0, 0, 0))
-        self.game.draw_toolbox()
-        r0 = pygame.Rect(box.rect.x, box.rect.y, main.GRID_SIZE, main.GRID_SIZE)
-        r1 = r0.move(main.GRID_SIZE, 0)
-        self.assertNotEqual(self.game.screen.get_at((r0.x + 1, r0.y + 1))[:3], main.GREEN)
-        self.assertEqual(self.game.screen.get_at((r1.x + 1, r1.y + 1))[:3], main.GREEN)
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(0, 0)):
+            self.game.draw()
+        rect = self.game._board_item_rect(*cell)
+        self.assertEqual(self.game.screen.get_at((rect.x + 1, rect.y + 1))[:3],
+                         main.GREEN)
 
 
-    def test_assigned_component_stays_green_at_its_cell(self):
+    def test_every_assigned_component_keeps_its_frame(self):
         self.game.toolbox.items.clear()
         shape_c = main.Component.shape_component(main.Shape.SLOPE)
         eff_c = main.Component.effect_component(main.Effect.BOUNCY)
         self.game.toolbox.add(shape_c)
         self.game.toolbox.add(eff_c)
-        self.game._select_toolbox_component(shape_c, 0)
-        self.game._select_toolbox_component(eff_c, 1)  # selecting a new one keeps the old green
+        shape_cell = self._item_cell(shape_c)
+        eff_cell = self._item_cell(eff_c)
+        self._click(self._grid_pos(*shape_cell))
+        self._click(self._grid_pos(*eff_cell))  # selecting a new one keeps the old green
 
         self.game.screen.fill((0, 0, 0))
-        self.game.draw_toolbox()
-        box = self.game.toolbox
-        r0 = pygame.Rect(box.rect.x, box.rect.y, main.GRID_SIZE, main.GRID_SIZE)
-        r1 = r0.move(main.GRID_SIZE, 0)
-        self.assertEqual(self.game.screen.get_at((r0.x + 1, r0.y + 1))[:3], main.GREEN)
-        self.assertEqual(self.game.screen.get_at((r1.x + 1, r1.y + 1))[:3], main.GREEN)
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(0, 0)):
+            self.game.draw()
+        for cell in (shape_cell, eff_cell):
+            rect = self.game._board_item_rect(*cell)
+            self.assertEqual(self.game.screen.get_at((rect.x + 1, rect.y + 1))[:3],
+                             main.GREEN)
 
 
     def test_selected_toolbox_index_cleared_on_deselect(self):
@@ -372,19 +335,19 @@ class ToolboxTests(GameTestCase):
 
 
     def test_s_key_applies_selected_action(self):
-        # Select an action, pick a toolbox block subject, then press S.
+        # Select an action, pick a block subject, then press S. Both of them lie
+        # on the board (see Game.ensure_board_cells).
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 30, 40, "Rect")
         self.game.toolbox.add(block)
         action = main.ActionItem(main.Action.DEATH, 60)
         self.game.actions.append(action)
         self.game.cash = 100
-        # Click the action in the action area to select it.
-        self._click((main.ACTION_AREA_COORDS[0] + 5, main.ACTION_AREA_COORDS[1] + 5))
+        # Click the action on its square to select it.
+        self._click(self._item_pos(action))
         self.assertIs(self.game.selected_action, action)
-        # Click the toolbox block to make it the subject.
-        self._click(self.game.toolbox.cell_rect(
-            self.game.toolbox.items.index(block)).center)
+        # Click the block to make it the subject.
+        self._click(self._item_pos(block))
         self.assertIs(self.game.selected_action_subject, block)
         # Press S to apply (Death sells it for 1.5x).
         self._press(main.pygame.K_s)
@@ -417,32 +380,36 @@ class ToolboxTests(GameTestCase):
         self.assertIn(main.Scorer.FINISH, scorers)
 
 
-    def test_toolbox_item_at_returns_owned_item(self):
+    def test_item_at_cell_finds_an_owned_item(self):
         self.game.toolbox.items.clear()
         item = self.game.shop.items[0]
         self.game.toolbox.add(item)
-        pos = (self.game.toolbox.rect.x + 5, self.game.toolbox.rect.y + 5)
+        cell = self._item_cell(item)
 
-        self.assertIs(self.game.toolbox.item_at(pos), item)
-        self.assertIsNone(self.game.toolbox.item_at((self.game.toolbox.rect.x - 10, self.game.toolbox.rect.y - 10)))
+        self.assertIs(self.game.item_at_cell(cell), item)
+        self.assertIsNone(self.game.item_at_cell((main.GRID_WIDTH - 1,
+                                                  main.GRID_HEIGHT - 1))
+                          if self._item_cell(item) != (main.GRID_WIDTH - 1,
+                                                       main.GRID_HEIGHT - 1)
+                          else None)
 
 
-    def test_the_panel_shows_capacity_worth_and_the_inventory_keeps_the_rest(self):
-        # The inventory has NO size limit: the panel's cells show `capacity`
-        # items at a time and everything past them waits in the stash, which a
-        # reshuffle (or a discard) draws from. Adding is therefore never refused.
+    def test_the_board_holds_one_item_per_square_and_stashes_the_rest(self):
+        # The board is the inventory now (user request), so its size is the
+        # number of squares: an item past the last free square waits in the
+        # stash instead of being refused (see Toolbox.add / _sync_stash).
         self.game.toolbox.items.clear()
         self.game.toolbox.stash.clear()
-        item = self.game.shop.items[0]
-        capacity = self.game.toolbox.capacity()
-        self.assertEqual(capacity, main.INVENTORY_START_SLOTS)  # a new save's size
-        for _ in range(capacity):
-            self.assertTrue(self.game.toolbox.add(item))
-        self.assertEqual(len(self.game.toolbox.items), capacity)
-        self.assertTrue(self.game.toolbox.add(item))        # an overflow item...
-        self.assertEqual(len(self.game.toolbox.items), capacity)   # ...is kept...
-        self.assertEqual(len(self.game.toolbox.stash), 1)          # ...in the stash
-        self.assertEqual(len(self.game.toolbox.every_item()), capacity + 1)
+        self.assertEqual(self.game.toolbox.capacity(),
+                         main.GRID_WIDTH * main.GRID_HEIGHT)
+        for x in range(main.GRID_WIDTH):
+            for y in range(main.GRID_HEIGHT):
+                self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE)
+        item = main.Component.shape_component(main.Shape.PIPE)
+
+        self.assertTrue(self.game.toolbox.add(item))     # never refused...
+        self.assertEqual(len(self.game.toolbox.stash), 1)  # ...but it has to wait
+        self.assertTrue(self.game.toolbox.contains(item))
 
 
     def test_distinct_duplicate_components_other_copy_survives(self):

@@ -24,7 +24,9 @@
       "col": 0,
       "row": 0,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
@@ -48,7 +50,9 @@
       "col": 0,
       "row": 1,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
@@ -77,7 +81,9 @@
       "x": 5,
       "y": 6,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
@@ -99,7 +105,9 @@
       "x": 5,
       "y": 7,
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,

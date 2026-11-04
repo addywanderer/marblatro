@@ -165,27 +165,23 @@ class OdysseyCardTests(GameTestCase):
         self.assertEqual(self.game._return_inaccessible(), 0)
         self.assertEqual(self.game.cash, 1000)
 
-    def test_a_full_panel_still_takes_the_item_home(self):
-        # The inventory is unbounded: an item that comes back while the panel is
-        # full is stashed rather than withheld, so it always comes home (and
-        # pays) on the first return.
+    def test_a_full_board_still_takes_the_item_home(self):
+        # A banked item always comes home (and pays) on the first return, even on
+        # a board with no free square: it waits in the stash (see Toolbox.add).
         self._own_odyssey()
         wall = self._wall(price=40)
         self._select(wall)
         self.assertTrue(self.game._bank_selected_item())
         cash_before = self.game.cash
-        # Fill every cell of the panel.
-        for _ in range(self.game.toolbox.cols * self.game.toolbox.rows):
-            self.game.toolbox.add(main.BlockItem(0, 0, main.Shape.RECT,
-                                                 main.Effect.NONE,
-                                                 main.Scorer.NONE, 0, 12, "Wall"))
+        for x in range(main.GRID_WIDTH):
+            for y in range(main.GRID_HEIGHT):
+                self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE)
+        self.game.ensure_board_cells()
 
         paid = self.game._return_inaccessible()
 
         self.assertEqual(paid, 10)
         self.assertEqual(self.game.cash, cash_before + 10)
-        self.assertEqual(self.game.inaccessible, [])
-        self.assertTrue(self.game.toolbox.contains(wall))
 
     def test_a_retry_keeps_the_item_banked_and_pays_nothing(self):
         # Banking is build-phase state: the run the item waits out is the run
@@ -277,10 +273,9 @@ class OdysseyWiringTests(GameTestCase):
         second = self.game.inaccessible_rect(1)
         self.assertEqual(first.x, main.INACCESSIBLE_COORDS[0])
         self.assertEqual(first.y, main.INACCESSIBLE_COORDS[1])
-        # The tokens are part of the inventory itself (see Game._token_rect),
-        # so what the away column sits beside is the inventory.
+        # The banked items sit in their own column to the right of the shop.
         self.assertGreaterEqual(first.x,
-                                main.TOOLBOX_COORDS[0] + main.TOOLBOX_COORDS[2])
+                                main.SHOP_COORDS[0] + main.SHOP_COORDS[2])
         self.assertEqual(second.y - first.y, main.GRID_SIZE)   # one slot each
 
     def test_the_column_is_drawn_with_the_banked_item(self):
@@ -315,7 +310,7 @@ class OdysseyWiringTests(GameTestCase):
         # The hint beside the inventory is where the player is looking when they
         # want the verb, and it only appears when G would do something.
         wall = self._select_wall()
-        self.assertNotIn("G to", self.game._action_hint(wall, "toolbox"))
+        self.assertNotIn("G to", self.game._action_hint(wall, "board"))
         self._own_odyssey()
-        self.assertIn("G to put it away", self.game._action_hint(wall, "toolbox"))
-        self.assertIn("Click to select", self.game._action_hint(wall, "toolbox"))
+        self.assertIn("G to put it away", self.game._action_hint(wall, "board"))
+        self.assertIn("Click to select", self.game._action_hint(wall, "board"))

@@ -213,7 +213,7 @@ class MatchGroupRarityTests(GameTestCase):
         # group's card: no scorer is tied to a particular group.
         random.seed(20240607)
         pipe = main.match_group_for_shape(main.Shape.PIPE)
-        with mock.patch("main.random_match_group", return_value=pipe):
+        with mock.patch("rolling.random_match_group", return_value=pipe):
             seen = {main.random_prebuilt_card_value() for _ in range(600)}
         self.assertEqual(seen, {main.match_group_card(pipe, scorer)
                                 for scorer in components.CARD_SCORERS})

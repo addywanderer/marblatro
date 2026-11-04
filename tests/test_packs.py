@@ -324,14 +324,19 @@ class PackShopTests(GameTestCase):
         return pack
 
     def test_the_shelf_holds_five_item_slots_and_three_packs(self):
-        items = [i for i in self.game.shop.items if i.row == main.SHOP_ITEM_ROW]
-        packs = [i for i in self.game.shop.items if i.row == main.SHOP_PACK_ROW]
+        items = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) != "pack"]
+        packs = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) == "pack"]
         self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
-        self.assertEqual([i.col for i in packs], [1, 2, 3])
+        self.assertEqual([i.col for i in packs],
+                         [main.SHOP_PACK_COL + n
+                          for n in range(main.SHOP_PACK_SLOTS)])
         self.assertTrue(all(i.kind == "pack" for i in packs))
         # The Board Unit's own tile sits beside them and holds no item.
         self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
-        self.assertEqual(main.BOARD_UNIT_COL, 4)
+        self.assertEqual(main.BOARD_UNIT_COL,
+                         main.SHOP_PACK_COL + main.SHOP_PACK_SLOTS)
         self.assertIsNone(self.game.shop.item_at(
             self.game._board_unit_tile().center))
 
@@ -386,7 +391,7 @@ class PackShopTests(GameTestCase):
                     return roll(shop, source, col, row, parts_only=parts_only)
 
                 shop = main.Shop(main.SHOP_COORDS)
-                with mock.patch.object(main, "SHELF_OFFER_TYPES", tuple(kinds)):
+                with mock.patch("shop.SHELF_OFFER_TYPES", tuple(kinds)):
                     with mock.patch.object(main.Shop, "_offer_of", spy):
                         for _ in range(20000):
                             shop._roll_random_offer(0, 0)
@@ -607,21 +612,19 @@ class PackKeepTests(GameTestCase):
         self.assertIs(self.game.open_pack, pack)
         self.assertIn("Already own", self.game.shop_message)
 
-    def test_a_full_panel_still_takes_a_pack_part(self):
-        # The inventory is unbounded (see Toolbox): a part kept from a pack while
-        # the panel is full goes to the stash, so the pick is never refused and
-        # the pack does not stay open.
+    def test_a_counted_out_board_still_takes_a_pack_part(self):
+        # The board can be full, but a part kept from a pack is never refused: it
+        # is owned and waits for a square (see Toolbox.add), so the pick goes
+        # through and the pack does not stay open.
         part = main.Component.shape_component(main.Shape.PIPE)
         pack = self._open([part], main.Pack.SHAPE)
-        self.game.toolbox.items = [main.BlockItem(0, 0, main.Shape.RECT,
-                                                 main.Effect.NONE, main.Scorer.NONE,
-                                                 0, 0, "wall")] * (
-            self.game.toolbox.capacity())
-        self.game.toolbox.stash = []
+        for x in range(main.GRID_WIDTH):
+            for y in range(main.GRID_HEIGHT):
+                self.game.grid[(x, y)] = main.Block(x, y, scorer=main.Scorer.NONE)
+        self.game.ensure_board_cells()
         self.game._keep_pack_option(0)
         self.assertIsNot(self.game.open_pack, pack)       # the pick went through
         self.assertTrue(self.game.toolbox.contains(part))
-        self.assertEqual(len(self.game.toolbox.stash), 1)
 
     def test_a_full_card_area_refuses_a_card(self):
         card = main.CardItem(main.Card.GARDEN, 36)
@@ -630,7 +633,7 @@ class PackKeepTests(GameTestCase):
             self.game.cards.append(main.CardItem(main.Card.JOKER, 24))
         self.game._keep_pack_option(0)
         self.assertEqual(pack.options, [card])
-        self.assertIn("full", self.game.shop_message)
+        self.assertIn("only hold", self.game.shop_message)
 
 
 class PackActionRuleTests(GameTestCase):
@@ -673,7 +676,7 @@ class PackActionRuleTests(GameTestCase):
                            scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
         self.game.grid[(2, 2)] = block
         self.game.run_active = True
-        self.game._pick_action_subject(None, None, block)
+        self.game._pick_action_subject(block)
         self.assertTrue(self.game._apply_action())
         self.assertIsNone(self.game.pending_pack_action)
         self.assertEqual(block.trigger_limit, 2)

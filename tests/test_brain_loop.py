@@ -100,7 +100,7 @@ class BrainLoopTests(GameTestCase):
         self._touch(self._sticky(), roll=0.1)
 
         self.assertEqual(len(self.game.actions), main.MAX_ACTIONS)
-        self.assertIn("Action area is full", self.game.shop_message)
+        self.assertIn("only hold", self.game.shop_message)
 
     def test_the_roll_comes_from_the_runs_own_rng(self):
         # Forcing the GLOBAL random to a value that would always pass must not

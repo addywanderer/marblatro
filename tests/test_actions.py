@@ -11,21 +11,21 @@ class ActionsTests(GameTestCase):
     """The one-shot actions (Death, Recognition, Deja Vu, ...)."""
 
 
-    def test_a_trigger_banks_a_decimal_fraction_of_a_point(self):
-        # A trigger banks a fraction of a point and one point always converts:
-        # a third for Shreds, a half for the rest, scaled by the scorer's
-        # magnitude. The count reads as a decimal, because a rolled magnitude
-        # lands off any small fraction's grid — a Rubble trigger's 0.7 points
-        # would read "2/3", and a Shreds 1.1/3 would read "1 1/6".
+    def test_a_trigger_banks_a_point_per_unit_of_magnitude(self):
+        # A trigger banks its own magnitude in points and one point always
+        # converts: a point a unit for Shreds, Rubble and Ideas, half a point a
+        # unit for Picky. The count reads as a decimal, because a rolled
+        # magnitude lands off any small fraction's grid — a Rubble trigger's
+        # 1.4 points would read "1 2/5", and a Picky 1.1 would read "1/2".
         self.assertEqual(main.points_text(0.5), "0.5")
         self.assertEqual(main.points_text(0.7), "0.7")
         self.assertEqual(main.points_text(1.5), "1.5")
         self.assertEqual(main.points_text(1 / 3), "0.333")
         self.assertEqual(main.points_text(2), "2")
         self.assertEqual(self.game._resource_cost(), 1)
-        for scorer, rate in ((main.Scorer.SHREDS, 1 / 3),
-                             (main.Scorer.RUBBLE, 0.5),
-                             (main.Scorer.IDEAS, 0.5),
+        for scorer, rate in ((main.Scorer.SHREDS, 1),
+                             (main.Scorer.RUBBLE, 1),
+                             (main.Scorer.IDEAS, 1),
                              (main.Scorer.PICKY, 0.5)):
             with self.subTest(scorer=main.Scorer.name(scorer)):
                 self.assertAlmostEqual(components.resource_points_for(scorer, 1),
@@ -39,17 +39,17 @@ class ActionsTests(GameTestCase):
         self.assertEqual(components.resource_points_for(main.Scorer.FRESH, 3), 0)
 
 
-    def test_a_trigger_banks_the_fraction_the_description_states(self):
+    def test_a_trigger_banks_the_points_the_description_states(self):
         # The description and the bank agree: a 1-magnitude Rubble block says
-        # "0.5 rubble point (0)" and banks exactly that.
+        # "1 rubble point (0)" and banks exactly that.
         block = main.Block(0, 0, scorer=main.Scorer.RUBBLE)
-        self.assertIn("0.5 rubble point (0)",
+        self.assertIn("1 rubble point (0)",
                       main.scorer_description(block.scorer, block.scorer_amount))
         self.game.run_active = True
         marble = self._add_marble()
         marble.collisions_this_tick = [block]
         self.game._handle_block_contacts([block])
-        self.assertAlmostEqual(self.game.rubble_run_gain, 0.5)
+        self.assertAlmostEqual(self.game.rubble_run_gain, 1.0)
 
 
     def test_action_data_lives_in_components(self):
@@ -298,11 +298,11 @@ class ActionsTests(GameTestCase):
 
         self.game._select_action(cleansweep)
         self.assertIn("press S to use", self.game.shop_message)
-        self.assertIn("no target", self.game._action_hint(cleansweep, "actions"))
+        self.assertIn("no target", self.game._action_hint(cleansweep, "board"))
 
         self.game._select_action(death)
         self.assertIn("click a target block/card", self.game.shop_message)
-        self.assertIn("Click a target", self.game._action_hint(death, "actions"))
+        self.assertIn("Click a target", self.game._action_hint(death, "board"))
 
 
     def test_cleansweep_is_refused_while_the_card_area_is_full(self):
@@ -318,7 +318,7 @@ class ActionsTests(GameTestCase):
 
         self.assertEqual(self.game.cash, 250)
         self.assertIn(action, self.game.actions)
-        self.assertIn("full", self.game.shop_message)
+        self.assertIn("only hold", self.game.shop_message)
 
 
     def _use_action(self, value, version=1):
@@ -329,8 +329,8 @@ class ActionsTests(GameTestCase):
         return self.game._apply_action(), item
 
     def test_expansion_unlocks_four_squares(self):
-        # A brand-new game's board is the centered 2x2 region; the four squares
-        # come off the frontier next to it (see _grant_locked_units).
+        # A brand-new game's board is its centered start region; the four
+        # squares come off the frontier next to it (see _grant_locked_units).
         self.game._reset_board_to_start()
         before = len(self.game.unlocked_cells)
         applied, item = self._use_action(main.Action.EXPANSION)
@@ -714,7 +714,7 @@ class InactionTests(GameTestCase):
         self.assertTrue(self._use())
         self.assertEqual(self.game.inaction_used, 5)
         self.assertEqual(self.game.max_cards, main.MAX_CARDS + 1)
-        self.assertIn("card area grew", self.game.shop_message)
+        self.assertIn("you may hold", self.game.shop_message)
         # It keeps counting: five more uses is another slot.
         for _ in range(main.INACTION_USES_PER_SLOT):
             self.assertTrue(self._use())
@@ -737,38 +737,28 @@ class InactionTests(GameTestCase):
         self.assertEqual(self.game.inaction_used, 0)     # not banked, handed over
         self.assertEqual(self.game.max_cards, main.MAX_CARDS + 1)
         self.assertIn("handed over a card slot", self.game.shop_message)
-        # ...and every further v2 is another slot.
-        self.assertTrue(self._use(version=2))
-        self.assertEqual(self.game.max_cards, main.MAX_CARDS + 2)
         # The v1 counter still works alongside it: five uses, one more slot.
         for _ in range(main.INACTION_USES_PER_SLOT):
             self.assertTrue(self._use())
-        self.assertEqual(self.game.max_cards, main.MAX_CARDS + 3)
+        self.assertEqual(self.game.max_cards, main.MAX_CARDS + 2)
+        self.assertEqual(self.game.inaction_used, main.INACTION_USES_PER_SLOT)
         self.assertIn("hands over a card slot",
                       main.Action.description(main.Action.INACTION, 2))
 
-    def test_it_is_refused_when_the_panel_cannot_show_another_slot(self):
-        # The tray's slots and the action row's add up to SLOT_ROW_SLOTS in all:
-        # with the tray already as wide as the panel column allows, a use that
-        # would win a slot is refused and the action KEPT, rather than spent on a
-        # slot that could not be drawn.
-        for _ in range(3 * main.INACTION_USES_PER_SLOT):
-            self.assertTrue(self._use())
-        self.assertEqual(self.game.max_cards,
-                         main.SLOT_ROW_SLOTS - self.game.max_actions)
-        self.assertEqual(self.game.card_slot_room(), 0)
-        # Four more uses are just counted (no slot is due yet)...
+    def test_the_slot_is_never_refused_for_want_of_panel_room(self):
+        # A card lies on a board square now, so there is no tray to fill: the
+        # use that completes a slot always lands.
+        self.assertEqual(self.game.card_slot_room(), 1)
         for _ in range(main.INACTION_USES_PER_SLOT - 1):
             self.assertTrue(self._use())
-        # ...and the one that would have completed a slot is refused.
         action = main.ActionItem(main.Action.INACTION, 24)
         self.game.actions.append(action)
         self.game.selected_action = action
-        self.assertFalse(self.game._apply_action())
-        self.assertIn("as wide as the panel allows", self.game.shop_message)
-        self.assertIn(action, self.game.actions)
-        self.assertEqual(self.game.inaction_used,
-                         4 * main.INACTION_USES_PER_SLOT - 1)
+
+        self.assertTrue(self.game._apply_action())
+
+        self.assertEqual(self.game.inaction_used, main.INACTION_USES_PER_SLOT)
+        self.assertEqual(self.game.max_cards, main.MAX_CARDS + 1)
 
     def test_essence_still_takes_its_slot_away(self):
         # The Essence card's slot is still gone; Inaction's slots are counted on
@@ -802,39 +792,26 @@ class ForesightTests(GameTestCase):
 
     def test_it_permanently_adds_an_action_slot(self):
         self.assertEqual(self.game.max_actions, main.MAX_ACTIONS)
-        self.assertEqual(self.game.action_area_x(), main.ACTION_AREA_COORDS[0])
 
         self.assertTrue(self._use())
 
         self.assertEqual(self.game.max_actions, main.MAX_ACTIONS + 1)
         self.assertEqual(self.game.action_slots_won, 1)
         self.assertIn("added 1 action slot", self.game.shop_message)
-        # The row is its own line in the panel column, so a wider row does not
-        # move it: it still starts beside the card tray's left edge, and the
-        # slot past the ones that fit before the upgrade button is reached by
-        # paging the row (see Game.action_row_window).
-        self.assertEqual(self.game.action_area_x(), main.ACTION_AREA_COORDS[0])
-        self.assertEqual(self.game.action_slots_shown(), main.ACTION_BAND_SLOTS)
-        self.assertEqual(self.game.action_area_x()
-                         + self.game.action_slots_shown() * main.GRID_SIZE
-                         + 12,
-                         main.ACTION_UPGRADE_RECT.left)
 
     def test_the_extra_slot_really_holds_an_action(self):
-        # Every path that fills the action area asks the GAME for its size, so
-        # the wider row is not just decoration: one more action fits, and the
-        # hit test finds the action the row shows in its first slot.
+        # Every path that fills the actions asks the GAME for its size, so the
+        # extra slot is not just decoration: one more action fits, and a click on
+        # it (it lies on a board square) selects it.
         self.game.actions = []
         self.assertTrue(self._use())
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
                              for _ in range(self.game.max_actions)]
         self.assertFalse(self.game._grant_random_action())
-        self.assertIn("full", self.game.shop_message)
-        # A click in the leftmost (new) slot selects the action drawn there.
-        rect = pygame.Rect(self.game.action_area_x(), main.ACTION_AREA_COORDS[1],
-                           main.GRID_SIZE, main.GRID_SIZE)
-        self.assertIs(self.game.action_area_item_at(rect.center),
-                      self.game.actions[0])
+        self.assertIn("only hold", self.game.shop_message)
+        first = self.game.actions[0]
+        self._click(self._item_pos(first))
+        self.assertIs(self.game.selected_action, first)
 
     def test_a_v2_foresight_removes_the_limit(self):
         self.assertFalse(self.game.action_slots_unlimited)
@@ -849,100 +826,30 @@ class ForesightTests(GameTestCase):
         # Nothing refuses an action for room any more: fill far past the line
         # and both the purchase path and the grant path still say yes.
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
-                             for _ in range(main.SLOT_ROW_SLOTS + 4)]
+                             for _ in range(50)]
         self.assertTrue(self.game._grant_random_action())
-        self.assertGreater(len(self.game.actions), main.SLOT_ROW_SLOTS)
+        self.assertEqual(len(self.game.actions), 51)
         # A second v2 has nothing left to give, so it is refused and kept.
         action = main.ActionItem(main.Action.FORESIGHT, 90, version=2)
         self.game.actions.append(action)
         self.game.selected_action = action
         self.assertFalse(self.game._apply_action())
-        self.assertIn("already unlimited", self.game.shop_message)
+        self.assertIn("as many actions as you like", self.game.shop_message)
         self.assertIn(action, self.game.actions)
 
-    def test_a_full_row_pages_every_action_into_reach(self):
-        # The row's line can only SHOW so many slots, so the row pages through
-        # the rest: every held action stays clickable, which is what makes an
-        # unlimited action area usable (see Game.action_row_window).
-        self._use(version=2)
-        self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
-                             for _ in range(9)]
-        slots = self.game.action_slots_shown()
-        per_page = slots - 1
-        pages = -(-len(self.game.actions) // per_page)
 
-        start, count, paging = self.game.action_row_window()
 
-        self.assertTrue(paging)
-        self.assertEqual((start, count), (0, per_page))
-        # The pager slot is the last one, and holds no action of its own.
-        self.assertTrue(self.game.action_area_pager_at(
-            self.game.action_slot_rect(slots - 1).center))
-        self.assertIsNone(self.game.action_area_item_at(
-            self.game.action_slot_rect(slots - 1).center))
-        # Turning the pages reaches every action, then wraps round again.
-        seen = []
-        for _ in range(2 * pages):
-            start, count, _paging = self.game.action_row_window()
-            self.assertGreater(count, 0)
-            seen.extend(self.game.action_area_item_at(
-                self.game.action_slot_rect(i).center) for i in range(count))
-            self.game._page_action_row()
-        self.assertEqual({id(action) for action in seen},
-                         {id(action) for action in self.game.actions})
-        self.assertEqual(self.game.action_area_page, 2 * pages)
-        self.assertEqual(self.game.action_row_window()[0], 0)   # wrapped round
 
-    def test_a_row_that_fits_does_not_page(self):
-        self._use(version=2)
-        self.game.actions = [main.ActionItem(main.Action.DEATH, 24)]
 
-        start, count, paging = self.game.action_row_window()
-
-        self.assertEqual((start, count), (0, 1))
-        self.assertFalse(paging)
-        self.assertFalse(self.game.action_area_pager_at(
-            self.game.action_slot_rect(self.game.action_slots_shown() - 1).center))
-        # An empty slot past the actions is empty, pager or not.
-        self.assertIsNone(self.game.action_area_item_at(
-            self.game.action_slot_rect(1).center))
-
-    def test_the_pager_says_which_page_is_on_show(self):
-        self._use(version=2)
-        self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
-                             for _ in range(self.game.action_slots_shown() + 1)]
-
-        self.game._page_action_row()
-
-        self.assertEqual(self.game.action_area_page, 1)
-        self.assertIn("Showing actions", self.game.shop_message)
-
-    def test_the_set_pager_exists_only_when_the_row_overflows(self):
-        self._use(version=2)
-        self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
-                             for _ in range(self.game.action_slots_shown() + 1)]
-        slots = self.game.action_slots_shown()
-        self.assertTrue(self.game.action_area_pager_at(
-            self.game.action_slot_rect(slots - 1).center))
-        self.assertFalse(self.game.action_area_pager_at(
-            self.game.action_slot_rect(0).center))
-
-    def test_it_is_refused_when_the_band_has_no_room(self):
-        # The cards-and-actions band holds SLOT_ROW_SLOTS slots in all, so a
-        # Foresight that would push the pair past it is refused and kept. Three
-        # Inaction slots fill the band: 8 cards + 2 actions is all it holds.
-        self.game.inaction_used = (main.SLOT_ROW_SLOTS - main.MAX_ACTIONS
-                                   - main.MAX_CARDS) * main.INACTION_USES_PER_SLOT
-        self.assertEqual(self.game.max_cards + self.game.max_actions,
-                         main.SLOT_ROW_SLOTS)
-        self.assertEqual(self.game.action_slot_room(), 0)
+    def test_it_is_never_refused_for_want_of_room(self):
+        # The cards and actions lie on the board now, so nothing caps how many
+        # slots they may have: a Foresight with no panel to fill always lands.
+        self.assertEqual(self.game.action_slot_room(), 1)
 
         action = main.ActionItem(main.Action.FORESIGHT, 90)
         self.game.actions.append(action)
         self.game.selected_action = action
-        self.assertFalse(self.game._apply_action())
+        self.assertTrue(self.game._apply_action())
 
-        self.assertIn("as wide as the panel allows", self.game.shop_message)
-        self.assertIn(action, self.game.actions)  # kept, not spent
-        self.assertEqual(self.game.max_actions, main.MAX_ACTIONS)
+        self.assertEqual(self.game.max_actions, main.MAX_ACTIONS + 1)
 

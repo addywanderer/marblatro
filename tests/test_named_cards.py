@@ -106,7 +106,7 @@ class NamedCardCatalogueTests(GameTestCase):
             "Cozy": ("start", main.Scorer.CHIPS_ADD, 3.0, "cozy"),
             "Painting": ("start", main.Scorer.CHIPS_ADD, 0.1, "painting"),
             "Synthesizer": ("start", main.Scorer.MULT_ADD, 0.75, "synthesizer"),
-            "Island": ("end", main.Scorer.MULT_MUL, 2.0, "island"),
+            "Island": ("end", main.Scorer.MULT_MUL, 0.5, "island"),
             "Fountain": ("end", main.Scorer.MULT_MUL, 1.0, "pipe_streak"),
             "Intangible": ("end", main.Scorer.MULT_ADD, 0.125, "inside_time"),
             "Swashbuckler": ("start", main.Scorer.MULT_ADD, 1.0 / 20.0,
@@ -204,9 +204,10 @@ class NamedCardStartTests(GameTestCase):
         self.game.cards = _own(main.Card.JOKER)
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_mult, 5)  # 1 + 4
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 4)  # +4
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_mult, 5)  # every run, not +4 more
+        self.assertEqual(self.game.score_mult,
+                         main.RUN_BASE_MULT + 4)  # every run, not +4 more
 
     def test_the_banker_pays_a_chip_per_ten_dollars(self):
         self.game.score_chips = 1
@@ -698,8 +699,11 @@ class IntangibleTests(GameTestCase):
         self.game.grid.clear()
         self.game.unlocked_cells = {(x, y) for x in range(6) for y in range(2)}
         self.game._board_walls_dirty = True
+        # A locked square only exists as a WALL where the marble could reach it:
+        # the frontier around the unlocked region (see _board_wall_blocks). The
+        # square under the unlocked block is one of them.
         marble = self._add_marble((main.MARBLE_BOX_COORDS[0] + 5 * main.GRID_SIZE + 20,
-                                   main.MARBLE_BOX_COORDS[1] + 5 * main.GRID_SIZE + 20))
+                                   main.MARBLE_BOX_COORDS[1] + 2 * main.GRID_SIZE + 20))
         self.game._count_inside_time(marble)
         self.assertEqual(self.game.inside_locked_time, main.DT)
         self.assertEqual(self.game.inside_block_time, 0.0)
@@ -860,9 +864,11 @@ class MatrixTests(GameTestCase):
         self.game.upgrades_enabled = False
         self.assertTrue(self.game.reset_run())
         marble = self.game.marbles[0]
+        # The locked unit it is inside is a frontier wall — the only locked
+        # squares the marble can reach (see Game._board_wall_blocks).
         marble.position = np.array(
-            [main.MARBLE_BOX_COORDS[0] + 5 * main.GRID_SIZE + 20,
-             main.MARBLE_BOX_COORDS[1] + 5 * main.GRID_SIZE + 20], dtype=float)
+            [main.MARBLE_BOX_COORDS[0] + 20,
+             main.MARBLE_BOX_COORDS[1] + main.GRID_SIZE + 20], dtype=float)
         self.game.run_active = True
         self.game.update()
         self.assertGreater(self.game.inside_locked_no_phase_time, 0.0)
@@ -887,7 +893,7 @@ class NamedCardFragileTests(GameTestCase):
         self.game.wrecking_bonus[main.Scorer.MULT_ADD] = 6
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_mult, 1 + 6)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 6)
 
     def test_a_retry_discards_the_gains_the_run_earned(self):
         self.game.cards = _own(main.Card.WRECKING_BALL)
@@ -914,11 +920,11 @@ class NamedCardOwnershipTests(GameTestCase):
         self.game.cards = _own(main.Card.JOKER, main.Card.BLUEPRINT)
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_mult, 1 + 4 + 4)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 4 + 4)
         # A Blueprint in the leftmost slot has nothing to copy.
         self.game.cards = _own(main.Card.BLUEPRINT, main.Card.JOKER)
         self.assertTrue(self.game.reset_run())
-        self.assertEqual(self.game.score_mult, 1 + 4)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT + 4)
 
     def test_a_blueprint_copies_an_end_card(self):
         self.game.cards = _own(main.Card.EXPLORER, main.Card.BLUEPRINT)
@@ -940,8 +946,8 @@ class NamedCardOwnershipTests(GameTestCase):
         self.game._apply_trial()
         self.assertIs(self.game.disabled_card, joker)
         self.game.reset_run(False)
-        self.assertEqual(self.game.score_mult, 1)   # the Joker was cut
-        self.assertEqual(self.game.score_chips, 1)
+        self.assertEqual(self.game.score_mult, main.RUN_BASE_MULT)   # the Joker was cut
+        self.assertEqual(self.game.score_chips, main.RUN_BASE_CHIPS)
 
     def test_a_named_card_does_nothing_on_a_collision(self):
         # A named card fires at its own moment, never on a hit: colliding with a

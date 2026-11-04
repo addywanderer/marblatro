@@ -40,8 +40,6 @@ BlockItem = _save_source.BlockItem
 CardItem = _save_source.CardItem
 Component = _save_source.Component
 DEFAULT_DIFFICULTY = _save_source.DEFAULT_DIFFICULTY
-DISCARDS_PER_RUN = _save_source.DISCARDS_PER_RUN
-INVENTORY_START_SLOTS = _save_source.INVENTORY_START_SLOTS
 Difficulty = _save_source.Difficulty
 Effect = _save_source.Effect
 GREEN = _save_source.GREEN
@@ -135,7 +133,12 @@ def _restore_random_rolls(item, data):
 
 
 def _serialize_item(item):
-    """Turn a toolbox/shop/grid item into a JSON-safe dict."""
+    """Turn a toolbox/shop/grid item into a JSON-safe dict.
+
+    Every owned item stands on a board square, and the square is the item's
+    ``col``/``row`` (a Block keeps its own ``x``/``y``), so it rides through the
+    save with the item like every other field.
+    """
     if isinstance(item, Block):
         return {
             "kind": "block",
@@ -169,6 +172,7 @@ def _serialize_item(item):
             "kind": "block",
             "placed": False,
             "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
             "shape": int(item.shape),
             "effects": [int(e) for e in item.effects],
             "effect_amounts": _serialize_effect_amounts(item),
@@ -196,6 +200,12 @@ def _serialize_item(item):
             "placed_cell": (list(item.placed_cell)
                             if getattr(item, "placed_cell", None) else None),
         }
+    return _serialize_item_as_item(item)
+
+
+def _serialize_item_as_item(item):
+    """The JSON for an item that is not a Block (a component, card, action, ...)."""
+    kind = getattr(item, "kind", None)
     if kind == "card":
         return {
             "kind": "card",
@@ -205,6 +215,7 @@ def _serialize_item(item):
             # describes itself with it); 0 for a whole card.
             "amount": getattr(item, "amount", 0),
             "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
             "name": item.name,
             # This run's RANDOM/LUCKY outcome (see _serialize_random_rolls).
             "random_rolls": _serialize_random_rolls(item),
@@ -216,6 +227,7 @@ def _serialize_item(item):
             "price": int(item.price),
             "version": int(getattr(item, "version", 1)),
             "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
             "name": item.name,
         }
     if kind == "resource":
@@ -252,11 +264,35 @@ def _serialize_item(item):
         "price": int(item.price),
         "name": item.name,
         "col": item.col, "row": item.row,
+        "board_cell": _serialize_board_cell(item),
     }
+
+
+def _serialize_board_cell(item):
+    """The board square an owned item lies on, as JSON, or None.
+
+    ``col``/``row`` are the SHOP cell an offer is drawn in and survive a save for
+    the shelf's sake; the square a bought item actually lies on is this (see
+    Game.item_cell).
+    """
+    cell = getattr(item, "board_cell", None)
+    return list(cell) if cell else None
+
+
+def _restore_board_cell(item, data):
+    """Give a loaded item back the board square it was saved on."""
+    cell = data.get("board_cell")
+    if cell:
+        item.board_cell = tuple(cell)
+    return item
 
 
 def _deserialize_item(data):
     """Rebuild a toolbox/shop/grid item from a serialized dict."""
+    return _deserialize_item_kind(data)
+
+
+def _deserialize_item_kind(data):
     if data["kind"] == "resource":
         return ResourceOption(data["scorer"], data.get("amount", 0),
                               data.get("points", 0))
@@ -270,13 +306,15 @@ def _deserialize_item(data):
                         kept=data.get("kept", 0))
     if data["kind"] == "card":
         return _restore_random_rolls(
-            CardItem(data["value"], data.get("price", 20),
-                     col=data.get("col", 0), row=data.get("row", 0),
-                     amount=data.get("amount", 0)), data)
+            _restore_board_cell(
+                CardItem(data["value"], data.get("price", 20),
+                         col=data.get("col", 0), row=data.get("row", 0),
+                         amount=data.get("amount", 0)), data), data)
     if data["kind"] == "action":
-        return ActionItem(data["value"], data.get("price", 60),
-                          version=data.get("version", 1),
-                          col=data.get("col", 0), row=data.get("row", 0))
+        return _restore_board_cell(
+            ActionItem(data["value"], data.get("price", 60),
+                       version=data.get("version", 1),
+                       col=data.get("col", 0), row=data.get("row", 0)), data)
     if data["kind"] == "block":
         if data.get("placed"):
             block = Block(
@@ -322,15 +360,15 @@ def _deserialize_item(data):
             item.triggers_left = int(data["triggers_left"])
         if data.get("placed_cell"):
             item.placed_cell = tuple(data["placed_cell"])
-        return _restore_random_rolls(item, data)
-    return Component(
+        return _restore_random_rolls(_restore_board_cell(item, data), data)
+    return _restore_board_cell(Component(
         data["kind"], data["value"],
         amount=data.get("amount", 0),
         price=data.get("price", 0),
         name=data.get("name", ""),
         col=data.get("col", 0),
         row=data.get("row", 0),
-    )
+    ), data)
 
 
 def ensure_saves():
@@ -434,15 +472,9 @@ def _save_data(game):
         "cards": [_serialize_item(c) for c in game.cards],
         "actions": [_serialize_item(a) for a in game.actions],
         "toolbox": [_serialize_item(i) for i in game.toolbox.items],
-        # The inventory's OTHER part: everything owned that the panel is not
-        # showing right now (the inventory is unbounded, see main.Toolbox). A
+        # The toolbox's overflow: owned parts the board had no square for. A
         # save written before the stash existed has none.
         "toolbox_stash": [_serialize_item(i) for i in game.toolbox.stash],
-        # The discards left this run (see Game._discard_items), and the
-        # inventory slots bought from the shop (on top of
-        # main.INVENTORY_START_SLOTS — see Game._buy_inventory_slot).
-        "discards_left": game.discards_left,
-        "inventory_slots_bought": game.inventory_slots_bought,
         "grid": [_serialize_item(b) for b in game.grid.values()],
         "shop": [_serialize_item(i) for i in game.shop.items],
         # The pack the player is choosing from, if any (it has already left the
@@ -630,23 +662,11 @@ def _load_save_data(game, data, slot):
     game.card_slots_won = data.get("card_slots_won", 0)
     game.inventory_slots_won = data.get("inventory_slots_won", 0)
     game.inventory_slots_run_gain = 0
-    # The inventory slots the save BOUGHT come back with it (a save written
-    # before the shop sold slots has none), so the panel is as big as it was.
-    game.inventory_slots_bought = data.get("inventory_slots_bought", 0)
-    game.toolbox.base_slots = (INVENTORY_START_SLOTS
-                               + game.inventory_slots_bought)
-    game.toolbox.slot_bonus = game.inventory_slots_won
     # A sale recorded before the save keeps the Deal breaker trial beaten, so a
     # save written before the record existed just reads as "never sold".
     game.card_sold = data.get("card_sold", False)
     game.action_slots_won = data.get("action_slots_won", 0)
     game.action_slots_unlimited = data.get("action_slots_unlimited", False)
-    game.action_area_page = 0
-    # The inventory's own view state is not saved either: the pop-up starts
-    # closed, on its first page, and so does the panel itself.
-    game.inventory_open = False
-    game.inventory_page = 0
-    game.toolbox.page = 0
     # The action bonuses above: a save written before they existed reads as an
     # untouched game (no factor, full reroll price, no banked xMult).
     game.resource_gain_mult = data.get("resource_gain_mult", 1.0)
@@ -698,14 +718,6 @@ def _load_save_data(game, data, slot):
     game.toolbox.items = [_deserialize_item(d) for d in data.get("toolbox", [])]
     game.toolbox.stash = [_deserialize_item(d)
                           for d in data.get("toolbox_stash", [])]
-    # The slots come before the items above, so a save written when the panel was
-    # wider than its bought slots (see INVENTORY_START_SLOTS) has its overflow
-    # moved to the stash instead of landing in unsold cells.
-    game.toolbox.settle()
-    # The discards the run had left come back too, so loading a save cannot hand
-    # a mid-run discard back (see Game._discard_items). A save written before
-    # the inventory had discards starts the run with a full set.
-    game.discards_left = int(data.get("discards_left", DISCARDS_PER_RUN))
     game.selection = []
     # Odyssey's banked items come back before anything asks the toolbox for
     # room (see Game._return_inaccessible), and a save written before the card
@@ -776,6 +788,11 @@ def _load_save_data(game, data, slot):
     game.run_time = 0.0
     game.assigned_toolbox_indexes = {}
     game._clear_toolbox_selection()
+    # Items only ever stand on UNLOCKED squares (see ensure_board_cells), so the
+    # loaded layout is re-made: a save whose board was locked down again — or one
+    # whose items sat where this layout cannot put them — comes back with every
+    # item on a square the player can reach.
+    game.ensure_board_cells()
 
 
 def wipe_slot(game, slot):
@@ -789,9 +806,9 @@ def wipe_slot(game, slot):
 def start_new_game_in_slot(game, slot):
     """Start a fresh game assigned to the given slot (no save written yet)."""
     game.reset_game()
-    # Every new game begins with the board locked to its starting centered 2x2
+    # Every new game begins with the board locked to its starting centered
     # region; buying Board Units unlocks squares. (Starting a NEW game always
-    # resets the board to this 2x2 start — an existing game's unlocked state is
+    # resets the board to this start — an existing game's unlocked state is
     # only restored when its slot is loaded, not when another game begins.)
     game._reset_board_to_start()
     game.save_slot = slot

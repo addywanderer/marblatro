@@ -152,7 +152,7 @@ class CardRarityTests(GameTestCase):
         random.seed(1)
         counted = collections.Counter()
         cards_only = (main.Pack.CARD,)
-        with mock.patch.object(main, "SHELF_OFFER_TYPES", cards_only):
+        with mock.patch("shop.SHELF_OFFER_TYPES", cards_only):
             for _ in range(1000):
                 self.game.shop.refresh()
                 for item in self.game.shop.items:

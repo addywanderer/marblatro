@@ -39,13 +39,19 @@ class UiTests(GameTestCase):
         block.rect.topleft = (0, 0)
         surface = pygame.Surface([main.GRID_SIZE] * 2)
 
-        block.draw(surface)  # untriggered: white border
-        self.assertEqual(surface.get_at((1, main.GRID_SIZE // 2))[:3], main.WHITE)
+        # The border is a player toggle, so pin it on for this test.
+        prev = main.BLOCK_BORDERS_ON
+        main.BLOCK_BORDERS_ON = True
+        try:
+            block.draw(surface)  # untriggered: white border
+            self.assertEqual(surface.get_at((1, main.GRID_SIZE // 2))[:3], main.WHITE)
 
-        block.triggers_left = 0  # triggered during a run
-        surface.fill((0, 0, 0))
-        block.draw(surface)
-        self.assertEqual(surface.get_at((1, main.GRID_SIZE // 2))[:3], main.RED)
+            block.triggers_left = 0  # triggered during a run
+            surface.fill((0, 0, 0))
+            block.draw(surface)
+            self.assertEqual(surface.get_at((1, main.GRID_SIZE // 2))[:3], main.RED)
+        finally:
+            main.BLOCK_BORDERS_ON = prev
 
 
     def test_no_effect_block_shape_is_scorer_colored(self):
@@ -211,19 +217,6 @@ class UiTests(GameTestCase):
             self.assertFalse(self.game._show_marble_box_title())
 
 
-    def test_inventory_title_stays_while_the_mouse_is_over_the_inventory(self):
-        # The INVENTORY title is part of the panel's own furniture: it is drawn
-        # wherever the mouse is, hovering over the inventory included (only the
-        # board's title gets out of the cursor's way — see
-        # test_board_title_hides_when_mouse_over_board).
-        with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
-            self.game.draw()
-        self.assertTrue(self._region_has_white(self._toolbox_title_region()))
-        with mock.patch("main.pygame.mouse.get_pos",
-                        return_value=(self.game.toolbox.rect.x + 5,
-                                      self.game.toolbox.rect.y + 5)):
-            self.game.draw()
-        self.assertTrue(self._region_has_white(self._toolbox_title_region()))
 
 
     def test_shop_title_stays_while_the_mouse_is_over_the_shop(self):
@@ -239,37 +232,8 @@ class UiTests(GameTestCase):
         self.assertTrue(self._region_has_white(self._shop_title_region()))
 
 
-    def test_titles_render_where_their_panels_put_them(self):
-        # A fresh frame (mouse outside all three panels): the BOARD and SHOP
-        # titles sit at the bottom-left of their panels and the INVENTORY title
-        # above its top-left corner, the way the card and action rows are
-        # labelled.
-        with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
-            self.game.draw()
-        self.assertTrue(self._region_has_white(self._marble_box_title_region()))
-        self.assertTrue(self._region_has_white(self._toolbox_title_region()))
-        self.assertTrue(self._region_has_white(self._shop_title_region()))
 
 
-    def test_only_the_board_title_hides_when_the_mouse_is_over_its_panel(self):
-        # The board's title hides while the mouse is over the board (the
-        # panel's bottom-left corner is where blocks get placed); the
-        # inventory's and the shop's stay put, wherever the mouse is.
-        board = (main.MARBLE_BOX_COORDS[0] + 5, main.MARBLE_BOX_COORDS[1] + 5)
-        inventory = (self.game.toolbox.rect.x + 5, self.game.toolbox.rect.y + 5)
-        shop = (main.SHOP_COORDS[0] + 5, main.SHOP_COORDS[1] + 5)
-        for mouse, over_board in ((board, True), (inventory, False),
-                                  (shop, False)):
-            with self.subTest(mouse=mouse):
-                with mock.patch("main.pygame.mouse.get_pos", return_value=mouse):
-                    self.game.draw()
-                self.assertEqual(
-                    self._region_has_white(self._marble_box_title_region()),
-                    not over_board)
-                self.assertTrue(
-                    self._region_has_white(self._toolbox_title_region()))
-                self.assertTrue(
-                    self._region_has_white(self._shop_title_region()))
 
 
     def test_cash_readout_hover_opens_the_breakdown(self):
@@ -544,11 +508,15 @@ class UiTests(GameTestCase):
 
 
     def _flames_above_the_board(self):
-        """True when the strip above the board's top edge holds fire pixels."""
+        """True when the strip under the board's top edge holds fire pixels.
+
+        The flames rise from the seam between the top bar and the board, so they
+        burn INTO the board (the bar is above them and must stay readable).
+        """
         x = main.MARBLE_BOX_COORDS[0]
         width = main.MARBLE_BOX_COORDS[2]
         y = main.MARBLE_BOX_COORDS[1]
-        return any(_flame_pixel(self.game.screen, x + dx, y - 12, tol=8)
+        return any(_flame_pixel(self.game.screen, x + dx, y + 12, tol=8)
                    for dx in range(8, width - 8, 8))
 
 
@@ -588,12 +556,12 @@ class UiTests(GameTestCase):
         # board's own width.
         x, y, w = (main.MARBLE_BOX_COORDS[0], main.MARBLE_BOX_COORDS[1],
                    main.MARBLE_BOX_COORDS[2])
-        # The flames rise from the board's top edge, so the strip to watch is
-        # the whole height a flame can reach, just off each side.
+        # The flames burn down from the board's top edge, so the strip to watch
+        # is the whole height a flame can reach, just off each side.
         beside = [(bx, by)
                   for bx in list(range(max(0, x - 70), x))
                   + list(range(x + w, min(main.SCREEN_WIDTH, x + w + 70)))
-                  for by in range(max(0, y - 140), y)]
+                  for by in range(max(0, y - 140), y + 140)]
         self.game.fire_intensity = 0.0
         self.game.draw()
         cold = {pos: self.game.screen.get_at(pos)[:3] for pos in beside}
@@ -815,7 +783,7 @@ class UiTests(GameTestCase):
         # rows, and a per-item action hint.
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 10, 20, "B")
-        width, height, name_lines, desc_lines, hint = self.game._info_layout(block, "toolbox")
+        width, height, name_lines, desc_lines, hint = self.game._info_layout(block, "board")
         self.assertGreater(width, 0)
         self.assertGreater(height, 0)
         self.assertTrue(name_lines)
@@ -833,18 +801,19 @@ class UiTests(GameTestCase):
 
 
     def test_draw_sidebar_renders_hovered_item(self):
-        # Hovering over a toolbox item draws its info box.
+        # Hovering over an owned item (it lies on a board square now) draws its
+        # info box.
         self.game.toolbox.items.clear()
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 10, 20, "B")
         self.game.toolbox.add(block)
-        pos = (self.game.toolbox.rect.x + 5, self.game.toolbox.rect.y + 5)
+        pos = self._item_pos(block)
         with mock.patch("main.pygame.mouse.get_pos", return_value=pos), \
              mock.patch.object(self.game, "_draw_item_info") as draw:
             self.game.draw_sidebar()
         draw.assert_called_once()
         self.assertIs(draw.call_args[0][0], block)
-        self.assertEqual(draw.call_args[0][1], "toolbox")
+        self.assertEqual(draw.call_args[0][1], "board")
 
 
     def test_info_box_size_scales_with_description(self):
@@ -856,8 +825,8 @@ class UiTests(GameTestCase):
                               effects=[main.Effect.SLIPPERY, main.Effect.FRAGILE,
                                        main.Effect.GRAVITY, main.Effect.BOUNCY,
                                        main.Effect.ROTATE])
-        w1, h1, *_ = self.game._info_layout(short, "toolbox")
-        w2, h2, *_ = self.game._info_layout(long, "toolbox")
+        w1, h1, *_ = self.game._info_layout(short, "board")
+        w2, h2, *_ = self.game._info_layout(long, "board")
         self.assertGreater(h2, h1)  # more description rows -> taller box
         self.assertGreaterEqual(w2, w1)
 
@@ -906,14 +875,14 @@ class UiTests(GameTestCase):
         roomy = main.Component.scorer_component(main.Scorer.ROOMY, amount=2,
                                                 col=1, row=1)
         self.game.toolbox.items.append(roomy)
-        _w, _h, _names, desc_lines, _hint = self.game._info_layout(roomy, "toolbox")
+        _w, _h, _names, desc_lines, _hint = self.game._info_layout(roomy, "board")
         self.assertIn("Now", [text for text, kind in desc_lines if kind == "label"])
         body = " ".join(text for text, kind in desc_lines if kind == "body")
         self.assertIn(f"Gives +{2 * len(self.game.unlocked_cells)} chips", body)
         # A card with a measure of its own (Stencil: the free card slots).
         card = main.CardItem(main.Card.STENCIL, 46)
         self.game.cards.append(card)
-        _w, _h, _names, desc_lines, _hint = self.game._info_layout(card, "cards")
+        _w, _h, _names, desc_lines, _hint = self.game._info_layout(card, "board")
         body = " ".join(text for text, kind in desc_lines if kind == "body")
         self.assertIn("Pays x", body)
         self.assertIn("free card slot", body)
@@ -921,7 +890,7 @@ class UiTests(GameTestCase):
         flat = main.Component.scorer_component(main.Scorer.CHIPS_ADD, amount=30,
                                                col=1, row=1)
         self.game.toolbox.items.append(flat)
-        _w, _h, _names, desc_lines, _hint = self.game._info_layout(flat, "toolbox")
+        _w, _h, _names, desc_lines, _hint = self.game._info_layout(flat, "board")
         labels = [text for text, kind in desc_lines if kind == "label"]
         self.assertNotIn("Now", labels)
 
@@ -1068,38 +1037,7 @@ class UiTests(GameTestCase):
             marble.draw(self.game.screen)
 
 
-    def test_cells_past_the_inventory_capacity_are_shaded(self):
-        # The panel is only ever as big as its slot count allows, but a slot
-        # count that does not fill its last row (six slots is a 5x2 grid) leaves
-        # cells the save has NOT bought: they are shaded so they read as locked
-        # rather than as empty slots the player could fill.
-        self.game.cash = 100
-        self.game._buy_inventory_slot()
-        self.game._buy_inventory_slot()
-        capacity = self.game.toolbox.capacity()
-        self.assertGreater(self.game.toolbox.per_page, capacity)
-        main.ui.draw(self.game)
 
-        def shade(panel):
-            rect = self.game.toolbox.cell_rect(panel)
-            return sum(self.game.screen.get_at((rect.centerx,
-                                                rect.bottom - 4))[:3])
-
-        # The last owned cell is a plain (bright) empty slot; the cells the save
-        # has not bought yet are shaded darker.
-        first = self.game.toolbox.first_shown()
-        last_owned = capacity - 1 - first
-        self.assertGreater(shade(last_owned), shade(last_owned + 1))
-
-    def test_sell_overlay_rect_hangs_one_unit_below_the_toolbox(self):
-        # The SELL/UPGRADE buttons hang off the panel's bottom-right corner, one
-        # grid unit BELOW it, so they never cover the rightmost inventory slots.
-        rect = self.game.sell_overlay_rect()
-        self.assertEqual(rect.right, self.game.toolbox.rect.right)
-        self.assertEqual(rect.top, self.game.toolbox.rect.bottom)
-        self.assertEqual((rect.width, rect.height), (main.GRID_SIZE, main.GRID_SIZE))
-        # ...and clear of the panel's own cells.
-        self.assertFalse(rect.colliderect(self.game.toolbox.rect))
 
 
     def test_new_shapes_draw_without_raising(self):
@@ -1322,18 +1260,26 @@ class UiTests(GameTestCase):
     def test_every_font_is_the_shared_garet_heavy_one(self):
         # ui's small labels used to build pygame's EMBEDDED default font inline
         # (Font(None, n)), so they were the one part of the game not drawn in
-        # garet-heavy — and one Font per frame.
-        source = inspect.getsource(main)
-        self.assertEqual(source.count("Font(None"), 0)
-        for module in (main.ui, main.cards, main.save_system, main.profiles,
-                       main.achievements, main.collection, main.metagame, main.crt):
-            self.assertEqual(inspect.getsource(module).count("pygame.font"), 0)
+        # garet-heavy — and one Font per frame. Every module the game is split
+        # over is checked: main.py, the drawing/state modules it names, and the
+        # mixins the Game is assembled from (see game.py).
+        parts = {"main": main, "ui": main.ui, "cards": main.cards,
+                 "save_system": main.save_system, "profiles": main.profiles,
+                 "achievements": main.achievements, "collection": main.collection,
+                 "metagame": main.metagame, "crt": main.crt}
+        for cls in type(self.game).__mro__:
+            module = sys.modules.get(cls.__module__)
+            if module is not None and getattr(module, "__file__", None):
+                parts[cls.__name__] = module
+        for name, module in parts.items():
+            source = inspect.getsource(module)
+            self.assertEqual(source.count("Font(None"), 0, name)
+            if name != "CoreMixin":  # the mixin that holds __init__'s font table
+                self.assertEqual(source.count("pygame.font"), 0, name)
         # The only creation sites are the two lines of the table Game.__init__
         # builds (the garet-heavy roles, then the title face).
-        self.assertEqual(source.count("pygame.font.Font"), 2)
-        self.assertEqual(source.count("pygame.font.Font"),
-                         inspect.getsource(main.Game.__init__).count(
-                             "pygame.font.Font"))
+        self.assertEqual(
+            inspect.getsource(main.Game.__init__).count("pygame.font.Font"), 2)
 
         # Every role is bound to a garet-heavy font of the size it asks for...
         for role, size in main.FONT_SIZES.items():
@@ -1415,19 +1361,32 @@ class UiTests(GameTestCase):
 
 
     def test_a_rolled_v2_action_shows_up_in_the_shop_and_in_grants(self):
-        with mock.patch("main.random_action_version", return_value=2):
-            self.game.shop.refresh()
-            shop_actions = [i for i in self.game.shop.items if i.kind == "action"]
+        with mock.patch("rolling.random_action_version", return_value=2):
+            # The shelf offers an action in only about half its rerolls (a slot
+            # is an action 15% of the time), so reroll until one lands — bounded,
+            # so a shelf that never offers one still fails rather than hangs.
+            shop_actions = []
+            for _ in range(200):
+                self.game.shop.refresh()
+                shop_actions = [i for i in self.game.shop.items
+                                if i.kind == "action"]
+                if shop_actions:
+                    break
             self.assertTrue(shop_actions)
             self.assertTrue(all(a.version == 2 for a in shop_actions))
             self.game.actions.clear()
             self.assertTrue(self.game._grant_random_action())
             self.assertEqual(self.game.actions[-1].version, 2)
 
-        with mock.patch("main.random_action_version", return_value=1):
-            self.game.shop.refresh()
-            self.assertTrue(all(a.version == 1 for a in self.game.shop.items
-                                if a.kind == "action"))
+        with mock.patch("rolling.random_action_version", return_value=1):
+            for _ in range(200):
+                self.game.shop.refresh()
+                versions = [i.version for i in self.game.shop.items
+                            if i.kind == "action"]
+                if versions:
+                    break
+            self.assertTrue(versions)
+            self.assertEqual(versions, [1] * len(versions))
 
 
     def test_an_upgraded_action_says_so_in_its_name_and_info_box(self):
@@ -1536,9 +1495,9 @@ class UiTests(GameTestCase):
         p = self.game.score_particles[0]
         self.assertEqual(p.text, "4")
         self.assertEqual(p.color, main.BLUE)
-        expected_x = main.CARD_AREA_COORDS[0] + main.GRID_SIZE // 2
-        expected_y = main.CARD_AREA_COORDS[1] + main.GRID_SIZE // 2
-        self.assertEqual((p.x, p.y), (expected_x, expected_y))
+        self.game.ensure_board_cells()
+        rect = self.game._board_item_rect(*self.game.item_cell(self.game.cards[0]))
+        self.assertEqual((p.x, p.y), (rect.centerx, rect.centery))
 
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
@@ -1724,9 +1683,10 @@ class UiTests(GameTestCase):
                                                main.Trial.ALL_FINISHES))
 
     def test_a_running_trials_panels_take_its_own_colour(self):
-        # The board, the inventory and the shop are filled with the running
-        # trial's tile colour, a little lighter, so the play areas take the
-        # run's palette instead of the game's own panel colour.
+        # The board and the shop are filled with the running trial's tile colour,
+        # a little lighter, so the play areas take the run's palette instead of
+        # the game's own panel colour. (The inventory and the trays are gone: the
+        # board carries the items — see Game.ensure_board_cells.)
         self.game.trials_enabled = True
         self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
                                     for y in range(main.GRID_HEIGHT)}
@@ -1737,26 +1697,12 @@ class UiTests(GameTestCase):
         self.assertEqual(tint, components.shade(main.Trial.COLORS[main.Trial.SPEEDRUN],
                                                 main.Trial.PANEL_LIGHT))
         self.assertNotEqual(tint, main.MARBLE_BOX_COLOR)
-        for label, pos in (("board", (main.MARBLE_BOX_COORDS[0] + 3,
-                                      main.MARBLE_BOX_COORDS[1] + 3)),
-                           ("inventory", (self.game.toolbox.rect.x + 3,
-                                          self.game.toolbox.rect.y + 3)),
+        for label, pos in (("board", (main.MARBLE_BOX_COORDS[0] + 3 + 10 * main.GRID_SIZE,
+                                      main.MARBLE_BOX_COORDS[1] + 3 + main.BORD_WIDTH)),
                            ("shop", (main.SHOP_COORDS[0] + 3,
                                      main.SHOP_COORDS[1] + 3))):
             with self.subTest(panel=label):
                 self.assertEqual(tuple(self.game.screen.get_at(pos))[:3], tint)
-        # A different trial tints them differently, and no trial at all keeps
-        # the game's own panel colour.
-        self.game.current_trial = main.Trial.CRUMBLING
-        main.ui.draw(self.game)
-        self.assertEqual(tuple(self.game.screen.get_at(
-            (main.MARBLE_BOX_COORDS[0] + 3, main.MARBLE_BOX_COORDS[1] + 3)))[:3],
-            main.Trial.panel_color(main.Trial.CRUMBLING))
-        self.game.current_trial = None
-        main.ui.draw(self.game)
-        self.assertEqual(tuple(self.game.screen.get_at(
-            (main.MARBLE_BOX_COORDS[0] + 3, main.MARBLE_BOX_COORDS[1] + 3)))[:3],
-            main.MARBLE_BOX_COLOR)
 
     def test_the_panels_stay_readable_under_every_trial(self):
         # The panels carry white text, so no trial may tint them so light that
@@ -1773,25 +1719,20 @@ class UiTests(GameTestCase):
                                     sum(main.Trial.COLORS[trial]) / 3,
                                     "a near-white tile darkens its panels")
 
-    def test_locked_squares_take_a_darker_shade_only_while_a_trial_runs(self):
-        # A locked board square is filled with a darker shade of the same trial
-        # colour (see locked_fill), so it stays in the run's palette while still
-        # reading as unlit. With the trial system switched off it goes back to
-        # the void however the id happens to read — the same gate panel_fill has
-        # (see Game.active_trial).
+    def test_locked_squares_show_the_background_while_a_trial_runs(self):
+        # A locked board square is painted with the BACKGROUND (its pattern while
+        # a trial runs, the flat colour otherwise — see _draw_locked_backdrop),
+        # while an unlocked square takes the trial's panel tint. With the trial
+        # system switched off there is no tint at all (the same gate panel_fill
+        # has: see Game.active_trial).
         self.game.current_trial = main.Trial.SPEEDRUN
         self.game.trials_enabled = False
-        self.assertEqual(main.ui.locked_fill(self.game), main.BG_COLOR)
         self.assertEqual(main.ui.panel_fill(self.game), main.MARBLE_BOX_COLOR)
         self.game.trials_enabled = True
-        locked = main.ui.locked_fill(self.game)
         panel = main.ui.panel_fill(self.game)
-        self.assertEqual(locked, main.Trial.locked_color(main.Trial.SPEEDRUN))
-        self.assertNotEqual(locked, panel)
-        self.assertTrue(all(lo < pa for lo, pa in zip(locked, panel)),
-                        (locked, panel))
+        self.assertEqual(panel, main.Trial.panel_color(main.Trial.SPEEDRUN))
         self.game.current_trial = None
-        self.assertEqual(main.ui.locked_fill(self.game), main.BG_COLOR)
+        self.assertEqual(main.ui.panel_fill(self.game), main.MARBLE_BOX_COLOR)
 
     def test_the_background_is_the_plain_colour_without_a_trial(self):
         # No trial running: the screen keeps the game's flat background colour.
@@ -1920,25 +1861,28 @@ class UiTests(GameTestCase):
                 self.assertEqual(right.right, main.TRIAL_BOX_RECT.right)
 
 
-    def test_shop_message_sits_between_the_shop_title_and_the_refresh_button(self):
+    def test_shop_message_sits_along_the_panels_bottom_strip(self):
         # A shop dialog lives in the panel's bottom strip: right of the SHOP
-        # title (bottom-left) and left of the REFRESH button (bottom-right).
-        title_right = (main.SHOP_COORDS[0] + 8
-                       + self.game.font.size("SHOP")[0])
-        lines, rect = main.ui.shop_message_layout(self.game, "Refreshed shop ($20)")
+        # title (bottom-left) and clear of the panel's right edge, on the row
+        # under the offers and their prices.
+        shop = self.game.shop.rect
+        title_right = shop.x + 8 + self.game.font.size("SHOP")[0]
+        # The strip is narrow, so only a short message is a single line...
+        lines, rect = main.ui.shop_message_layout(self.game, "Sold")
         self.assertEqual(len(lines), 1)
         self.assertGreaterEqual(rect.left, title_right)
-        self.assertLessEqual(rect.right, main.SHOP_REFRESH_BUTTON_RECT.left)
-        self.assertEqual(rect.centery, main.SHOP_REFRESH_BUTTON_RECT.centery)
-        self.assertGreater(rect.top, main.SHOP_COORDS[1] + 4 * main.GRID_SIZE)
-        # A message too long for the gap wraps onto two tiny lines that both
-        # stay inside it.
-        long_lines, long_rect = main.ui.shop_message_layout(
-            self.game, "Disassembled Slippery Fragile Pipe +Chips v2 ($56)")
-        self.assertEqual(len(long_lines), 2)
-        self.assertGreaterEqual(long_rect.left, title_right)
-        self.assertLessEqual(long_rect.right, main.SHOP_REFRESH_BUTTON_RECT.left)
-        self.assertEqual(long_rect.centery, main.SHOP_REFRESH_BUTTON_RECT.centery)
+        self.assertLessEqual(rect.right, shop.right)
+        self.assertGreater(rect.top, shop.bottom - main.GRID_SIZE)
+        self.assertLessEqual(rect.bottom, shop.bottom)
+        # ...and a full shop message is laid out there too: one line if it fits,
+        # two tiny ones when it does not, always inside the panel.
+        for message in ("Refreshed shop ($20)",
+                        "Disassembled Slippery Fragile Pipe +Chips v2 ($56)"):
+            long_lines, long_rect = main.ui.shop_message_layout(self.game, message)
+            self.assertIn(len(long_lines), (1, 2))
+            self.assertGreaterEqual(long_rect.left, title_right)
+            self.assertLessEqual(long_rect.right, shop.right)
+            self.assertLessEqual(long_rect.bottom, shop.bottom)
 
 
     def test_shop_message_draws_in_the_bottom_strip(self):
@@ -1955,12 +1899,12 @@ class UiTests(GameTestCase):
 
 
     def test_all_finishes_trial_draws_yellow_marble_box_border(self):
-        # The marble-box outer border is gold (the finish scorer color) while
-        # the all-finishes trial is ACTIVE, and the normal dark gray otherwise.
-        # The thick border sits just above the box (centered at
-        # y - BORD_WIDTH//2), so sample inside it rather than the fill below.
-        border_px = (main.MARBLE_BOX_COORDS[0] + 20,
-                     main.MARBLE_BOX_COORDS[1] - main.BORD_WIDTH // 2)
+        # The board's outer border is gold (the finish scorer color) while the
+        # all-finishes trial is ACTIVE, and the normal dark gray otherwise. The
+        # frame is drawn INSIDE the window's own edge (the top bar is above it),
+        # so sample just inside that edge.
+        border_px = (main.MARBLE_BOX_COORDS[0] + main.BORD_WIDTH // 2,
+                     main.MARBLE_BOX_COORDS[1] + main.BORD_WIDTH // 2)
         self.game.trials_enabled = True
         self.game.current_trial = main.Trial.ALL_FINISHES
         self.game.draw()
@@ -1977,123 +1921,10 @@ class UiTests(GameTestCase):
         self.assertEqual(self.game.screen.get_at(border_px)[:3], (30, 30, 30))
 
 
-    def test_the_card_and_action_slots_share_one_square_back(self):
-        # An empty action slot shows the very same back as an empty card slot
-        # (they are the same slot in two trays), and a slot is a SQUARE cell of
-        # its tray rather than a rounded card: with rounded corners the tray's
-        # own fill would show through at the slot's corners.
-        self.game.cards.clear()
-        self.game.actions.clear()
-        main.ui.draw(self.game)
-        slot = main.GRID_SIZE
-        card_slot = pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
-                                slot, slot)
-        action_slot = pygame.Rect(main.ACTION_AREA_COORDS[0],
-                                  main.ACTION_AREA_COORDS[1], slot, slot)
-        for dx in range(slot):
-            for dy in range(slot):
-                self.assertEqual(
-                    tuple(self.game.screen.get_at(
-                        (card_slot.left + dx, card_slot.top + dy)))[:3],
-                    tuple(self.game.screen.get_at(
-                        (action_slot.left + dx, action_slot.top + dy)))[:3],
-                    (dx, dy))
-        # Every corner is the back's own colour (its black fill or its 2px
-        # border), never the tray showing through a rounded corner.
-        back = (main.BLACK, (130, 120, 170))
-        for px, py in ((0, 0), (slot - 1, 0), (0, slot - 1), (slot - 1, slot - 1)):
-            self.assertIn(tuple(self.game.screen.get_at(
-                (card_slot.left + px, card_slot.top + py)))[:3], back, (px, py))
 
-    def test_the_card_and_action_trays_have_no_panel_colour_behind_them(self):
-        # The card and action areas are drawn with a BLACK background rather
-        # than the marble-box colour the other panels use, and the empty slots'
-        # backs are black too (see draw_card_back), so the only colours in
-        # either tray are the black fill, the slot back's border and dots, and
-        # whatever is actually in the slots.
-        self.game.cards.clear()
-        self.game.actions.clear()
-        main.ui.draw(self.game)
-        slot = main.GRID_SIZE
-        for x0, y0, count in ((main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
-                               self.game.max_cards),
-                              (self.game.action_area_x(),
-                               main.ACTION_AREA_COORDS[1],
-                               self.game.action_slots_shown())):
-            self.assertGreater(count, 0)
-            for x in range(x0, x0 + count * slot):
-                for y in range(y0, y0 + slot):
-                    colour = tuple(self.game.screen.get_at((x, y)))[:3]
-                    self.assertNotEqual(colour, main.MARBLE_BOX_COLOR, (x, y))
 
-    def test_the_tray_background_behind_a_card_is_black(self):
-        # A card face is a ROUNDED card, so the tray's own background shows at
-        # the slot's corners. That background is black: a card sitting in a
-        # tray never shows the marble-box colour around it.
-        self.game.cards = [main.CardItem(main.Card.JOKER, 10)]
-        self.game.actions.clear()
-        main.ui.draw(self.game)
-        rect = pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
-                           main.GRID_SIZE, main.GRID_SIZE)
-        self.assertEqual(tuple(self.game.screen.get_at(rect.topleft))[:3],
-                         main.BLACK)
-        self.assertEqual(tuple(self.game.screen.get_at(
-            (rect.right - 1, rect.bottom - 1)))[:3], main.BLACK)
 
-    def test_the_action_row_pages_when_it_holds_more_than_it_can_show(self):
-        # The row draws ONE PAGE of the actions at a time, with the last slot
-        # spent on a pager rather than an action (see Game.action_row_window) —
-        # which is what keeps an unlimited action area (Foresight v2) usable.
-        # Distinct action values, so a turned page is visibly a different row.
-        values = (main.Action.DEATH, main.Action.RECOGNITION,
-                  main.Action.DEJA_VU, main.Action.EXPANSION,
-                  main.Action.ANOINTMENT, main.Action.STRENGTH,
-                  main.Action.SPIRIT)
-        self.game.actions = [main.ActionItem(value, 24) for value in values]
-        self.game.cards.clear()
-        slots = self.game.action_slots_shown()
-        self.assertGreater(len(self.game.actions), slots)
-        self.game.draw()
 
-        start, count, paging = self.game.action_row_window()
-        self.assertTrue(paging)
-        self.assertEqual(count, slots - 1)
-        # The action slots show the page's actions (they are not empty backs)...
-        first = self.game.action_slot_rect(0)
-        pager = self.game.action_slot_rect(slots - 1)
-        self.assertNotEqual(
-            self._pixel_hash(self.game.screen.subsurface(first).copy()),
-            self._pixel_hash(self.game.screen.subsurface(pager).copy()))
-        # ...and the pager slot is not a bare slot back either: it carries the
-        # forward arrow and the page number.
-        self.assertTrue(self.game.action_area_pager_at(pager.center))
-        page_pixels = {tuple(self.game.screen.get_at((x, y)))[:3]
-                       for x in range(pager.left, pager.right)
-                       for y in range(pager.top, pager.bottom)}
-        self.assertIn(main.YELLOW, page_pixels)
-        # Turning the page swaps which actions those slots hold.
-        before = self._pixel_hash(self.game.screen.subsurface(first).copy())
-        self.game._page_action_row()
-        self.game.draw()
-        self.assertNotEqual(
-            before, self._pixel_hash(self.game.screen.subsurface(first).copy()))
-        self.assertNotEqual(self.game.action_row_window()[0], start)
-
-    def test_an_unlimited_action_row_fills_its_own_line_in_the_column(self):
-        # A v2 Foresight takes the row's cap away; what it DRAWS is its own line
-        # in the panel column — the card tray's slots no longer come off the row
-        # (SLOT_ROW_SLOTS is only the pair's combined ceiling, see Game.max_cards
-        # and action_slot_room), and the row stays left-aligned with the tray and
-        # clear of the upgrade button beside it.
-        self.game.action_slots_unlimited = True
-        self.game.draw()
-        self.assertEqual(self.game.action_slots_shown(), main.ACTION_BAND_SLOTS)
-        self.assertEqual(self.game.action_area_x(), main.ACTION_AREA_COORDS[0])
-        self.assertLessEqual(self.game.action_area_x()
-                             + self.game.action_slots_shown() * main.GRID_SIZE,
-                             main.ACTION_UPGRADE_RECT.left)
-        self.assertGreaterEqual(self.game.action_area_x(),
-                                main.CARD_AREA_COORDS[0])
 
     def test_disabled_card_draws_dimmed(self):
         joker = _card_item(main.match_group_for_shape(main.Shape.PIPE),
@@ -2103,9 +1934,9 @@ class UiTests(GameTestCase):
         self.game.draw()  # renders the dimmed card without raising
 
         # A card disabled by the Card cutter trial is dimmed, so the player can
-        # see which card got cut.
-        rect = main.pygame.Rect(main.CARD_AREA_COORDS[0], main.CARD_AREA_COORDS[1],
-                                main.GRID_SIZE, main.GRID_SIZE)
+        # see which card got cut. The card lies on a board square.
+        cell = self._item_cell(joker)
+        rect = self.game._board_item_rect(*cell)
 
         def brightness():
             return sum(sum(self.game.screen.get_at((x, y))[:3])
@@ -2240,41 +2071,10 @@ class UiTests(GameTestCase):
         self.assertIn("1800 px/s along its surface (+300)", rows["Effect - Piston"])
 
 
-    def test_upgrade_overlay_rect_is_left_of_sell_rect(self):
-        sell = self.game.sell_overlay_rect()
-        up = self.game.upgrade_overlay_rect()
-        # Same row and size, sitting directly left of the SELL cell.
-        self.assertEqual(up.top, sell.top)
-        self.assertEqual(up.bottom, sell.bottom)
-        self.assertEqual(up.height, sell.height)
-        self.assertEqual(up.right, sell.left)
 
 
-    def test_clicking_upgrade_overlay_raises_trigger_limit(self):
-        block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE, main.Scorer.CHIPS_ADD,
-                               10, 50, "Rect +Chips")
-        self.game.toolbox.items.clear()
-        self.game.toolbox.add(block)
-        self.game._equip_block(block)
-        self.game.cash = 1000
-        cost = self.game._trigger_upgrade_cost(block)
-
-        self._click(self.game.upgrade_overlay_rect().center)
-
-        self.assertEqual(block.trigger_limit, 2)
-        self.assertEqual(self.game.cash, 1000 - cost)
-        # Selection is preserved so the player can upgrade again.
-        self.assertIs(self.game.selected_toolbox_item, block)
 
 
-    def test_clicking_upgrade_overlay_with_component_does_nothing(self):
-        comp = self._place_shop_offer(main.Component.SHAPE)
-        self.game.selected_toolbox_item = comp
-        self.game.cash = 1000
-
-        self._click(self.game.upgrade_overlay_rect().center)
-
-        self.assertEqual(self.game.cash, 1000)
 
 
     def test_sidebar_total_price_includes_trigger_upgrade_cash(self):
@@ -2290,7 +2090,7 @@ class UiTests(GameTestCase):
         # The info box renders an upgraded block (price + total) without raising.
         self.game.toolbox.items.clear()
         self.game.toolbox.add(upgraded)
-        pos = (self.game.toolbox.rect.x + 5, self.game.toolbox.rect.y + 5)
+        pos = self._item_pos(upgraded)
         with mock.patch("main.pygame.mouse.get_pos", return_value=pos):
             self.game.draw_sidebar()
 

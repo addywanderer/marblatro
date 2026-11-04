@@ -23,59 +23,24 @@ class TokensTests(GameTestCase):
         self.assertNotIn(block, self.game.toolbox.items)
 
 
-    def test_tokens_are_part_of_the_inventory_not_an_area_of_their_own(self):
-        # A token takes an inventory cell rather than a column of its own: it
-        # sits right after the items the inventory holds (see
-        # Game._token_rect), which is where the hit test and the sidebar find
-        # it.
+    def test_tokens_stand_on_board_squares_like_everything_else(self):
+        # A token is owned, so it lies on a board square of its own (see
+        # Game.ensure_board_cells), which is where the hit test and the sidebar
+        # find it.
         self.game.toolbox.items.clear()
         self.game.tokens = [_token(main.Scorer.CASH, 15, runs_left=2),
                             _token(main.Scorer.MULT_ADD, 4, runs_left=2)]
         first = self.game._token_rect(0)
         second = self.game._token_rect(1)
 
-        self.assertEqual(first.topleft, self.game.toolbox.cell_rect(0).topleft)
-        self.assertEqual(second.topleft, self.game.toolbox.cell_rect(1).topleft)
+        self.assertNotEqual(first.topleft, second.topleft)
         self.assertEqual(first.size, (main.GRID_SIZE, main.GRID_SIZE))
+        self.assertEqual(first, self.game._board_item_rect(
+            *self.game.item_cell(self.game.tokens[0])))
         self.assertIs(self.game.token_at(first.center), self.game.tokens[0])
         self.assertIs(self.game.token_at(second.center), self.game.tokens[1])
-        self.assertIsNone(self.game.token_at(
-            (first.centerx, first.centery + main.GRID_SIZE)))
-        # An item in the inventory pushes its tokens along: the same grid, in
-        # the cells after the items.
-        self.game.toolbox.add(main.BlockItem(
-            0, 0, main.Shape.RECT, main.Effect.NONE, main.Scorer.NONE, 0, 5, "b"))
-        self.assertEqual(self.game._token_rect(0).topleft,
-                         self.game.toolbox.cell_rect(1).topleft)
-        # The chip and the info sidebar render without raising, and the token's
-        # own cell is the one they read.
-        self.game.draw()
-        moved = self.game._token_rect(0)
-        self.assertEqual(self.game._info_target_at(moved.center),
-                         (self.game.tokens[0], "tokens"))
-        self.assertTrue(self.game._describe_item(self.game.tokens[0]))
-        self.assertTrue(self.game._action_hint(self.game.tokens[0], "tokens"))
 
 
-    def test_the_inventory_panel_grows_to_hold_its_tokens(self):
-        # The inventory's panel is drawn to hold everything the inventory
-        # carries — the items and the tokens in the entries after them — up to
-        # main.INVENTORY_MAX_COLS x main.INVENTORY_MAX_ROWS cells. Past that it
-        # turns pages instead (see test_the_panel_pages_past_its_largest_size).
-        box = self.game.toolbox
-        self.game.toolbox.items.clear()
-        self.game.tokens = []
-        self.assertEqual(self.game.inventory_grid_rows(), 1)
-
-        # Tokens that outgrow a single row make the panel take a second one, and
-        # every token still has a cell inside it.
-        self.game.tokens = [_token(main.Scorer.CASH, 15, runs_left=None)
-                            for _ in range(main.INVENTORY_MAX_COLS + 1)]
-        self.assertEqual(self.game.inventory_grid_rows(), 2)
-        last = self.game._token_rect(len(self.game.tokens) - 1)
-        self.assertLessEqual(last.bottom,
-                             box.rect.y + box.rows * main.GRID_SIZE)
-        self.game.draw()  # the taller panel renders without raising
 
 
     def test_tokens_spend_a_run_and_expire(self):

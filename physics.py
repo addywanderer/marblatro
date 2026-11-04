@@ -43,6 +43,12 @@ GRID_SIZE = _physics_source.GRID_SIZE
 GROW_RADIUS_FACTOR = _physics_source.GROW_RADIUS_FACTOR
 GROW_MAX_TRIGGERS = _physics_source.GROW_MAX_TRIGGERS
 MARBLE_BOX_COORDS = _physics_source.MARBLE_BOX_COORDS
+# The pixel rect the marble is clamped to, as (x, y, width, height): the
+# unlocked region of the board, kept up to date by the game (see
+# Game._board_wall_blocks). The board itself is infinite, so this is only the
+# region the walls enclose — the box rect is the fallback for a marble with no
+# game behind it (a unit test driving the engine directly).
+BOARD_BOUNDS = tuple(MARBLE_BOX_COORDS)
 MAX_MARBLE_RECURSION = _physics_source.MAX_MARBLE_RECURSION
 MIN_MARBLE_RADIUS = _physics_source.MIN_MARBLE_RADIUS
 MAX_MARBLE_SPEED = _physics_source.MAX_MARBLE_SPEED
@@ -122,9 +128,10 @@ class PhysicsEngine:
         # faster as their mass grows.
         gravity_force = self.gravity_dir * GRAVITY * max(1.0, marble.mass)
         # The dead-zone trial triples gravity while the marble is in the bottom
-        # third of the marble box.
+        # third of the board's playable region.
         if getattr(marble, "dead_zone", False):
-            bottom_third = MARBLE_BOX_COORDS[1] + 2 * MARBLE_BOX_COORDS[3] / 3
+            bounds = getattr(marble, "bounds", None) or BOARD_BOUNDS
+            bottom_third = bounds[1] + 2 * bounds[3] / 3
             if marble.position[1] >= bottom_third:
                 gravity_force *= 3
 
@@ -1595,30 +1602,38 @@ class PhysicsEngine:
             return np.array([0.0, 1.0 if dy > 0 else -1.0])
 
     def keep_in_bounds(self, marble):
-        """Keep marble within screen bounds"""
+        """Keep marble within the board's playable bounds.
+
+        The bounds are the UNLOCKED region's pixel rect (see
+        ``marble.bounds``, set by the game — Game.board_pixel_bounds): the board
+        is infinite, so what stops the marble is the ring of locked squares, not
+        the edge of the screen. A marble with no game behind it (a unit test
+        driving this engine directly) falls back to the box rect.
+        """
         collision = False
-        # Rubber-ball marbles bounce off the marble-box borders with full
-        # energy; a ping-pong ball bounces back a little (its restitution);
-        # other marbles just stop at the edge.
+        bounds = getattr(marble, "bounds", None) or BOARD_BOUNDS
+        # Rubber-ball marbles bounce off the borders with full energy; a
+        # ping-pong ball bounces back a little (its restitution); other marbles
+        # just stop at the edge.
         if getattr(marble, "bouncy", False):
             bounce = BOUNCY_RESTITUTION
         else:
             bounce = getattr(marble, "restitution", RESTITUTION)
 
-        if marble.position[0] - marble.radius < MARBLE_BOX_COORDS[0]:
-            marble.position[0] = marble.radius + MARBLE_BOX_COORDS[0]
+        if marble.position[0] - marble.radius < bounds[0]:
+            marble.position[0] = marble.radius + bounds[0]
             marble.velocity[0] = abs(marble.velocity[0]) * bounce
             collision = True
-        elif marble.position[0] + marble.radius > MARBLE_BOX_COORDS[0] + MARBLE_BOX_COORDS[2]:
-            marble.position[0] = MARBLE_BOX_COORDS[0] + MARBLE_BOX_COORDS[2] - marble.radius
+        elif marble.position[0] + marble.radius > bounds[0] + bounds[2]:
+            marble.position[0] = bounds[0] + bounds[2] - marble.radius
             marble.velocity[0] = -abs(marble.velocity[0]) * bounce
             collision = True
-        if marble.position[1] - marble.radius < MARBLE_BOX_COORDS[1]:
-            marble.position[1] = marble.radius + MARBLE_BOX_COORDS[1]
+        if marble.position[1] - marble.radius < bounds[1]:
+            marble.position[1] = marble.radius + bounds[1]
             marble.velocity[1] = abs(marble.velocity[1]) * bounce
             collision = True
-        elif marble.position[1] + marble.radius > MARBLE_BOX_COORDS[1] + MARBLE_BOX_COORDS[3]:
-            marble.position[1] = MARBLE_BOX_COORDS[1] + MARBLE_BOX_COORDS[3] - marble.radius
+        elif marble.position[1] + marble.radius > bounds[1] + bounds[3]:
+            marble.position[1] = bounds[1] + bounds[3] - marble.radius
             marble.velocity[1] = -abs(marble.velocity[1]) * bounce
             collision = True
             marble.grounded = True

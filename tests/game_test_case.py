@@ -23,6 +23,7 @@ import os
 import random
 import re
 import shutil
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -39,11 +40,13 @@ import main
 import metagame
 import profiles
 import save_system
+import shop
 
 __all__ = [
     "inspect", "itertools", "json", "math", "os", "random", "re", "shutil",
-    "tempfile", "unittest", "mock", "np", "pygame", "achievements",
+    "sys", "tempfile", "unittest", "mock", "np", "pygame", "achievements",
     "collection", "components", "main", "metagame", "profiles", "save_system",
+    "shop",
     "GameTestCase", "CONDITIONS_COMMENTED_OUT", "NAMED_CARDS_GONE",
     "_group_card", "_card_item", "_token",
     "_card_for_block", "_shape_card_value", "_effect_card_value",
@@ -250,6 +253,20 @@ class GameTestCase(unittest.TestCase):
         """A screen point inside the given marble-box grid cell."""
         return (main.MARBLE_BOX_COORDS[0] + gx * main.GRID_SIZE + 5,
                 main.MARBLE_BOX_COORDS[1] + gy * main.GRID_SIZE + 5)
+
+
+    def _item_pos(self, item):
+        """A screen point on the board square the owned item stands on."""
+        self.game.ensure_board_cells()
+        cell = self.game.item_cell(item)
+        self.assertIsNotNone(cell, f"{item!r} has no board square")
+        return self._grid_pos(*cell)
+
+
+    def _item_cell(self, item):
+        """The board square the owned item stands on."""
+        self.game.ensure_board_cells()
+        return self.game.item_cell(item)
 
 
     def _region_has_white(self, rect):
@@ -512,14 +529,15 @@ class GameTestCase(unittest.TestCase):
 
     # --- Shop offers: placing one particular kind on the shelf --------------
 
-    def _place_shop_offer(self, kind, cell=1):
+    def _place_shop_offer(self, kind, cell=1, predicate=None):
         """Put an offer of ``kind`` on the shelf's item row and return it.
 
         The shelf's five slots draw their kinds at their own odds — a shape
         offer turns up 8% of the time, an effect 12% (see
         components.Pack.SHELF_WEIGHTS) — so a test that needs ONE particular
         kind must place one, rather than hunt the rolled shelf for it: hunting
-        made those tests pass or fail on the roll.
+        made those tests pass or fail on the roll. ``predicate`` narrows it
+        further (a portal block, say, is bought as a pair).
         """
         source = _SHOP_OFFER_SOURCES[kind]
         offer = None
@@ -528,7 +546,8 @@ class GameTestCase(unittest.TestCase):
             # A run role sold as a part comes back as a ready-made block (see
             # Shop._scorer_offer), so a scorer request re-rolls until it is
             # really a scorer.
-            if getattr(offer, "kind", None) == kind:
+            if getattr(offer, "kind", None) == kind and (
+                    predicate is None or predicate(offer)):
                 break
         self.game.shop.items = [i for i in self.game.shop.items
                                 if (i.col, i.row) != (cell, main.SHOP_ITEM_ROW)]
