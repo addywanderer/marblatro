@@ -305,13 +305,6 @@ class GameTestCase(unittest.TestCase):
         return pygame.Rect(panel.x + 6, panel.y - 20, panel.width, 20)
 
 
-    def _shop_title_region(self):
-        """The bottom-left region of the shop where its title sits."""
-        return pygame.Rect(main.SHOP_COORDS[0] + 6,
-                           main.SHOP_COORDS[1] + main.SHOP_COORDS[3] - 28,
-                           220, 26)
-
-
     def _run_quick_drop(self, effect):
         """Drop a marble onto a Quick block with the given effect and run physics.
 
@@ -557,9 +550,24 @@ class GameTestCase(unittest.TestCase):
 
     def _click(self, pos, mod=0):
         """Click the play screen at ``pos``; ``mod`` is the keyboard modifier mask."""
+        self._click_button(pos, 1, mod)
+
+
+    def _right_click(self, pos):
+        """Right-click the play screen at ``pos`` — the shop's BUY click."""
+        self._click_button(pos, 3)
+
+
+    def _middle_click(self, pos):
+        """Middle-click the play screen at ``pos`` — the Hoard card's hold click."""
+        self._click_button(pos, 2)
+
+
+    def _click_button(self, pos, button, mod=0):
+        """Click the play screen at ``pos`` with the given mouse button."""
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN
-        event.button = 1
+        event.button = button
         # A real click always carries a mod mask (0 for a plain click); the
         # inventory reads it for ctrl/shift-click discard picks.
         event.mod = mod

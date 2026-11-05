@@ -1,7 +1,7 @@
 # Marblatro
 
 A physics-driven deck-builder: you build a board out of blocks (each one a
-**shape** Ã— **effect** Ã— **scorer**), release a marble at the Start block, and
+**shape** × **effect** × **scorer**), release a marble at the Start block, and
 watch it score as it falls, bounces and triggers everything it touches. Between
 runs the shop sells components, pre-built blocks, cards and one-shot actions,
 and every run plays under exactly one **trial**.
@@ -21,35 +21,41 @@ pip install pygame numpy
 
 ## The screen
 
-A **bar** along the top of the screen holds everything the game owns: the shop,
-the score readout, the trial box, the run/round display and the MAIN MENU
-button. The **board** fills the rest of the screen, and it is **infinitely
-large** â€” a square is any integer coordinate, and the camera decides which part
-of it you are looking at. Locked squares are not board at all: they wear the
-background's own pattern, so the playable region reads as a platform floating in
-the void.
+A **bar** along the top of the screen holds the game's own furniture: the cash
+readouts, the score readout, the trial box, the run/round display and the MAIN
+MENU button. The **board** fills the rest of the screen, and it is
+**infinitely large** — a square is any integer coordinate, and the camera decides
+which part of it you are looking at. Locked squares are not board at all:
+they wear the background's own pattern, so the playable region reads as
+a platform floating in the void.
+
+The shop has no box of its own: every offer is a **locked item lying on the
+board**, drawn with a padlock and chain until it is bought. The price is shown
+only on hover, the offer can be picked up and moved like any other item, and a
+right-click unlocks it.
 
 ## Controls
 
-Every item the player owns lies on the board â€” the inventory panel, the card
+Every item the player owns lies on the board — the inventory panel, the card
 tray and the action row are gone, and the board is the inventory.
 
 | Input | What it does |
 |---|---|
-| Click an item on the board | Flip its switch â€” every item is selected by the same toggle: on turns it green, a second click turns it off, and no other item changes. Any number can be on at once. A block is picked up (or armed, if it is still a loose block), a component joins the next block, a card or an action is held to be moved |
-| Left-click on the board | Put the selected item down: a block is built on that square, anything else â€” a component, a card, an action â€” is moved there |
+| Click an item on the board | Flip its switch — every item is selected by the same toggle: on turns it green, a second click turns it off, and no other item changes. Any number can be on at once. **The first item switched on is the actor** — the one that gets used up — and every item switched on after it is one of its targets |
+| Click anything that is not an item | Turn every switch off: the void around the board, a locked square (even with a Board Unit in hand), the bar |
+| Left-click an empty unlocked square | Put the selected item down: a block is built on that square, anything else — a component, a card, an action — is moved there |
 | Drag from an empty square | Scroll the board: it follows the cursor, so you can travel anywhere on the infinite board. A press that never moves is still a click |
-| Right-click a block | Erase it: the block becomes a loose block again, lying on the square it stood on |
-| Right-click anything else | Nothing â€” the eraser is for blocks (use B to sell) |
+| Right-click a shop offer | Buy it: it unlocks where it lies (a card or an action stays on that square, a component or block hands over a copy and the offer stays on sale, a pack opens its overlay) |
+| Middle-click a shop offer | Hoard: hold that offer in place through the next refresh (one offer per copy of the card) |
+| Right-click anywhere else | Nothing |
 | Hover anything | The sidebar describes it: shape, effects, scorer, trigger limit |
-| **A** | Rotate the block being placed by 90Â° |
-| **S** | The context action: use the selected action, assemble the selected parts into a block, disassemble a selected block â€” with nothing selected it builds a plain wall |
-| **B** | Sell the selected item |
+| **A** | Rotate the block being placed by 90° |
+| **S** | The context action: use the selected action on its targets (nothing happens unless it has exactly the number of targets it needs), assemble the selected parts into a block, disassemble a selected block — with nothing selected it builds a plain wall |
+| **B** | Sell the selected item (the actor) |
 | **D** | Pay cash to raise the selected block's trigger limit |
 | **G** | Odyssey: put the selected block/component away for the run |
-| Click a locked square with a Board Unit in hand | Unlock it (the marble can travel there, and items can be laid out on it) |
-| Click a locked square with no Board Unit | Nothing but a hint: buy one from the shop |
-| Click the shop's Board Unit tile | Buy one Board Unit ($8) |
+| Click a locked square with nothing selected | Unlock it if you own a Board Unit (the marble can travel there, and items can be laid out on it); without one, a hint to buy one |
+| Right-click the Board Unit offer | Buy one Board Unit ($8), then click a locked square to open it |
 | **T** | Start a fresh run (rolls a new trial) |
 | **R** | Restart the current run, keeping its trial |
 | **V** | Turn every placed block back into a loose block |
@@ -65,17 +71,17 @@ tray and the action row are gone, and the board is the inventory.
 | File | Role |
 |---|---|
 | `components.py` | **The source of truth for game data.** Enums for shapes, effects, scorers, conditions, cards, actions and trials, plus their `NAMES` / `DESCRIPTIONS` / `PRICES` / `COLORS` / `GLYPHS` / `ORDER` tables, the price helpers, and the magnitude roll (see `MAGNITUDE_SPREAD`). |
-| `main.py` | The **entry point** and the game's single namespace. The pieces below are re-exported from here, because the code and the tests refer to them as `main.Block`, `main.Game`, `main.SHOP_COORDS`, â€¦; it also wires the drawing helpers onto the classes (`Game.draw = ui.draw`) and runs `python main.py`. **It contains zero drawing code and almost no logic.** |
+| `main.py` | The **entry point** and the game's single namespace. The pieces below are re-exported from here, because the code and the tests refer to them as `main.Block`, `main.Game`, `main.SHOP_COORDS`, …; it also wires the drawing helpers onto the classes (`Game.draw = ui.draw`) and runs `python main.py`. **It contains zero drawing code and almost no logic.** |
 | `config.py` | Every tunable: the colours, the layout geometry (every rect and panel coordinate), the prices, and the score scales. |
 | `rolling.py` | The rolls and prices an item is built and valued with: magnitudes, the cards and match groups the shop offers, the key/portal numbers, resale prices. |
 | `blocks.py` | `Block`: one square of the board, with its shape, effects, scorer and rolled magnitudes. |
 | `items.py` | What the player owns: `BlockItem`, `CardItem`, `ActionItem`, `ItemPack`, `ResourceOption`, `ScorerToken`, `CashBreakdown`. |
-| `shop.py` | The `Shop`: its shelf of offers, its packs and the cells it holds. |
-| `toolbox.py` | `Toolbox`: the player's portable items (loose blocks and components). They lie on board squares â€” the board is the inventory â€” so this is only the ownership list the placement code reads. |
+| `shop.py` | The `Shop`: its shelf of offers — every one of them an item lying on the board — and the logical cells they are dealt from. |
+| `toolbox.py` | `Toolbox`: the player's portable items (loose blocks and components). They lie on board squares — the board is the inventory — so this is only the ownership list the placement code reads. |
 | `marble.py` | `Marble`: the ball's physics state and its trail. |
-| `game.py` | `Game`, assembled from the feature mixins below â€” one object, but its ~300 methods live in the module that owns their subject. |
+| `game.py` | `Game`, assembled from the feature mixins below — one object, but its ~300 methods live in the module that owns their subject. |
 | `game_*.py` | The mixins: `game_core` (setup, locked squares, profiles), `game_input` (the event loop), `game_build` (placing and assembling), `game_store` (purchases and packs), `game_slots` (cards, actions, slots), `game_actions` (the one-shot actions), `game_inventory` (Spirit tokens, banking and selling), `game_economy` (money and resource points), `game_describe` (info-box text), `game_frame` (update, autosave, achievements), `game_runs` (runs, trials, score, gondolas), `game_contact` (what touching a block does), `game_payoffs` (xMult, Procrastination, block scoring), `game_ending` (cash out, retry, the main loop). |
-| `ui.py` | **All drawing.** Screens (`draw`, `draw_title_screen`, `draw_collection`, â€¦), the board and marble rendering, the sidebar and every info box, the icon art, and the shared font table. Functions take the object they draw as their first argument; `main.py` keeps thin delegating wrappers (`Game.draw`, `Block.draw`, â€¦). |
+| `ui.py` | **All drawing.** Screens (`draw`, `draw_title_screen`, `draw_collection`, …), the board and marble rendering, the sidebar and every info box, the icon art, and the shared font table. Functions take the object they draw as their first argument; `main.py` keeps thin delegating wrappers (`Game.draw`, `Block.draw`, …). |
 | `physics.py` | The marble simulation: per-frame integration, every collision shape, effects like portals, magnets and black holes. |
 | `cards.py` | The card hooks that fire on collisions, run start/end and sales. |
 | `sounds.py` | Every sound effect, synthesized as waveforms at import time (no audio files). |
@@ -95,7 +101,7 @@ Conventions worth knowing before editing:
   mixin that owns its subject; every mixin shares the attributes `__init__` (in
   `game_core.py`) creates, so a method in one calls a method in another freely.
 * **Fonts are built once**, in `Game.__init__` (see `FONT_SIZES`), and handed to
-  the UI with `ui.bind_fonts` â€” nothing anywhere else builds a font.
+  the UI with `ui.bind_fonts` — nothing anywhere else builds a font.
 * **Magnitudes** (a scorer's amount, a piston's speed) are rolled around their
   average with a continuous truncated Cauchy whose tail is set by
   `components.MAGNITUDE_SPREAD` (4 = a deliberately long tail). A roll changes
@@ -115,8 +121,8 @@ Conventions worth knowing before editing:
   The marble's hard clamp is the unlocked region plus two squares, which leaves
   room for the Phase effect to carry it into a wall.
 * **The board IS the inventory.** There is no inventory panel, card tray or
-  action row: every owned item â€” a loose block (`BlockItem`), a component, a
-  card, an action, a Spirit token â€” stands on a board square, and is drawn,
+  action row: every owned item — a loose block (`BlockItem`), a component, a
+  card, an action, a Spirit token — stands on a board square, and is drawn,
   clicked and selected there. `Game.ensure_board_cells` lays them out on
   UNLOCKED squares only (an item never stands on a locked one): an item keeps
   the square it claims, and a new one takes the first free unlocked square in
@@ -124,10 +130,10 @@ Conventions worth knowing before editing:
 * **The board starts partly locked, and the player opens it.** A brand-new
   game unlocks only a centered `BOARD_START_WIDTH x BOARD_START_HEIGHT` region;
   the ring around it is solid wall. Clicking a locked square spends a Board Unit
-  to unlock it â€” that click always means "unlock", whatever is in hand â€” and
-  Board Units come from the shop tile, the Drill and Conquistador payoffs and
-  the Packed scorer. Unlocking a square re-lays the layout, so a stashed item
-  takes it.
+  to unlock it — that click always means "unlock", whatever is in hand — and
+  Board Units come from the Board Unit offer on the shelf (bought by
+  right-clicking it), the Drill and Conquistador payoffs and the Packed scorer.
+  Unlocking a square re-lays the layout, so a stashed item takes it.
 * **The board can fill up, and nothing is lost.** `Toolbox.stash` holds the
   portable items the board has no square for; they are still owned and still
   sellable, and they take a square as soon as one opens up.
@@ -135,41 +141,63 @@ Conventions worth knowing before editing:
   not consume the item: it records the square its block stands on
   (`BlockItem.placed_cell`), and the block points back at it
   (`Block.source_item`). `Game.item_cell` reads that square, so the item answers
-  only where the block actually stands â€” never on the square it was laid out (or
+  only where the block actually stands — never on the square it was laid out (or
   created) in. Clicking that square picks the block up to move it, and erasing
-  the block makes the same item placeable again â€” one item can never field two
+  the block makes the same item placeable again — one item can never field two
   blocks. Anything that removes the item (selling, banking, sacrificing,
   disassembling) takes its block off the board with it.
 * **Only blocks are physical.** The marble never meets anything that is not a
   `Block`: the simulation reads `Game.board_blocks()`, not `grid.values()`, so
   a card or a component lying on a square is scenery.
+* **Two flush blocks make one surface.** A marble near the seam between two
+  blocks used to touch the *corner* of one of them, whose closest-point normal
+  points diagonally into the block next door — a phantom corner that threw it
+  off sideways. A corner normal whose face is buried under a neighbouring solid
+  block falls back to the face that really is exposed
+  (`PhysicsEngine._unbury_normal`), one surface is answered once even when
+  several blocks make it up (`SAME_SURFACE_DOT`), and one push separates the
+  marble from it, so there is no sideways kick, no double bounce and no pop at
+  a seam. A contact with no offset at all (centre exactly on a corner) is pushed
+  back the way the marble came (`_arrival_direction`).
 * **Every item is its own switch.** `Game._toggle_item_selection` is the only
   way an item is selected: a click turns that item's switch ON, another click
-  turns it OFF, and no click ever changes any other item's switch â€” so the
+  turns it OFF, and no click ever changes any other item's switch — so the
   player can have any number of items on at once. Everything switched on wears
-  the green frame (thick for the one in hand, see `ui.draw`) â€” blocks,
-  components, cards, actions and tokens alike. The last item switched on is the
-  one in hand, which is also the one a click on a square acts with: a block is
-  built there, anything else is moved there. Choosing what `_select_in_hand`
-  does for each kind is what keeps `B` (sell), `S` (use or assemble), `D`
-  (upgrade) and `G` (bank) working off one selection.
-  * An armed action does not block anything: a click on a block or card both
-    flips that item's switch and aims the action at it (the gold outline).
+  the green frame (plus a white inner frame on the ACTOR, see `ui.draw`) —
+  blocks, components, cards, actions and tokens alike. The selection is a queue
+  (`Game.actor` / `Game.selected_targets`): the FIRST item switched on is the
+  actor — the one `B` sells, `D` upgrades, `G` banks and `S` uses — and every
+  item switched on after it is one of its targets. A click on a square acts with
+  the actor: a block is built there, anything else is moved there.
+  * An action is used with `S` on the items selected behind it
+    (`Game._apply_action`). It needs exactly the number of targets it asks for
+    (`Game.required_targets`: one for a targeted action, none for the rest), so
+    the wrong number of them makes nothing happen and the action is not spent.
   * A block has one shape and one scorer, so the newest switched-on piece of
-    each kind is the one assembled â€” but both keep their switches, and turning
-    the newest off hands the slot back to the one before it
-    (`_reassign_part_of_kind`).
+    each kind is the one assembled (`Game._sync_assigned_parts`) — but both keep
+    their switches, and turning the newest off hands the slot back.
   * Putting an item down, selling, banking, erasing, destroying or consuming it
     turns that one switch off (`_forget_item`); the rest stay as they were.
-  * A click on empty space is the single "turn everything off" gesture.
-* **Player data is local**: `profiles/<name>/â€¦` (saves, `collection.json`,
+  * A click that is not on an item — the void, the bar, a locked square even
+    when a Board Unit is owned — is the single "turn everything off" gesture.
+* **Two copies are two items.** The shop keeps selling a component or block
+  slot after it is bought (its price just rises), so a purchase hands over a
+  fresh copy of the offer (`items.owned_copy`) and the shelf keeps its own
+  object; one object is never owned twice (`Game.owns_item`, `Toolbox.add`).
+  A placed block and its item are the one exception, and they are one existence:
+  whatever removes the block for good — selling it, disassembling it, sacrificing
+  it to Spirit, a Bomb, Sharp or Satanic destroying it — removes the item too
+  (`Game._release_block_item`), so no ghost is left behind to be fielded a
+  second time. Counts that read both the board and the toolbox skip an item
+  that is standing as its block, so one existence is never counted twice.
+* **Player data is local**: `profiles/<name>/…` (saves, `collection.json`,
   `achievements.json`, `metagame.json`), with the active profile name in
   `profiles/current.txt`. The tests redirect all of it into a temp folder.
 
 ## Tests
 
 ```powershell
-python -m unittest discover -s tests -q        # 1532 tests, ~35 s
+python -m unittest discover -s tests -q        # 1563 tests, ~35 s
 python -m unittest discover -s tests -k concert -q     # just one topic
 ```
 
@@ -189,13 +217,14 @@ produces.
 | `test_scorers.py` | Each scorer's payoff, description and shop availability. |
 | `test_blocks.py` | Blocks: shapes, effects, triggers, portals, keys and locks, borders, and placing one with `_place_block_at`. |
 | `test_runs.py` | A run's life: scoring, cash, marbles, trails, retries and the run cycle. |
-| `test_actions.py` | The one-shot actions (Death, Recognition, Deja Vu, Anointment, â€¦). |
+| `test_actions.py` | The one-shot actions (Death, Recognition, Deja Vu, Anointment, …). |
 | `test_trials.py` | Trials. |
 | `test_tokens.py` | Spirit tokens kept from sacrificed blocks. |
 | `test_collision_behaviors.py` | The physics: what the marble actually does against every shape and effect. |
 | `test_save_profiles.py` | Saving/loading and the profile + player-data-path rules. |
 | `test_board_units.py` | Board units, locked squares and the locked-board rules. |
 | `test_board_camera.py` | The infinite board: screen/square conversion, dragging the view, squares far outside the window, and the top bar's furniture. |
+| `test_item_copies.py` | Several copies of one item: copies are items of their own, one object is never owned twice, a block and its item are one existence, and portal/key groups share their count. |
 
 A split module only needs:
 

@@ -103,11 +103,13 @@ MARBLE_BOX_COORDS = (0, TOP_BAR_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - TOP_BAR_HE
 # IS the inventory now (user request), so those areas are gone and every owned
 # item stands on a board square instead.
 CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and on the board
-# The shop, in the top bar's left corner: 10 columns x 5 rows of tiles. Row 0 is
-# the cash header (with the reroll button on its right), row 1 holds every offer
-# (5 items, 3 packs and the Board Unit tile) with its price under it on row 2,
-# and rows 3-4 are Picky's extra offers, the panel title and the shop message.
-SHOP_COORDS = (0, 0, 400, TOP_BAR_HEIGHT)  # x, y, width, height of the shop
+# The shelf's LOGICAL grid: the shape Shop.refresh deals into (5 item slots,
+# 3 pack slots, the Board Unit tile and Picky's bonus offers below them). The
+# panel that used to be drawn here is gone (user request: "completely remove the
+# shop's box") — every offer is an item lying on the board now — but the grid
+# still decides how many offers a shelf holds and which slot each one came from
+# (see Shop.reseat / Shop.slot_key).
+SHOP_COORDS = (0, 0, 400, TOP_BAR_HEIGHT)  # x, y, width, height of the old panel
 # The trial box, right of the score readout in the top bar.
 TRIAL_BOX_COORDS = (810, 14, 200, 92)
 SHOP_GRID_COLS = SHOP_COORDS[2] // GRID_SIZE
@@ -204,9 +206,11 @@ SHOP_MESSAGE_DURATION = 90  # Frames a shop purchase message stays visible
 AUTOSAVE_INTERVAL = 30.0
 # The shop's shelf: SHOP_ITEM_SLOTS "any item" offers — one random component,
 # block, card or action each (see Shop._random_offer) — plus SHOP_PACK_SLOTS
-# item packs, plus the fixed Board Unit tile. All of them share the offer row
-# (SHOP_ITEM_ROW), the packs to the right of the items and the Board Unit tile
-# right of the packs; the row under them carries the prices (see ui.draw_shop).
+# item packs, plus the fixed Board Unit offer. All of them share the offer row
+# (SHOP_ITEM_ROW), the packs to the right of the items and the Board Unit right
+# of the packs. The offers lie on the BOARD now (the panel is gone, user
+# request), so these cells only decide which slot a shelf's offer came from and
+# where a restored save's offers are re-seated; the price is shown on hover.
 SHOP_ITEM_SLOTS = 5
 SHOP_PACK_SLOTS = 3
 SHOP_ITEM_ROW = 1
@@ -303,8 +307,18 @@ FIRE_DECAY_SPEED = 1.5  # fire strength lost per second after the run ends
 # constant rect; they are now module-level constants (the parameterized
 # marble_card_rect / upgrade_card_rect methods stay, since they depend on an
 # index).
-SHOP_REFRESH_BUTTON_RECT = pygame.Rect(SHOP_COORDS[0] + SHOP_COORDS[2] - 112,
-                                       SHOP_COORDS[1] + 8, 104, 24)
+# COMMENTED OUT: shop rerolling (user request: "comment out shop rerolling for
+# now"). The reroll button is not drawn and its click is not wired (see
+# ui.draw_bar_readouts / InputMixin.handle_events).
+# SHOP_REFRESH_BUTTON_RECT = pygame.Rect(SHOP_COORDS[0] + SHOP_COORDS[2] - 112,
+#                                        SHOP_COORDS[1] + 8, 104, 24)
+# Where the bar's readouts start: the cash caption, the last run's earnings
+# under it and the game's message line under that. The shop panel used to own
+# this corner; the panel is gone (every offer is an item on the board now), so
+# the captions simply stay where the player already looked for them.
+BAR_TEXT_X = 10
+BAR_TEXT_Y = 10
+BAR_TEXT_WIDTH = 380
 # The trial display above the cards. Its LEFT half buys a different random
 # trial and its RIGHT half buys no trial for the run (see
 # _click_trial_display); hovering it shows both prices.
@@ -450,6 +464,10 @@ SKY_HIGH_SCORE_FACTOR = 2.0
 FRICTION_COEFFICIENT = 1
 ROLLING_FRICTION = 0
 RESTITUTION = 0  # Bounciness factor for walls
+# Two contact normals at least this parallel (cos 5 degrees) are ONE surface:
+# adjacent blocks that make up a single flat floor bounce the marble once,
+# not once per block (see PhysicsEngine._resolve_block_overlaps).
+SAME_SURFACE_DOT = 0.996
 BOUNCY_RESTITUTION = Effect.MAGNITUDE[Effect.BOUNCY] / 100.0  # the AVERAGE: every bouncy block rolls its own % (see roll_effect_magnitude)
 # A sticky block slows the marble on impact and holds it in place for a short
 # time before releasing it. The slowdown grows with the impact speed: the kept

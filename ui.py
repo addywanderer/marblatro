@@ -29,6 +29,9 @@ else:  # pragma: no cover - only when ui.py is imported standalone
 
 BG_COLOR = _ui_source.BG_COLOR
 BAR_COLOR = _ui_source.BAR_COLOR
+BAR_TEXT_X = _ui_source.BAR_TEXT_X
+BAR_TEXT_Y = _ui_source.BAR_TEXT_Y
+BAR_TEXT_WIDTH = _ui_source.BAR_TEXT_WIDTH
 BLACK = _ui_source.BLACK
 BLOCK_INTERIOR_COLOR = _ui_source.BLOCK_INTERIOR_COLOR
 BLUE = _ui_source.BLUE
@@ -88,7 +91,8 @@ GAME_OVER_NEW_BUTTON_RECT = _ui_source.GAME_OVER_NEW_BUTTON_RECT
 MARBLE_BACK_BUTTON_RECT = _ui_source.MARBLE_BACK_BUTTON_RECT
 MARBLE_UPGRADES_TOGGLE_RECT = _ui_source.MARBLE_UPGRADES_TOGGLE_RECT
 RETURN_TO_MENU_BUTTON_RECT = _ui_source.RETURN_TO_MENU_BUTTON_RECT
-SHOP_REFRESH_BUTTON_RECT = _ui_source.SHOP_REFRESH_BUTTON_RECT
+# COMMENTED OUT with shop rerolling (see config.py): the reroll button is gone.
+# SHOP_REFRESH_BUTTON_RECT = _ui_source.SHOP_REFRESH_BUTTON_RECT
 TRIAL_BOX_RECT = _ui_source.TRIAL_BOX_RECT
 UPGRADES_BACK_BUTTON_RECT = _ui_source.UPGRADES_BACK_BUTTON_RECT
 UPGRADES_BUTTON_RECT = _ui_source.UPGRADES_BUTTON_RECT
@@ -430,6 +434,29 @@ def draw_shop_item(screen, item, rect):
         draw_resource_option(screen, item, rect)
     elif getattr(item, "kind", None) == "pack":
         draw_pack(screen, item, rect)
+    elif getattr(item, "kind", None) == "unit":
+        draw_board_unit_tile(screen, rect)
+
+
+def draw_board_unit_tile(screen, rect, units=0):
+    """Draw the Board Unit offer: a green tile with an "expand the board" glyph.
+
+    A Board Unit is not an item — it is a square of board the player can open —
+    so it wears its own green tile with a plus sign rather than any item art. A
+    badge counts the units already in hand (``units``), so the tile doubles as
+    the readout the old shop panel's tile carried.
+    """
+    pygame.draw.rect(screen, (45, 95, 55), rect)
+    pygame.draw.rect(screen, WHITE, rect, 2)
+    pygame.draw.rect(screen, (255, 255, 255), (rect.x + 9, rect.y + 7, 22, 26), 1)
+    pygame.draw.line(screen, (255, 255, 255), (rect.centerx, rect.y + 10),
+                     (rect.centerx, rect.y + 30), 2)
+    pygame.draw.line(screen, (255, 255, 255), (rect.x + 12, rect.centery),
+                     (rect.x + 28, rect.centery), 2)
+    if units:
+        badge = font("tiny").render(f"x{units}", True, YELLOW)
+        screen.blit(badge, badge.get_rect(bottomright=(rect.right - 3,
+                                                       rect.bottom - 3)))
 
 
 def draw_resource_option(screen, option, rect):
@@ -3278,6 +3305,20 @@ def draw(game):
             if not game.board_viewport().colliderect(rect):
                 continue
             draw_shop_item(game.screen, item, rect)
+            if getattr(item, "kind", None) == "unit" and game.board_units:
+                # The badge counts the units in hand, so the offer doubles as the
+                # readout the old shop tile carried.
+                badge = game.tiny_font.render(f"x{game.board_units}", True, YELLOW)
+                game.screen.blit(badge, badge.get_rect(
+                    bottomright=(rect.right - 3, rect.bottom - 3)))
+            if game.is_shop_offer(item):
+                # A shop offer is not the player's yet: it wears a padlock and
+                # a chain until it is bought (user request: "add a lock-and
+                # chain ui icon over a shop item to show that has not been
+                # bought yet"). Its price is only shown on hover (see
+                # info_layout).
+                draw_locked_marker(game, rect)
+                continue
             if (getattr(item, "kind", None) == "card"
                     and game._card_disabled(item)):
                 # A card the Card cutter trial cut is dimmed, so the player can
@@ -3285,9 +3326,10 @@ def draw(game):
                 shade = pygame.Surface(rect.size, pygame.SRCALPHA)
                 shade.fill((0, 0, 0, 140))
                 game.screen.blit(shade, rect.topleft)
-    # A selected item wears a green frame — thick for the one IN HAND, thin for
-    # the rest — so one selection reads the same wherever the player clicked it
-    # (see Game._toggle_item_selection).
+    # A selected item wears a green frame, and the ACTOR — the first one selected,
+    # the item that gets used up — also wears a white inner frame, so one
+    # selection reads the same wherever the player clicked it (see
+    # Game._toggle_item_selection / Game.actor).
     for item in game.selection:
         cell = game.item_cell(item)
         if cell is None:
@@ -3365,7 +3407,7 @@ def draw(game):
         draw_trial_box(game)
         draw_inaccessible(game)
         draw_action_upgrade_button(game)
-        draw_shop(game)
+        draw_bar_readouts(game)
         # The MAIN MENU button in the top bar: clicking it returns to the title
         # screen.
         btn = RETURN_TO_MENU_BUTTON_RECT
@@ -3700,153 +3742,143 @@ def draw_inaccessible(game):
     game.screen.blit(label, (x, y + len(game.inaccessible) * GRID_SIZE + 4))
 
 
+def cash_caption_rect(game):
+    """The screen rect of the top bar's "Cash" caption.
+
+    Cash and the last run's earnings are the two things the bar still reports
+    from the old shop panel (user request: "keep the current cash and last run
+    cash gained captions in the top bar"); everything else the shop owned is now
+    an item lying on the board. Both captions stack in the bar's left corner,
+    where the player already looked for them.
+    """
+    text = game.small_font.render(f"Cash: {game.cash}", True, WHITE)
+    return text.get_rect(topleft=(BAR_TEXT_X, BAR_TEXT_Y))
+
+
 def last_run_cash_rect(game):
-    """The screen rect of the shop's "Last run cash gained" readout.
+    """The screen rect of the bar's "Last run cash gained" readout.
 
     The readout is what the player hovers to see where the last run's cash
     came from (Game._info_target_at turns it into a hover target), so the rect
-    is measured here and shared by the drawing and the hit test. It sits on the
-    cash header row, right-aligned to the re-roll button so the two never
-    overlap.
+    is measured here and shared by the drawing and the hit test. It sits under
+    the cash caption.
     """
     text = game.small_font.render(
         f"Last run cash gained: {game.last_run_cash_gained}", True, GREEN)
-    return text.get_rect(topright=(SHOP_REFRESH_BUTTON_RECT.left - 8,
-                                   game.shop.rect.y + 8))
+    cash = cash_caption_rect(game)
+    return text.get_rect(topleft=(cash.x, cash.bottom + 6))
 
 
 def shop_message_layout(game, message):
-    """Lay a shop message out in the shop panel's bottom strip.
+    """Lay a shop message out in the bar, under the cash captions.
 
-    The message lives in the band between the SHOP title (bottom-left) and the
-    panel's right edge, on the panel's last row, so it never covers the cash
-    header, the offers or their prices. A message that fits the gap is one
+    The message is the game's one line of feedback — what was bought, sold or
+    unlocked, and why something was refused — so it keeps a permanent place in
+    the top bar now that the shop panel is gone. A message that fits is one
     small-font line; a wider one wraps onto up to two tiny-font lines. Returns
-    (lines, rect): the rendered line surfaces and the rect they are centred on.
+    (lines, rect): the rendered line surfaces and the rect they fill.
     """
-    shop = game.shop.rect
-    left = shop.x + 8 + game.font.size("SHOP")[0] + 8
-    right = shop.right - 8
-    gap = max(60, right - left)
-    strip_y = shop.bottom - GRID_SIZE // 2 - 2
-    center = ((left + right) // 2, strip_y)
+    gap = BAR_TEXT_WIDTH
+    left = BAR_TEXT_X
+    top = last_run_cash_rect(game).bottom + 8
     msg = game.small_font.render(message, True, YELLOW)
     if msg.get_width() <= gap:
-        return [msg], msg.get_rect(center=center)
+        return [msg], msg.get_rect(topleft=(left, top))
     lines = [game.tiny_font.render(line, True, YELLOW)
              for line in game._wrap_text(message, game.tiny_font, gap)][:2]
-    rect = pygame.Rect(0, 0, max(line.get_width() for line in lines),
+    rect = pygame.Rect(left, top, gap,
                        sum(line.get_height() + 1 for line in lines))
-    rect.center = center
     return lines, rect
 
 
-def _draw_shop_held_marker(game, rect):
-    """Mark a shop offer the Hoard whole card is holding (see _toggle_shop_lock).
+def draw_locked_marker(game, rect):
+    """Mark a shop offer as still LOCKED: a padlock and a chain across it.
 
-    A gold frame around the cell says the cell is pinned — a reroll will not
-    touch it — and a padlock in the corner says what is pinning it: the same
-    padlock the Lock shape and the locked board squares are drawn with, so
-    "held" reads in the game's own language instead of as a new icon. The
-    padlock sits in the top-left corner, clear of the item's own art (which
-    fills the middle) and of the price drawn under the cell's bottom edge.
+    Every offer lies on the board until it is bought (see Game._buy_shop_item),
+    so the tile has to say "not yours yet" by itself. The padlock is the one the
+    Lock shape and the locked board squares are drawn with, and the chain run
+    diagonally across the tile reads as "sealed" at a glance without hiding the
+    item's own art (user request: "add a lock-and-chain ui icon over a shop item
+    to show that has not been bought yet").
     """
-    pygame.draw.rect(game.screen, (255, 215, 0), rect, 2)
-    plate = pygame.Rect(rect.x + 1, rect.y + 1, 15, 15)
-    pygame.draw.rect(game.screen, (20, 20, 28), plate)
-    pygame.draw.circle(game.screen, (255, 215, 0),
-                       (plate.centerx, plate.y + 6), 4, 2)
-    pygame.draw.rect(game.screen, (255, 215, 0),
-                     (plate.x + 3, plate.y + 7, plate.width - 6, 6), 2)
+    # A soft dark wash so the art behind the icon reads as pinned down, not
+    # merely decorated.
+    shade = pygame.Surface(rect.size, pygame.SRCALPHA)
+    shade.fill((0, 0, 0, 90))
+    game.screen.blit(shade, rect.topleft)
+    # The chain: three links running corner to corner, plus the two end studs.
+    start = (rect.left + 5, rect.bottom - 5)
+    end = (rect.right - 5, rect.top + 5)
+    pygame.draw.line(game.screen, (200, 205, 215), start, end, 3)
+    for ratio in (0.2, 0.5, 0.8):
+        cx = int(start[0] + (end[0] - start[0]) * ratio)
+        cy = int(start[1] + (end[1] - start[1]) * ratio)
+        pygame.draw.circle(game.screen, (20, 20, 28), (cx, cy), 4)
+        pygame.draw.circle(game.screen, (200, 205, 215), (cx, cy), 4, 2)
+    # The padlock, centred: a shackle over a solid body.
+    body = pygame.Rect(0, 0, 16, 12)
+    body.center = (rect.centerx, rect.centery + 3)
+    pygame.draw.arc(game.screen, (255, 215, 0),
+                    (body.x + 3, body.y - 9, body.width - 6, 14),
+                    0, math.pi, 2)
+    pygame.draw.rect(game.screen, (255, 215, 0), body, border_radius=2)
+    pygame.draw.rect(game.screen, (20, 20, 28), body, 1, border_radius=2)
+    keyhole = (body.centerx, body.centery)
+    pygame.draw.circle(game.screen, (20, 20, 28), keyhole, 2)
 
 
-def draw_shop(game):
-    """Draw the shop panel, its items, prices, refresh button, and messages."""
-    shop = game.shop
-    draw_marble_box(game.screen, shop.rect.x, shop.rect.y, shop.cols, shop.rows,
-                    fill=panel_fill(game))
+def draw_bar_readouts(game):
+    """Draw the top bar's remaining shop furniture: cash, earnings and messages.
 
-    # The shop title sits at the bottom-left of the panel, and STAYS there
-    # while the mouse is over the shop: the label is part of the panel's own
-    # furniture rather than a hint that has to get out of the cursor's way
-    # (unlike the board's and the inventory's, whose panels are the ones the
-    # player picks things up from).
-    title = game.font.render("SHOP", True, WHITE)
-    game.screen.blit(title, (shop.rect.x + 8, shop.rect.bottom - 26))
-
-    # Cash header along the shop's (empty) top row: the total cash sits at the
-    # top-left and the most recent run's cash gain at the top-right (hovering
-    # that readout breaks the run's earnings down — see last_run_cash_rect).
+    The shop BOX is gone (user request: "completely remove the shop's box"): its
+    offers are items lying on the board, bought by right-clicking them, with
+    their price shown on hover (see ui.info_layout). What is left in the bar is
+    what was never an item.
+    """
     cash_text = game.small_font.render(f"Cash: {game.cash}", True, WHITE)
-    game.screen.blit(cash_text, (shop.rect.x + 8, shop.rect.y + 8))
+    game.screen.blit(cash_text, cash_caption_rect(game))
     gained_text = game.small_font.render(
         f"Last run cash gained: {game.last_run_cash_gained}", True, GREEN)
     game.screen.blit(gained_text, last_run_cash_rect(game))
-
-    # Reroll button above the shop's top-right corner. When a Fresh reroll is
-    # banked, it reads FREE (and shows how many are left) instead of the fee.
-    refresh_btn = SHOP_REFRESH_BUTTON_RECT
-    pygame.draw.rect(game.screen, (60, 60, 160), refresh_btn)
-    pygame.draw.rect(game.screen, WHITE, refresh_btn, 2)
-    free = getattr(game, "free_rerolls", 0)
-    if free > 0:
-        label = f"REFRESH FREE ({free})" if free > 1 else "REFRESH FREE"
-        refresh_text = game.small_font.render(label, True, YELLOW)
-    else:
-        # The price of a reroll: the inflation trial raises it and Brainstorm's
-        # v2 halves it (see Game.refresh_cost), so the label and the charge in
-        # _refresh_shop read the same number.
-        cost = game.refresh_cost()
-        refresh_text = game.small_font.render(f"REFRESH ${cost}", True, WHITE)
-    game.screen.blit(refresh_text, refresh_text.get_rect(center=refresh_btn.center))
-
-    for item in shop.items:
-        rect = pygame.Rect(shop.rect.x + item.col * GRID_SIZE, shop.rect.y + item.row * GRID_SIZE, GRID_SIZE, GRID_SIZE)
-        draw_shop_item(game.screen, item, rect)
-        # Hoard: a held cell is framed and padlocked, so the player can see at a
-        # glance which offers a reroll will leave alone (see _toggle_shop_lock).
-        if shop.slot_key(item) in shop.locked:
-            _draw_shop_held_marker(game, rect)
-        # Show the effective price (component prices rise with each purchase).
-        # An already-upgraded action is sold at the normal action price but is
-        # worth ACTION_UPGRADE_COST more, so its price is drawn in the gold of
-        # its own frame to flag the bargain (see draw_action).
-        upgraded = (getattr(item, "kind", None) == "action"
-                    and getattr(item, "version", 1) >= 2)
-        price = game.small_font.render(f"${game._buy_price(item)}", True,
-                                       (255, 215, 0) if upgraded else WHITE)
-        center_x = shop.rect.x + item.col * GRID_SIZE + GRID_SIZE // 2
-        price_y = shop.rect.y + (item.row + 1) * GRID_SIZE + GRID_SIZE // 2
-        game.screen.blit(price, price.get_rect(center=(center_x, price_y)))
-
-    # The shop's always-present Board Unit tile (the rightmost unit of the
-    # bottom item row): $4 buys an expansion the player spends by clicking a
-    # locked square on the board. A counter shows how many are in hand.
-    bcell = pygame.Rect(shop.rect.x + BOARD_UNIT_COL * GRID_SIZE,
-                        shop.rect.y + BOARD_UNIT_ROW * GRID_SIZE,
-                        GRID_SIZE, GRID_SIZE)
-    pygame.draw.rect(game.screen, (45, 95, 55), bcell)
-    pygame.draw.rect(game.screen, WHITE, bcell, 2)
-    # A plus icon reads as "expand the board" (mini 2x2 grid hint).
-    pygame.draw.rect(game.screen, (255, 255, 255), (bcell.x + 9, bcell.y + 7, 22, 26), 1)
-    pygame.draw.line(game.screen, (255, 255, 255), (bcell.centerx, bcell.y + 10),
-                     (bcell.centerx, bcell.y + 30), 2)
-    pygame.draw.line(game.screen, (255, 255, 255), (bcell.x + 12, bcell.centery),
-                     (bcell.x + 28, bcell.centery), 2)
-    if game.board_units > 0:
-        badge = game.tiny_font.render(f"x{game.board_units}", True, YELLOW)
-        game.screen.blit(badge, badge.get_rect(bottomright=(bcell.right - 3, bcell.bottom - 3)))
-    bu_price = game.small_font.render(f"${game._board_unit_price()}", True, WHITE)
-    bu_center_x = bcell.centerx
-    bu_price_y = shop.rect.y + (BOARD_UNIT_ROW + 1) * GRID_SIZE + GRID_SIZE // 2
-    game.screen.blit(bu_price, bu_price.get_rect(center=(bu_center_x, bu_price_y)))
-
+    # COMMENTED OUT: shop rerolling (user request: "comment out shop rerolling
+    # for now"). The button, its label and Game._refresh_shop's click wiring are
+    # parked here so rerolling can come back as it was.
+    #
+    # refresh_btn = SHOP_REFRESH_BUTTON_RECT
+    # pygame.draw.rect(game.screen, (60, 60, 160), refresh_btn)
+    # pygame.draw.rect(game.screen, WHITE, refresh_btn, 2)
+    # free = getattr(game, "free_rerolls", 0)
+    # if free > 0:
+    #     label = f"REFRESH FREE ({free})" if free > 1 else "REFRESH FREE"
+    #     refresh_text = game.small_font.render(label, True, YELLOW)
+    # else:
+    #     cost = game.refresh_cost()
+    #     refresh_text = game.small_font.render(f"REFRESH ${cost}", True, WHITE)
+    # game.screen.blit(refresh_text, refresh_text.get_rect(center=refresh_btn.center))
     if game.shop_message:
         lines, rect = shop_message_layout(game, game.shop_message)
         y = rect.top
         for line in lines:
-            game.screen.blit(line, line.get_rect(midtop=(rect.centerx, y)))
+            game.screen.blit(line, (rect.x, y))
             y += line.get_height() + 1
+
+
+# ---------------------------------------------------------------------------
+# The shop PANEL is gone (user request: "completely remove the shop's box"):
+# every offer is an item lying on the BOARD now, drawn with the rest of the
+# board's items and marked with a padlock and chain while it is unbought (see
+# draw_locked_marker). Its price is only shown on hover (see info_layout), it is
+# bought by right-clicking it (InputMixin.handle_events), and what is left of the
+# old panel in the bar is draw_bar_readouts above.
+#
+# COMMENTED OUT with the panel, kept as history: the SHOP title, the price
+# labels under each offer, the Hoard hold marker (_toggle_shop_lock has no
+# reroll left to hold an offer against) and the Board Unit tile, which is an
+# offer of its own now (see items.BoardUnitOffer / draw_board_unit_tile).
+#
+# def draw_shop(game):
+#     """Draw the shop panel, its items, prices, refresh button, and messages."""
+#     ...
 
 
 def draw_sidebar(game):

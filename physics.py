@@ -63,6 +63,7 @@ RESTITUTION = _physics_source.RESTITUTION
 ROLLING_FRICTION = _physics_source.ROLLING_FRICTION
 ROTATE_FLING = _physics_source.ROTATE_FLING
 ROTATE_SPEED = _physics_source.ROTATE_SPEED
+SAME_SURFACE_DOT = _physics_source.SAME_SURFACE_DOT
 SHRINK_RADIUS_FACTOR = _physics_source.SHRINK_RADIUS_FACTOR
 SQRT_2 = _physics_source.SQRT_2
 STICKY_DURATION = _physics_source.STICKY_DURATION
@@ -71,6 +72,12 @@ STICKY_SPEED_REF = _physics_source.STICKY_SPEED_REF
 Scorer = _physics_source.Scorer
 Shape = _physics_source.Shape
 del _physics_source
+
+# The shapes whose faces lie on the cell's own edges, so two of them side by side
+# make ONE flat surface with no step at the seam (see _unbury_normal). A shape
+# with an angled or inset face — a slope, a circle, a peg, a corner's leg — has a
+# real angled normal there and keeps it.
+SEAM_SHAPES = (Shape.RECT, Shape.LOCK, Shape.PLATFORM)
 
 
 class PhysicsEngine:
@@ -82,9 +89,16 @@ class PhysicsEngine:
     """
     def __init__(self):
         self.gravity_dir = DOWN_GRAVITY
+        # The cells the blocks occupy this frame, so a corner normal can tell
+        # whether the face it points at is buried under a neighbouring block
+        # (see _unbury_normal). Empty until a frame is simulated.
+        self.solid_cells = set()
 
     def update(self, marble, dt, blocks):
         """Advance the marble by one frame: integrate forces, collide, clamp."""
+        # Which cells are solid this frame, for the corner-normal test (see
+        # _unbury_normal). Set before anything can ask for a collision normal.
+        self.solid_cells = self._solid_cells(blocks)
         # A marble stuck to a sticky block is pinned in place until its stick
         # expires, then released at its damped impact velocity.
         if getattr(marble, "sticky_timer", 0.0) > 0:
@@ -550,6 +564,8 @@ class PhysicsEngine:
 
     def move_with_collision(self, marble, blocks, dt):
         """Move the marble in bounded sub-steps, separating it from blocks positionally."""
+        # Which cells are solid, for the corner-normal test (see _unbury_normal).
+        self.solid_cells = self._solid_cells(blocks)
         speed = np.linalg.norm(marble.velocity)
         if speed > MAX_MARBLE_SPEED:
             marble.velocity *= MAX_MARBLE_SPEED / speed
@@ -595,6 +611,14 @@ class PhysicsEngine:
         if not overlaps:
             return
 
+        # The normals already responded to in this sub-step: two blocks that make
+        # up ONE flat surface (a floor laid out of several blocks, say) are one
+        # surface, and the marble bounces off it once. Answering the second block
+        # too reflected the velocity a second time — straight back into the first
+        # block, or off at an angle that depends only on the order the blocks
+        # happened to be in (user report: "bounces off things in weird directions,
+        # especially on the borders between blocks").
+        answered = []
         for block, normal, _ in overlaps:
             if block not in marble.collisions_this_tick:
                 marble.collisions_this_tick.append(block)
@@ -605,17 +629,97 @@ class PhysicsEngine:
             if block not in marble.contact_normals:
                 marble.contact_normals[block] = normal
                 marble.contact_incoming[block] = np.array(marble.velocity, dtype=float)
+            if any(float(np.dot(normal, seen)) > SAME_SURFACE_DOT
+                   for seen in answered):
+                continue
+            answered.append(normal)
             self.resolve_collision(marble, block, normal)
 
         for _ in range(MAX_MARBLE_RECURSION + 1):
             overlaps = self._collect_overlaps(marble, blocks)
             if not overlaps:
                 break
+            # One push per SURFACE, as above: two blocks of one flat floor share
+            # a normal, and pushing along both would separate the marble twice
+            # the distance it is actually sunk — a visible pop at every seam.
+            pushes = []                      # [(normal, deepest penetration)]
             for _, normal, penetration in overlaps:
+                for index, (seen, deepest) in enumerate(pushes):
+                    if float(np.dot(normal, seen)) > SAME_SURFACE_DOT:
+                        if penetration > deepest:
+                            pushes[index] = (seen, penetration)
+                        break
+                else:
+                    pushes.append((normal, penetration))
+            for normal, penetration in pushes:
                 marble.position += normal * penetration
 
     def _block_collision(self, marble, block):
         """Return (normal, penetration) for a block, or None if the marble is clear."""
+        hit = self._raw_block_collision(marble, block)
+        if hit is None:
+            return None
+        if block.shape in SEAM_SHAPES:
+            # Only shapes whose faces reach the cell's own edges can have a
+            # phantom corner at a seam: a diagonal face (a slope, a corner's leg)
+            # is a real surface and keeps its angled normal.
+            return self._unbury_normal(block, hit[0]), hit[1]
+        return hit[0], hit[1]
+
+    def _unbury_normal(self, block, normal):
+        """Turn a corner normal that points into a neighbouring block into a face one.
+
+        Two flush blocks make ONE flat surface, but a marble landing near their
+        shared edge touches the CORNER of one of them, whose closest-point normal
+        points diagonally — into the space the other block fills. That phantom
+        corner is not a surface at all, and bouncing off it flung the marble
+        sideways at an angle that depended only on which block was nearer (user
+        report: "bounces off things in weird directions, especially when it hits
+        the exact point on the borders between blocks").
+
+        So: if the normal points at a face whose neighbour is solid, that
+        component is dropped and the marble bounces off the face that really is
+        exposed. When BOTH neighbours are solid the corner is a real one (the
+        marble is in a nook), and the diagonal way out is the only way out.
+        """
+        nx, ny = float(normal[0]), float(normal[1])
+        if abs(nx) < 1e-9 or abs(ny) < 1e-9:
+            return normal                     # already a face normal
+        if not self.solid_cells:
+            return normal
+        cell = (getattr(block, "x", None), getattr(block, "y", None))
+        if not isinstance(cell[0], int) or not isinstance(cell[1], int):
+            return normal
+        buried_x = (cell[0] + (1 if nx > 0 else -1), cell[1]) in self.solid_cells
+        buried_y = (cell[0], cell[1] + (1 if ny > 0 else -1)) in self.solid_cells
+        if buried_x == buried_y:
+            return normal                     # a nook, or a free corner
+        if buried_x:
+            nx = 0.0
+        else:
+            ny = 0.0
+        return np.array([nx, ny]) / math.hypot(nx, ny)
+
+    def _solid_cells(self, blocks):
+        """The grid cells of the blocks a marble cannot pass through."""
+        cells = set()
+        for block in blocks:
+            x, y = getattr(block, "x", None), getattr(block, "y", None)
+            if not isinstance(x, int) or not isinstance(y, int):
+                continue
+            if block.shape in (Shape.NONE, Shape.KEY):
+                continue
+            if block.scorer == Scorer.START:
+                continue
+            if block.has_effect(Effect.PORTAL):
+                continue
+            if block.shape == Shape.LOCK and not getattr(block, "locked", True):
+                continue
+            cells.add((x, y))
+        return cells
+
+    def _raw_block_collision(self, marble, block):
+        """The shape test behind _block_collision: (normal, penetration) or None."""
         if block.scorer == Scorer.START:
             return None
         if block.has_effect(Effect.PORTAL):
@@ -1324,7 +1428,7 @@ class PhysicsEngine:
                 corner_distance = np.linalg.norm(corner_vec)
                 if corner_distance > 0:
                     return corner_vec / corner_distance
-                return np.array([-1.0, -1.0]) / SQRT_2
+                return self._arrival_direction(marble, closest_point)
 
             if distance > 0:
                 if abs(dist_vec[0]) > abs(dist_vec[1]) or (
@@ -1337,6 +1441,29 @@ class PhysicsEngine:
             return self._calculate_rect_normal(marble, block_rect)
 
         return None
+
+    def _arrival_direction(self, marble, point):
+        """The outward direction to push a marble that sits EXACTLY on a point.
+
+        A contact with no offset at all (the marble's centre is exactly on a
+        corner or a segment end) has no natural normal: any direction is as good
+        as another, and picking one fixed diagonal flung the marble off at a
+        random-looking angle whatever it had been doing (user report: "bounces
+        off things in weird directions, especially when it hits the exact point
+        on the borders"). So it is pushed back the way it came — where it was at
+        the start of this sub-step, else opposite its velocity — and only a
+        marble that has not moved at all falls back to a fixed diagonal.
+        """
+        pre = getattr(marble, "_pre_move_position", None)
+        if pre is not None:
+            away = np.asarray(pre, dtype=float) - np.asarray(point, dtype=float)
+            length = float(np.linalg.norm(away))
+            if length > 1e-9:
+                return away / length
+        speed = float(np.linalg.norm(marble.velocity))
+        if speed > 1e-9:
+            return -np.asarray(marble.velocity, dtype=float) / speed
+        return np.array([-1.0, -1.0]) / SQRT_2
 
     def _get_edge_normal(self, marble, p1, p2, block):
         """Return an outward normal for a slope edge."""
@@ -1393,7 +1520,7 @@ class PhysicsEngine:
                 if corner_distance < marble.radius:
                     if corner_distance > 0:
                         return corner_vec / corner_distance, corner_distance
-                    return np.array([-1.0, -1.0]) / SQRT_2, 0.0
+                    return self._arrival_direction(marble, corner), 0.0
 
             if block.shape in (Shape.SLOPE, Shape.LINE, Shape.FLAT_LINE):
                 normal = self._get_edge_normal(marble, p1, p2, block)

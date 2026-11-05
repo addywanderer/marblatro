@@ -94,13 +94,12 @@ class ActionsMixin:
 
 
     def _select_action(self, action):
-        """Select an owned action; the next block/item click picks its subject.
+        """Arm an action as the actor; its targets are the rest of the selection.
 
-        An action is selected the same way every other item is (see
-        _toggle_item_selection): it joins the selection, wears the green frame,
-        and becomes the item IN HAND, so a click on a square moves it. While it
-        is armed, a click on a BLOCK or a CARD picks that as its subject instead
-        (see _pick_action_subject); S applies it.
+        An action is selected like every other item (see _toggle_item_selection),
+        but it is the ACTOR: the targets it acts on are the items selected after
+        it (see Game.selected_targets). S applies it, and nothing happens unless
+        it has exactly the number of targets it needs (see _apply_action).
         """
         if (self.pending_pack_action is not None
                 and action is not self.pending_pack_action):
@@ -110,11 +109,6 @@ class ActionsMixin:
             self._set_shop_message("Use the packed action first (or press S) — "
                                    f"{self.pending_pack_action.name} is waiting")
             return
-        # A packed action is armed before it is on the board, so only an OWNED
-        # action joins the selection.
-        if (action in self.actions
-                and not self.is_item_selected(action)):
-            self.selection.append(action)
         self._clear_active_selection()
         self.selected_toolbox_item = action
         self.selected_toolbox_index = self._shown_index_of(action)
@@ -134,31 +128,13 @@ class ActionsMixin:
         return (isinstance(item, Block)
                 or getattr(item, "kind", None) in ("block", "card"))
 
-    def _pick_action_subject(self, item):
-        """Designate the clicked board item as the active action's subject."""
-        if item is not None and getattr(item, "kind", None) == "card":
-            self.selected_action_subject = item
-            self._set_shop_message(f"Target: {item.name}")
-            return
-        if item is not None and (isinstance(item, Block)
-                                 or getattr(item, "kind", None) == "block"):
-            self.selected_action_subject = item
-            self._set_shop_message(f"Target: {self._item_name(item)}")
-            return
-        if item is not None:
-            self._set_shop_message("Action target must be a block or card")
-            return
-        # Clicking empty space cancels the active action.
-        self._clear_action_selection()
-        self._set_shop_message("Action canceled")
-
     def _clear_action_selection(self, announce=True):
         """Deselect the current action and its subject.
 
         The action leaves the SELECTION too: it was selected like any other item
         (see _toggle_item_selection), so cancelling it drops the green frame with
-        it and hands the place in hand to whatever is still selected. A used-up
-        action is dropped quietly — it is gone, so there is nothing to announce.
+        it and leaves the first remaining item as the actor. A used-up action is
+        dropped quietly — it is gone, so there is nothing to announce.
         """
         action = self.selected_action
         self.selected_action = None
@@ -167,21 +143,36 @@ class ActionsMixin:
             self._unselect_item(action, announce=announce)
 
     def _apply_action(self):
-        """Apply the selected action to its subject (the S key).
+        """Apply the actor action to its targets (the S key).
 
-        Using an action consumes it. An action that acts on the player rather
-        than on a block or card (see Action.needs_target) needs no subject and
-        fires as soon as it is selected. Returns True when it was applied.
+        The action is the FIRST selected item and what it acts on is everything
+        selected behind it (user request: "assume all items selected other than
+        the first one is a target item"). If there are not the right number of
+        targets, NOTHING happens (user request: "if there are not the right
+        number of target items, make nothing happen") — the action is not spent.
+        An action that acts on the player rather than on a block or card (see
+        Action.needs_target) needs no target at all.
         """
         action = self.selected_action
         pending = action is not None and action is self.pending_pack_action
         if action is None or (action not in self.actions and not pending):
             self._set_shop_message("Select an action first")
             return False
-        subject = self.selected_action_subject
-        if subject is None and Action.needs_target(action.value):
-            self._set_shop_message("Select a target block or card first")
+        needed = self.required_targets(action)
+        # Everything selected BESIDES the action is a target for it (user
+        # request: "assume all items selected other than the first one is a
+        # target item"). A packed action is not itself in the selection, so all
+        # of it counts.
+        targets = [t for t in self.selection
+                   if t is not action and self.is_action_target(t)]
+        if needed is not None and len(targets) != needed:
+            # Not the right number of targets: nothing happens at all.
+            self._set_shop_message(
+                f"{action.name} needs {needed} target"
+                f"{'' if needed == 1 else 's'} — {len(targets)} selected")
             return False
+        subject = targets[0] if targets else None
+        self.selected_action_subject = subject
         applied = False
         if action.value == Action.CLEANSWEEP:
             applied = self._action_cleansweep(action)
@@ -455,6 +446,11 @@ class ActionsMixin:
             if subject.scorer == Scorer.START:
                 self.marbles = [m for m in self.marbles
                                 if getattr(m, "start_block", None) is not subject]
+            # Selling the block sells the item it was built from with it (see
+            # _release_block_item) — one existence, one sale. Its switch goes off
+            # too: the block is not on the board any more.
+            self._forget_item(subject)
+            self._release_block_item(subject)
             self._delete_pairing_partners(subject)
             self.cash += gained
             self._set_shop_message(f"{action.name} sold {self._item_name(subject)} for ${gained}")
@@ -570,13 +566,15 @@ class ActionsMixin:
         return True
 
     def _add_portal_pair_triggers(self, block, amount):
-        """Give a portal's partner the same extra triggers (and its new limit).
+        """Give a portal's partners the same extra triggers (and its new limit).
 
         A portal pair shares one trigger count, so a Deja Vu upgrade on one
-        half has to reach the other half too: otherwise the next contact would
-        sync both halves back down to the lower count and waste the upgrade.
-        The partner may be unplaced (a toolbox block, which has no trigger
-        count of its own yet), so only its limit is carried over then.
+        half has to reach the other halves too: otherwise the next contact would
+        sync them back down to the lower count and waste the upgrade. Every
+        portal sharing the number is upgraded — Recognition can leave more than
+        two of them (see _delete_paired_portal). The partner may be unplaced (a
+        toolbox block, which has no trigger count of its own yet), so only its
+        limit is carried over then.
         """
         if not getattr(block, "has_effect", lambda e: False)(Effect.PORTAL):
             return
@@ -586,10 +584,13 @@ class ActionsMixin:
         for other in list(self.toolbox.items) + self.board_blocks():
             if other is block or getattr(other, "portal_number", 0) != number:
                 continue
+            if getattr(other, "placed_cell", None) is not None:
+                # Its BLOCK is the copy that matters, and that block is in
+                # board_blocks(): touching both would upgrade one portal twice.
+                continue
             other.trigger_limit = block.trigger_limit
             if hasattr(other, "triggers_left"):
                 other.triggers_left += amount
-            return
 
     def _enchant_block(self, item, effect):
         """Give a block one extra effect and reprice it for the new part.
@@ -627,8 +628,11 @@ class ActionsMixin:
         if action.version >= 2:
             targets = [b for b in self.board_blocks()
                        if b.scorer not in (Scorer.START, Scorer.FINISH)]
+            # A placed block's item is that same block (see _place_block_at), so
+            # its item is not a second target — one block gets one effect.
             targets += [i for i in self.toolbox.items
                         if getattr(i, "kind", None) == "block"
+                        and getattr(i, "placed_cell", None) is None
                         and i.scorer not in (Scorer.START, Scorer.FINISH)]
             blessed = 0
             for target in targets:
@@ -768,6 +772,9 @@ class ActionsMixin:
             if subject.scorer == Scorer.START:
                 self.marbles = [m for m in self.marbles
                                 if getattr(m, "start_block", None) is not subject]
+            # The sacrificed block's item goes with it (see _release_block_item):
+            # the token is what the player keeps now.
+            self._release_block_item(subject)
         else:
             self.toolbox.remove(subject)
             self.assigned_toolbox_indexes.pop(subject, None)

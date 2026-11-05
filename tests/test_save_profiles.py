@@ -314,7 +314,8 @@ class SaveSystemTests(unittest.TestCase):
         fresh.trials_enabled = False
         save_system.load_slot(fresh, 5)
 
-        offers = [i for i in fresh.shop.items if getattr(i, "kind", None) != "pack"]
+        offers = [i for i in fresh.shop.items
+                  if getattr(i, "kind", None) not in ("pack", "unit")]
         packs = [i for i in fresh.shop.items if getattr(i, "kind", None) == "pack"]
         self.assertEqual(len(offers), main.SHOP_ITEM_SLOTS)
         self.assertEqual(len(packs), main.SHOP_PACK_SLOTS)
@@ -324,15 +325,18 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual([(i.col, i.row) for i in packs],
                          [(main.SHOP_PACK_COL + n, main.SHOP_PACK_ROW)
                           for n in range(main.SHOP_PACK_SLOTS)])
-        # Every offer is inside the panel the shop is drawn in, and the cell it
-        # is drawn in is the cell the hit test finds it in.
+        # The Board Unit is always on the shelf, in the slot right of the packs.
+        units = [i for i in fresh.shop.items
+                 if getattr(i, "kind", None) == "unit"]
+        self.assertEqual([(u.col, u.row) for u in units],
+                         [(main.BOARD_UNIT_COL, main.BOARD_UNIT_ROW)])
+        # Every offer stands on a board square of its own, and the square it
+        # stands on is the square the hit test finds it in.
+        fresh.ensure_board_cells()
         for item in fresh.shop.items:
-            cell = main.pygame.Rect(
-                fresh.shop.rect.x + item.col * main.GRID_SIZE,
-                fresh.shop.rect.y + item.row * main.GRID_SIZE,
-                main.GRID_SIZE, main.GRID_SIZE)
-            self.assertTrue(fresh.shop.rect.contains(cell), (item.col, item.row))
-            self.assertIs(fresh.shop.item_at(cell.center), item)
+            cell = fresh.item_cell(item)
+            self.assertIsNotNone(cell, item)
+            self.assertIs(fresh.shop.offer_at_cell(cell), item)
 
 
     def test_a_held_offer_follows_its_offer_to_the_cell_it_is_re_seated_in(self):
@@ -1996,10 +2000,12 @@ class ProfileTests(unittest.TestCase):
         self.assertEqual(fresh.shop_lock_cap(), 1)
         fresh._refresh_shop()
         self.assertEqual(fresh.shop.locked, [slot])
-        self.assertEqual(fresh.shop.item_at(
-            (fresh.shop.rect.x + held.col * main.GRID_SIZE + 20,
-             fresh.shop.rect.y + held.row * main.GRID_SIZE + 20)).name,
-            held.name)
+        fresh.ensure_board_cells()
+        held_now = next(i for i in fresh.shop.items
+                        if fresh.shop.slot_key(i) == slot)
+        self.assertEqual(held_now.name, held.name)
+        self.assertIs(fresh.shop.offer_at_cell(fresh.item_cell(held_now)),
+                      held_now)
 
     def test_a_saved_hold_without_its_card_is_clipped_on_load(self):
         # A hold cannot outlive the card: loading clips the saved holds against

@@ -353,6 +353,12 @@ class InventoryMixin:
         count = sum(1 for block in self.board_blocks()
                     if getattr(block, "scorer", None) == scorer)
         for item in self.toolbox.items:
+            # A block standing on the board is counted above; the item it was
+            # built from is that same block, so counting it here would make one
+            # placed Start block look like a spare one (and let the player sell
+            # the only role the game has left).
+            if getattr(item, "placed_cell", None) is not None:
+                continue
             role_block = getattr(item, "kind", None) == "block" and item.scorer == scorer
             role_component = item.kind == Component.SCORER and item.value == scorer
             if role_block or role_component:

@@ -80,16 +80,17 @@ class CameraTests(GameTestCase):
         self.assertTrue(self.game.in_hand)
         home = self.game.item_cell(item)
 
-        # A drag that STARTS on a locked square: the press spends nothing (no
-        # Board Unit is in hand), so all the gesture does is scroll the view —
-        # the item in hand stays in hand, on its own square.
+        # A drag that STARTS on a locked square: the press deselects everything
+        # (a click on anything that is not an item does, user request) and the
+        # drag that follows only scrolls the view — the item stays on its own
+        # square.
         locked = (0, 0)
         self.assertTrue(self.game.is_cell_locked(*locked))
         self._drag(self._cell_centre(*locked), (-80, 0))
 
         self.assertNotEqual(self.game.camera, (0, 0))
         self.assertEqual(self.game.item_cell(item), home)
-        self.assertTrue(self.game.in_hand)
+        self.assertFalse(self.game.in_hand)
 
     def test_a_click_without_a_drag_still_places_the_item_in_hand(self):
         # The press is a click until it moves: putting an item down still takes
@@ -177,20 +178,25 @@ class TopBarTests(GameTestCase):
     def test_the_furniture_is_in_the_bar(self):
         bar = main.pygame.Rect(0, 0, main.SCREEN_WIDTH, main.TOP_BAR_HEIGHT)
         pieces = {
-            "shop": main.pygame.Rect(main.SHOP_COORDS),
             "trial box": main.TRIAL_BOX_RECT,
             "main menu": main.RETURN_TO_MENU_BUTTON_RECT,
-            "reroll": main.SHOP_REFRESH_BUTTON_RECT,
             "score": main.SCORE_PANEL_RECT,
             "action upgrade": main.ACTION_UPGRADE_RECT,
         }
         for name, rect in pieces.items():
             with self.subTest(piece=name):
                 self.assertTrue(bar.contains(rect), (name, rect))
+        # The cash readouts and the shop's messages share the bar's left corner:
+        # the shop BOX is gone, and its offers lie on the board (see
+        # ui.draw_bar_readouts).
+        readout = main.pygame.Rect(main.BAR_TEXT_X, main.BAR_TEXT_Y,
+                                   main.BAR_TEXT_WIDTH,
+                                   main.TOP_BAR_HEIGHT - main.BAR_TEXT_Y)
+        self.assertTrue(bar.contains(readout), readout)
         # ...and so does the run/round display (RUN_DOT_GRID is the first dot).
         x0, y0 = main.RUN_DOT_GRID
         self.assertLess(y0 + 2 * main.RUN_DOT_DY, main.TOP_BAR_HEIGHT)
-        self.assertGreater(x0, main.SHOP_COORDS[2])
+        self.assertGreater(x0, readout.right)
 
     def test_a_locked_square_wears_the_backgrounds_pattern(self):
         g = self.game

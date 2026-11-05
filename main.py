@@ -37,7 +37,6 @@ from components import (
     MAGNITUDE_SCALE,
     MAGNITUDE_STEP_DIVISOR,
     MAGNITUDES,
-    MATCH_GROUPS,
     PIPE_GROUP_SHAPES,
     RESOURCE_PACK_FACTOR,
     RESOURCE_THRESHOLD,
@@ -95,11 +94,12 @@ from config import *  # noqa: I001  the game's tunables (dependency order below)
 import rolling                           # noqa: F401
 from rolling import *
 from rolling import _random_card_scorer  # noqa: F401  the tests roll with it
-from blocks import Block                 # noqa: F401
+from blocks import Block
 from items import (                      # noqa: F401
     CASH_BREAKDOWN,
     ActionItem,
     BlockItem,
+    BoardUnitOffer,
     CardItem,
     ItemPack,
     ResourceOption,
@@ -108,6 +108,7 @@ from items import (                      # noqa: F401
     _s,
     make_card_item,
     offer_key,
+    owned_copy,
     resource_point_label,
 )
 import shop                              # noqa: F401
@@ -143,7 +144,7 @@ import cards  # noqa: F401
 import profiles
 import save_system  # noqa: F401
 import ui
-from game import Game                  # noqa: F401
+from game import Game
 
 
 

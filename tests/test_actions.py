@@ -201,6 +201,7 @@ class ActionsTests(GameTestCase):
         action = main.ActionItem(main.Action.RECOGNITION, 60)
         self.game.actions.append(action)
         self.game.cash = 100
+        self.game.selection.append(block)
         self.game.selected_action = action
         self.game.selected_action_subject = block
         self.assertTrue(self.game._apply_action())
@@ -603,6 +604,7 @@ class ActionsTests(GameTestCase):
         self.game.toolbox.add(block)
         action = main.ActionItem(main.Action.DEJA_VU, 56)
         self.game.actions.append(action)
+        self.game.selection.append(block)
         self.game.selected_action = action
         self.game.selected_action_subject = block
         self.game.cash = 100

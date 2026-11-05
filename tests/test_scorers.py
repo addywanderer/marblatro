@@ -1500,7 +1500,10 @@ class ScorersTests(GameTestCase):
         self.game.toolbox.stash.clear()
         self.game.cash = 1000
         self.game._buy_shop_item(block)
-        self.game._equip_block(block)
+        bought = next(i for i in self.game.toolbox.items
+                      if getattr(i, "kind", None) == "block")
+        self.assertIsNot(bought, block)   # the purchase is a copy (owned_copy)
+        self.game._equip_block(bought)
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN
         event.button = 1

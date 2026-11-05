@@ -30,9 +30,14 @@ class ToolboxTests(GameTestCase):
 
         self.game._buy_shop_item(offer)
 
-        self.assertIn(offer, self.game.toolbox.items)
+        # The bought item is a copy of the offer (see items.owned_copy): the
+        # shelf keeps the offer, the player keeps their own block.
+        self.assertEqual(len(self.game.toolbox.items), 1)
+        bought = self.game.toolbox.items[0]
+        self.assertIsNot(bought, offer)
+        self.assertEqual(bought.shape, main.Shape.RECT)
+        self.assertEqual(bought.effects, [])
         self.assertEqual(offer.shape, main.Shape.RECT)
-        self.assertEqual(offer.effects, [])
         self.assertLess(self.game.cash, 1000)
 
 
@@ -98,7 +103,10 @@ class ToolboxTests(GameTestCase):
         self.assertTrue(self.game.shop_message)
 
 
-    def test_moving_placed_block_displaces_other_block_to_toolbox(self):
+    def test_clicking_a_second_placed_block_selects_it_too(self):
+        # Every click on an item is its own switch (see _toggle_item_selection),
+        # so clicking a second block with one already selected switches the
+        # second one on as a TARGET of the first instead of overwriting it.
         self.game.toolbox.items.clear()
         self.game.grid[(2, 3)] = main.Block(2, 3, shape=main.Shape.SLOPE, effect=main.Effect.BOUNCY,
                                             scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
@@ -106,31 +114,33 @@ class ToolboxTests(GameTestCase):
                                             scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
         self._click(self._grid_pos(2, 3))  # select the SLOPE block
 
-        self._click(self._grid_pos(5, 5))  # move it onto the RECT block
+        self._click(self._grid_pos(5, 5))  # switch the RECT block on as well
 
-        self.assertIn((5, 5), self.game.grid)
-        self.assertNotIn((2, 3), self.game.grid)  # moved away
-        self.assertEqual(self.game.grid[(5, 5)].shape, main.Shape.SLOPE)
-        # The displaced RECT block was refunded to the toolbox.
-        self.assertEqual(len(self.game.toolbox.items), 1)
-        self.assertEqual(self.game.toolbox.items[0].shape, main.Shape.RECT)
-        self.assertFalse(self.game.has_selected)
+        self.assertEqual(self.game.grid[(2, 3)].shape, main.Shape.SLOPE)  # still there
+        self.assertEqual(self.game.grid[(5, 5)].shape, main.Shape.RECT)
+        self.assertEqual(len(self.game.selection), 2)
+        self.assertIs(self.game.actor(), self.game.grid[(2, 3)])
+        self.assertIs(self.game.selected_toolbox_item, self.game.grid[(2, 3)])
+        self.assertEqual(self.game.toolbox.items, [])  # nothing refunded
 
 
-    def test_equipped_block_still_replaces_placed_block_on_click(self):
+    def test_a_block_in_hand_does_not_replace_a_block_clicked_on(self):
+        # A click on an item is a switch, not a placement: the fresh block stays
+        # in hand and the block that was clicked joins the selection behind it.
         self.game.toolbox.items.clear()
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 10, 20, "B")
         self.game.toolbox.add(block)
         self.game._equip_block(block)
-        self.game.grid[(2, 3)] = main.Block(2, 3, shape=main.Shape.SLOPE,
-                                            scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        placed = main.Block(2, 3, shape=main.Shape.SLOPE,
+                           scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        self.game.grid[(2, 3)] = placed
 
         self._click(self._grid_pos(2, 3))
 
-        # The equipped block replaces the placed one (existing placement behavior).
-        self.assertEqual(self.game.grid[(2, 3)].shape, main.Shape.RECT)
-        self.assertFalse(self.game.has_selected)
+        self.assertEqual(self.game.grid[(2, 3)].shape, main.Shape.SLOPE)
+        self.assertIs(self.game.selected_toolbox_item, block)  # still in hand
+        self.assertIs(self.game.selected_targets()[0], placed)
 
 
     def test_clicking_a_block_item_arms_it(self):
@@ -164,7 +174,9 @@ class ToolboxTests(GameTestCase):
         self.assertEqual(self.game.current_block_angle, 90)
 
 
-    def test_right_click_erases_block(self):
+    def test_right_click_does_not_erase_a_block(self):
+        # Right-click is the shop's alone now (user request: "remove whatever
+        # right-clicking does"): the board is left untouched.
         block = main.Block(2, 3, scorer=main.Scorer.CHIPS_ADD)
         self.game.grid[(2, 3)] = block
         event = mock.Mock()
@@ -175,10 +187,10 @@ class ToolboxTests(GameTestCase):
              mock.patch("main.pygame.event.get", return_value=[event]):
             self.game.handle_events()
 
-        self.assertNotIn((2, 3), self.game.grid)  # right-click erases
+        self.assertIn((2, 3), self.game.grid)  # right-click leaves it alone
 
 
-    def test_right_click_erasing_the_selected_block_deselects_it(self):
+    def test_erasing_the_selected_block_deselects_it(self):
         # Picking a placed block up arms it for placement (a MOVE, see
         # _select_placed_block). Erasing that block must drop the selection with
         # it: _refund_block puts the block back in the toolbox, so leaving it
@@ -191,12 +203,7 @@ class ToolboxTests(GameTestCase):
         self.assertTrue(self.game.has_selected)
         self.assertIs(self.game.selected_toolbox_item, block)
 
-        event = mock.Mock()
-        event.type = main.pygame.MOUSEBUTTONDOWN
-        event.button = 3
-        with mock.patch("main.pygame.mouse.get_pos", return_value=self._grid_pos(2, 3)), \
-             mock.patch("main.pygame.event.get", return_value=[event]):
-            self.game.handle_events()
+        self.game._erase_block_at(2, 3)
 
         self.assertNotIn((2, 3), self.game.grid)
         self.assertFalse(self.game.has_selected)
@@ -223,13 +230,15 @@ class ToolboxTests(GameTestCase):
 
 
     def test_effect_component_toggles_off_when_clicked_again(self):
+        # A click is a switch (see _toggle_item_selection): the second one turns
+        # the piece off again, and it is no longer part of the next assembly.
         comp = main.Component.effect_component(main.Effect.BOUNCY)
         self.game.toolbox.items.clear()
         self.game.toolbox.add(comp)
-        self.game._select_toolbox_component(comp)
+        self.game._toggle_item_selection(comp)
         self.assertIn(comp, self.game.assigned_effects())
 
-        self.game._select_toolbox_component(comp)
+        self.game._toggle_item_selection(comp)
 
         self.assertNotIn(comp, self.game.assigned_effects())
 

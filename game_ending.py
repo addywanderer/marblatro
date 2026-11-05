@@ -189,8 +189,12 @@ class EndingMixin:
             if block.scorer == Scorer.SHARP and random.random() < 0.25:
                 self.grid.pop((block.x, block.y), None)
                 # The block is gone, so its switch goes off with it (and only
-                # its own: every other item keeps the state the player left it).
+                # its own: every other item keeps the state the player left it),
+                # and the item it was built from is destroyed with it — a block
+                # that outlived its item would be a second copy of a block the
+                # player no longer owns (see _release_block_item).
                 self._forget_item(block)
+                self._release_block_item(block)
         # Sharp-scorer cards (a generic card whose scorer half is Sharp) also
         # have a 1/4 chance to be destroyed after each run.
         if self.cards:

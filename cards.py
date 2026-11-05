@@ -1074,6 +1074,11 @@ def owned_slippery_block_count(game):
     """
     count = 0
     for item in game.toolbox.items:
+        # A block standing on the board is counted below; its item is that same
+        # block and must not be counted twice (several copies of a slippery
+        # block would then pay double their number).
+        if getattr(item, "placed_cell", None) is not None:
+            continue
         if getattr(item, "kind", None) == "block" and item.has_effect(Effect.SLIPPERY):
             count += 1
     for block in game.board_blocks():

@@ -68,7 +68,7 @@ class CardsTests(GameTestCase):
     def test_resource_points_discarded_on_retry(self):
         # A retry is a full do-over for resource points: the run's pending gain
         # AND the points banked from earlier runs are all reset (a NEW run
-        # keeps the bank â€” see test_resource_points_persist_across_runs).
+        # keeps the bank — see test_resource_points_persist_across_runs).
         self.game.toolbox.items.clear()
         self.game.shred_points = 2
         self.game.rubble_points = 3
@@ -162,7 +162,7 @@ class CardsTests(GameTestCase):
                                        scorer_amount=4)])
         self.assertEqual(self.game.score_mult, 5)
         # With the card a no-scorer block (a plain wall) is retriggered into
-        # nothing â€” it has no scorer to fire twice.
+        # nothing — it has no scorer to fire twice.
         self.game.cards.append(main.CardItem(main.Card.PEDESTAL, 44))
         self.game.score_mult = 1
         self._touch_blocks([main.Block(1, 5, scorer=main.Scorer.NONE)])
@@ -326,7 +326,7 @@ class CardsTests(GameTestCase):
 
     def test_infinity_makes_the_factors_straight_lines_through_the_anchor(self):
         # The card's whole rule: the two saturating curves become straight
-        # lines, each pinned to its curve at INFINITY_ANCHOR â€” so the two
+        # lines, each pinned to its curve at INFINITY_ANCHOR — so the two
         # formulas AGREE at the anchor (0.75) and the card trades a slower start
         # for a factor that never levels off.
         self.assertEqual(main.INFINITY_ANCHOR, 0.75)
@@ -512,7 +512,7 @@ class CardsTests(GameTestCase):
 
     def test_a_second_copy_rewinds_the_run_a_second_time(self):
         # Two copies are two activations: the run rewinds, the marble reaches the
-        # finish again, and THAT completion rewinds it once more â€” then the
+        # finish again, and THAT completion rewinds it once more — then the
         # copies are spent and the next completion ends the run. The message
         # counts the copies as they are spent, and each rewind pops its popup on
         # the copy that paid for it.
@@ -584,7 +584,7 @@ class CardsTests(GameTestCase):
     def test_blueprints_do_not_chain_into_a_second_rewind(self):
         # [Procrastination][Blueprint][Blueprint]: the second Blueprint would
         # have to copy a Blueprint, which the game never allows, so it activates
-        # nothing â€” two cards, two rewinds, not three.
+        # nothing — two cards, two rewinds, not three.
         cards = [main.CardItem(main.Card.PROCRASTINATION, 46),
                  main.CardItem(main.Card.BLUEPRINT, 46),
                  main.CardItem(main.Card.BLUEPRINT, 46)]
@@ -891,7 +891,7 @@ class CardsTests(GameTestCase):
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_a_blueprint_copies_the_magnitude_too(self):
-        # A Blueprint copies the card to its left â€” its value AND its roll.
+        # A Blueprint copies the card to its left — its value AND its roll.
         mult = main.condition_scorer_card(main.Condition.START, main.Scorer.MULT_ADD)
         self.game.cards.append(main.make_card_item(mult, amount=9))
         self.game.cards.append(main.CardItem(main.Card.BLUEPRINT, 33))
@@ -907,7 +907,7 @@ class CardsTests(GameTestCase):
         # Building a card consumes the scorer piece, so the card PAYS the
         # strength that piece was bought at: no laundering a cheap roll into
         # the average card (or the reverse). Its price is the catalog price
-        # either way â€” a roll is never part of what something costs.
+        # either way — a roll is never part of what something costs.
         for amount, expected in ((45, 45), (15, 15)):
             with self.subTest(amount=amount):
                 self.game.toolbox.items.clear()
@@ -1097,7 +1097,7 @@ class CardsTests(GameTestCase):
         # An island is a group of unlocked units joined by SHARED SIDES. Two
         # blocks touching only at a corner are two islands: the corner between
         # them is water. The count is of groups, so one big continent is still
-        # 1 â€” and a board with nothing unlocked has none.
+        # 1 — and a board with nothing unlocked has none.
         game = self.game
         game.unlocked_cells = set()
         self.assertEqual(main.cards.island_group_count(game), 0)
@@ -1253,7 +1253,7 @@ class CardsTests(GameTestCase):
     def test_start_parts_card_banks_its_component_at_run_start(self):
         # Regression: a start-of-run resource card (Ripped Card + Parts =
         # FEW_BLOCKS x Parts) fires when the run starts, but its reward is
-        # BANKED â€” the component only reaches the toolbox when the player
+        # BANKED — the component only reaches the toolbox when the player
         # continues the run (see Game._continue_run).
         value = main.condition_scorer_card(main.Condition.FEW_BLOCKS, main.Scorer.PARTS)
         self.game.cards.append(main.CardItem(value, 50))
@@ -1633,7 +1633,7 @@ class CardsTests(GameTestCase):
         self.assertIn("when the marble collides with a Pipe block", pipe)
         self.assertIn("$15 when the marble collides", pipe)  # no comma: a clause
         # A time adverbial gets its own comma instead of running the two
-        # clauses together ("â€¦ the first block the marble hits this run at the
+        # clauses together ("… the first block the marble hits this run at the
         # start of the run").
         row = main.Card.description(
             main.condition_scorer_card(main.Condition.FULLEST_COLUMN,
@@ -1963,7 +1963,7 @@ class CardsTests(GameTestCase):
         rect = main.Block(0, 0, shape=main.Shape.RECT, scorer=main.Scorer.NONE)
         self._card_fire(rect)
         self.assertEqual(self.game.parts_run_gain, 1)
-        # The bank is handed over on continue â€” and only then.
+        # The bank is handed over on continue — and only then.
         self._complete_run(2000)
         self.game._continue_run()
         self.assertEqual(self._component_count(), 1)
@@ -2275,7 +2275,7 @@ class CardsTests(GameTestCase):
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_collision_cards_ignore_role_blocks(self):
         # Start/Finish blocks are not scoring blocks and never spend a trigger,
-        # so a collision card must not fire on them at all â€” otherwise a
+        # so a collision card must not fire on them at all — otherwise a
         # slope-shaped Start block would feed a Slope xMult card on every touch.
         value = main.condition_scorer_card(main.Condition.SHAPE_SLOPE, main.Scorer.MULT_MUL)
         self.game.cards = [main.CardItem(value, 40)]
@@ -2418,7 +2418,7 @@ class CardsTests(GameTestCase):
 
     def test_cash_card_reward_folds_into_run_award_and_retry_discards(self):
         # Cash earned by Cash cards is added at _award_cash (part of the run's
-        # end award), so retrying the run undoes it â€” it only sticks after a run.
+        # end award), so retrying the run undoes it — it only sticks after a run.
         self.game.score_total = 10000
         self.game.required_score = 1
         self.game.card_cash_run_gain = 9
@@ -2673,6 +2673,7 @@ class CardsTests(GameTestCase):
         action = main.ActionItem(main.Action.RECOGNITION, 60, version=2)
         self.game.actions.append(action)
         self.game.cash = 100
+        self.game.selection.append(card)
         self.game.selected_action = action
         self.game.selected_action_subject = card
         self.assertTrue(self.game._apply_action())
@@ -2955,7 +2956,7 @@ class CardsTests(GameTestCase):
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_card_cutter_covers_every_passive_whole_card(self):
         # Every passive whole card is read through _has_card, so cutting it
-        # silences it â€” and cutting one card never silences another.
+        # silences it — and cutting one card never silences another.
         passive = [main.Card.SHOWMAN, main.Card.GARDEN, main.Card.RIGGED_CASINO,
                    main.Card.CONQUISTADOR, main.Card.COMPOUND_INTEREST,
                    main.Card.INFERNO, main.Card.WATCH, main.Card.PEDESTAL,

@@ -177,10 +177,12 @@ class SlotsMixin:
         return int(self._buy_price(component) * TRIGGER_UPGRADE_MARKUP)
 
     def _sync_portal_pair_limits(self, item):
-        """Give a portal's partner the same (upgraded) trigger limit.
+        """Give every portal partner the same (upgraded) trigger limit.
 
         Portal pairs share a trigger count, so their limits must stay in step;
-        the upgrade is charged once on the selected portal.
+        the upgrade is charged once on the selected portal. Recognition can leave
+        more than two portals sharing a number, so every partner is raised, not
+        just the first one found (see Game._delete_paired_portal).
         """
         if not getattr(item, "has_effect", lambda e: False)(Effect.PORTAL):
             return
@@ -190,7 +192,6 @@ class SlotsMixin:
         for other in list(self.toolbox.items) + self.board_blocks():
             if other is not item and getattr(other, "portal_number", 0) == number:
                 other.trigger_limit = item.trigger_limit
-                return
 
     def _upgrade_trigger_limit(self):
         """Pay cash to raise the selected block's trigger limit by one.

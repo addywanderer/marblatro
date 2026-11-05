@@ -598,7 +598,6 @@ class CoreMixin:
         self.selected_scorer_amount = None  # Scorer.DEFAULT_AMOUNT[Scorer.CHIPS_ADD]
         self.current_block_angle = 0
         self.drawing = False
-        self.erasing = False
         # The pan gesture: a press on board space with no item under it starts
         # one (see InputMixin.handle_events), and a drag from there scrolls the
         # board (see Game.pan_board).
@@ -806,7 +805,13 @@ class CoreMixin:
                     # wherever they are.
                     if self._unlock_cell(nx, ny):
                         unlocked += 1
-            self.grid.pop((x, y), None)
+            # A bomb destroys itself, and the item it was built from with it (see
+            # _release_block_item): a block whose item stayed behind could be
+            # fielded a second time.
+            bomb = self.grid.pop((x, y), None)
+            if bomb is not None:
+                self._forget_item(bomb)
+                self._release_block_item(bomb)
         if unlocked:
             if announce:
                 plural = "s" if unlocked != 1 else ""
@@ -841,11 +846,10 @@ class CoreMixin:
         self._set_shop_message(
             f"Board expanded {total} square{plural}{detail}")
 
-    def _board_unit_tile(self):
-        """Screen rect of the shop's always-present Board Unit tile."""
-        return pygame.Rect(self.shop.rect.x + BOARD_UNIT_COL * GRID_SIZE,
-                           self.shop.rect.y + BOARD_UNIT_ROW * GRID_SIZE,
-                           GRID_SIZE, GRID_SIZE)
+    # The Board Unit tile used to live in the shop panel. There is no panel any
+    # more: the tile is a shelf OFFER lying on the board (see
+    # items.BoardUnitOffer), bought by right-clicking it like every other offer
+    # (see Game._buy_board_unit).
 
     def _board_wall_blocks(self):
         """The solid wall Blocks covering the locked squares (cached).
@@ -942,15 +946,34 @@ class CoreMixin:
 
         Taking an item is what puts it on the board: without the layout pass a
         card bought from the shelf would sit with no square until something else
-        happened to run it (see ensure_board_cells).
+        happened to run it (see ensure_board_cells). The very same card object
+        is never owned twice (see Game.owns_item): a second reference would share
+        the first one's board square and its switch.
         """
+        if self.owns_item(item):
+            return
         self.cards.append(item)
         self.ensure_board_cells()
 
     def _adopt_action(self, item):
         """Take ownership of an action and lay it out on the board at once."""
+        if self.owns_item(item):
+            return
         self.actions.append(item)
         self.ensure_board_cells()
+
+    def owns_item(self, item):
+        """True when this EXACT object is one of the player's items.
+
+        Identity, not value: two copies of a card are different items, and a
+        shelf offer is not the player's until it is bought (see items.owned_copy).
+        One object is never owned twice — a double click on a shop offer is one
+        purchase, not two, and no item can wear two board squares or two
+        switches (user report: glitches with several copies of the same item).
+        """
+        if item is None:
+            return False
+        return any(item is owned for owned in self.owned_items())
 
     def item_cell(self, item):
         """The (x, y) square ``item`` stands on, or None when it has none.
@@ -1025,16 +1048,43 @@ class CoreMixin:
         having to remember to call it after a change.
 
         An item that is standing as its BLOCK (a placed block keeps its item —
-        see BlockItem.placed_cell) is not laid out: the block already occupies
-        the square, and drawing the item there too would show one block twice.
+        see BlockItem.placed_cell) is not laid out afresh: the block already
+        occupies a square, and drawing the item there too would show one block
+        twice. Its own spot stays RESERVED for it, though (user request: "when a
+        block is placed on the board, make its spot in the inventory still
+        occupied with the block"): nothing else may be laid out where the item
+        will come back to when its block is taken up.
         """
-        items = [item for item in self.owned_items()
-                 if getattr(item, "placed_cell", None) is None]
+        items = []
         claimed = set(self.grid)
+        for item in self.owned_items():
+            if getattr(item, "placed_cell", None) is not None:
+                home = getattr(item, "board_cell", None)
+                if home is not None:
+                    claimed.add(tuple(home))
+                continue
+            items.append(item)
         for item in items:
             cell = self.item_cell(item)
             if cell is None or cell in claimed or self.is_cell_locked(*cell):
                 self.set_item_cell(item, None)
+            else:
+                claimed.add(cell)
+        # The shop's offers stand on the board too (user request: "make each
+        # shop option an item ... allow shop items to be selected and moved
+        # around"), and their squares are claimed BEFORE the owned items that
+        # have none are dealt squares: a new item must never be laid out on top
+        # of an offer the player can see and click.
+        offers = list(self.shop.items) if getattr(self, "shop", None) else []
+        # An offer the player already owns (a purchase that has just been adopted
+        # while the shelf still lists it) is laid out as the owned item it now
+        # is; treating it as an offer too would strip the square it was unlocked
+        # in and deal it somewhere else.
+        offers = [offer for offer in offers if not self.owns_item(offer)]
+        for offer in offers:
+            cell = self.item_cell(offer)
+            if cell is None or cell in claimed or self.is_cell_locked(*cell):
+                self.set_item_cell(offer, None)
             else:
                 claimed.add(cell)
         for item in items:
@@ -1043,6 +1093,13 @@ class CoreMixin:
                 if cell is None:
                     continue
                 self.set_item_cell(item, cell)
+                claimed.add(cell)
+        for offer in offers:
+            if self.item_cell(offer) is None:
+                cell = self._free_board_cell(claimed)
+                if cell is None:
+                    continue
+                self.set_item_cell(offer, cell)
                 claimed.add(cell)
         self._sync_stash(items)
         return claimed
@@ -1063,8 +1120,9 @@ class CoreMixin:
     def item_at_cell(self, cell):
         """The item standing on a board square, or None.
 
-        Blocks live in ``grid``; everything else the player owns is laid out by
-        ensure_board_cells, so both are checked.
+        Blocks live in ``grid``; every other item laid out on the board — the
+        player's own and the shop's offers — is found by the square it claims
+        (see ensure_board_cells).
         """
         block = self.grid.get(cell)
         if block is not None:
@@ -1073,7 +1131,18 @@ class CoreMixin:
         for item in self.owned_items():
             if self.item_cell(item) == cell:
                 return item
-        return None
+        shop = getattr(self, "shop", None)
+        return shop.offer_at_cell(cell) if shop is not None else None
+
+    def is_shop_offer(self, item):
+        """True when ``item`` is one of the shop's offers (not the player's yet).
+
+        An offer stands on the board and is selected and moved like any other
+        item, but it is only UNLOCKED when it is bought (right-click), so the
+        rules that treat an item as the player's — selling, banking, assembling
+        — check this first.
+        """
+        return self.shop.is_offer(item)
 
     def board_blocks(self):
         """The BLOCKS standing on the board — the only board items the marble meets.
@@ -1090,12 +1159,18 @@ class CoreMixin:
 
         An item whose block is standing for it (see BlockItem.placed_cell) is
         left out: the block already occupies the square, and the item would
-        otherwise be drawn twice.
+        otherwise be drawn twice. The shop's offers are on the board too (user
+        request: each shop option is an item you can select and move), so they
+        are drawn and hit-tested here like everything else.
         """
         self.ensure_board_cells()
         laid_out = [item for item in self.owned_items()
                     if self.item_cell(item) is not None
                     and getattr(item, "placed_cell", None) is None]
+        shop = getattr(self, "shop", None)
+        if shop is not None:
+            laid_out += [offer for offer in shop.items
+                         if self.item_cell(offer) is not None]
         laid_out.sort(key=lambda item: self.item_cell(item)[::-1])
         return list(self.grid.values()) + laid_out
 
@@ -1237,18 +1312,23 @@ class CoreMixin:
         """True when an item is selected to be put down on the board.
 
         The item in hand is what a click or drag on the board puts down: a BLOCK
-        is built into a block (see _place_block_at), and any other owned item —
-        a component, a card, an action — is MOVED to the square the player clicks
-        (see _move_item_to). Every item the player owns can be picked up that way
-        (user request: "cards and actions should be able to be moved around"), so
-        this is simply "is the item in hand one I own?".
+        is built into a block (see _place_block_at), and any other item — a
+        component, a card, an action, a shop offer — is MOVED to the square the
+        player clicks (see _move_item_to). Every item on the board can be picked
+        up that way (user request: "cards and actions should be able to be moved
+        around" — and shop offers "moved around just like other items"), so this
+        is simply "is the item in hand one that is on the board?".
         """
         item = self.selected_toolbox_item
         if item is None:
             return False
         if isinstance(item, Block):
             return True
-        return any(item is owned for owned in self.owned_items())
+        if self.owns_item(item):
+            return True
+        # A shop offer is not owned yet, but it lies on the board and can be
+        # arranged like everything else on it.
+        return self.is_shop_offer(item)
 
     def _switch_profile(self, name):
         """Make ``name`` the active profile from the title screen.

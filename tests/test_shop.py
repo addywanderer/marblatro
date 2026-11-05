@@ -204,11 +204,15 @@ class ShopTests(GameTestCase):
         self.game.shop.bonus_slots = 3
         self.game.shop.refresh()
         standard = [i for i in self.game.shop.items
-                    if i.row < main.SHOP_BONUS_ROW]
+                    if i.row < main.SHOP_BONUS_ROW
+                    and getattr(i, "kind", None) != "unit"]
         bonus = [i for i in self.game.shop.items
                  if i.row >= main.SHOP_BONUS_ROW]
         self.assertEqual(len(standard), main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
         self.assertEqual(len(bonus), 3)
+        # The fixed Board Unit tile rides with every shelf (see Shop.refresh).
+        self.assertEqual([getattr(i, "kind", None)
+                          for i in self.game.shop.items].count("unit"), 1)
         allowed = {"shape", "effect", "scorer", "block", "card", "action"}
         for item in bonus:
             self.assertIn(getattr(item, "kind", "block"), allowed)
@@ -1216,20 +1220,21 @@ class ShopTests(GameTestCase):
         self.assertEqual(len(parts), 3)
 
 
-    def test_clicking_shop_unselects_selected_block(self):
+    def test_clicking_a_shop_offer_selects_it_alongside_the_block(self):
         self.game.toolbox.items.clear()
         block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
                                main.Scorer.CHIPS_ADD, 10, 20, "B")
         self.game.toolbox.add(block)
         self.game._equip_block(block)
-        shop = self.game.shop.items[0]
-        pos = (self.game.shop.rect.x + shop.col * main.GRID_SIZE + 5,
-               self.game.shop.rect.y + shop.row * main.GRID_SIZE + 5)
+        offer = self.game.shop.items[0]
 
-        self._click(pos)
+        self._click(self._item_pos(offer))
 
-        self.assertIsNone(self.game.selected_toolbox_item)
-        self.assertFalse(self.game.has_selected)
+        # A shop offer is an item like every other: the click turns ITS switch
+        # on and leaves the block's alone, so the block stays the actor.
+        self.assertTrue(self.game.is_item_selected(offer))
+        self.assertTrue(self.game.is_item_selected(block))
+        self.assertIs(self.game.selected_toolbox_item, block)
 
 
     def test_assembling_keeps_new_block_selected(self):
@@ -1253,10 +1258,10 @@ class ShopTests(GameTestCase):
 
 
     def test_info_target_at_finds_shop_items_and_board_items(self):
+        # A shop offer is an item lying on the board now, so hovering it reports
+        # the shelf it belongs to rather than the board (see _info_target_at).
         shop = self.game.shop.items[0]
-        target, source = self.game._info_target_at(
-            (self.game.shop.rect.x + shop.col * main.GRID_SIZE + 5,
-             self.game.shop.rect.y + shop.row * main.GRID_SIZE + 5))
+        target, source = self.game._info_target_at(self._item_pos(shop))
         self.assertIs(target, shop)
         self.assertEqual(source, "shop")
 
@@ -1274,21 +1279,36 @@ class ShopTests(GameTestCase):
         self.assertEqual(source, "board")
 
 
-    def test_left_clicking_shop_item_buys_it(self):
+    def test_right_clicking_shop_item_buys_it(self):
         self.game.toolbox.items.clear()
         # The shelf's slots are mixed now, and a pack can cost more than the
-        # starting purse, so this puts a cheap offer in the first cell by hand
+        # starting purse, so this puts a cheap offer on the shelf by hand
         # (a shape piece is the cheapest kind) and makes sure it is affordable.
         item = self.game.shop._offer_of(main.Pack.SHAPE, 1, main.SHOP_ITEM_ROW)
         self.game.shop.items = [item]
         self.game.cash = max(self.game.cash, self.game._buy_price(item) + 50)
         cash_before = self.game.cash
-        pos = (self.game.shop.rect.x + item.col * main.GRID_SIZE + main.GRID_SIZE // 2,
-               self.game.shop.rect.y + item.row * main.GRID_SIZE + main.GRID_SIZE // 2)
 
-        self._click(pos)
+        self._right_click(self._item_pos(item))
 
-        self.assertLess(self.game.cash, cash_before)  # left-click buys the item
+        self.assertLess(self.game.cash, cash_before)  # right-click buys it
+        self.assertTrue(self.game.shop_message)
+
+
+    def test_left_clicking_shop_item_only_offers_to_move_it(self):
+        # A locked offer is an item like any other: left-click picks it up (it
+        # can be moved around the board), and only a right-click unlocks it.
+        self.game.toolbox.items.clear()
+        item = self.game.shop._offer_of(main.Pack.SHAPE, 1, main.SHOP_ITEM_ROW)
+        self.game.shop.items = [item]
+        self.game.cash = max(self.game.cash, self.game._buy_price(item) + 50)
+        cash_before = self.game.cash
+
+        self._click(self._item_pos(item))
+
+        self.assertEqual(self.game.cash, cash_before)  # nothing bought
+        self.assertTrue(self.game.is_item_selected(item))
+        self.assertIn("right-click to buy", self.game.shop_message)
 
 
     def test_selling_selected_block_refunds_half_price(self):
@@ -1595,7 +1615,13 @@ class ShopTests(GameTestCase):
 
         self.game._buy_shop_item(component)
 
-        self.assertIn(component, self.game.toolbox.items)
+        # The player owns a copy of what the offer sells; the offer itself stays
+        # on the shelf to be bought again (see items.owned_copy).
+        owned = [i for i in self.game.toolbox.items
+                 if i.kind == component.kind and i.value == component.value]
+        self.assertEqual(len(owned), 1)
+        self.assertIsNot(owned[0], component)
+        self.assertIn(component, self.game.shop.items)
         self.assertEqual(self.game.cash, 1000 - component.price)
 
 
@@ -1657,11 +1683,10 @@ class ShopTests(GameTestCase):
 
     def test_shop_item_at_hits_item_cell(self):
         item = self.game.shop.items[0]
-        pos = (self.game.shop.rect.x + item.col * main.GRID_SIZE + 5,
-               self.game.shop.rect.y + item.row * main.GRID_SIZE + 5)
 
-        self.assertIs(self.game.shop.item_at(pos), item)
-        self.assertIsNone(self.game.shop.item_at((self.game.shop.rect.x - 10, self.game.shop.rect.y - 10)))
+        self.assertIs(self.game.shop.item_at(self._item_pos(item)), item)
+        # A point outside the board (the top bar) hits no offer at all.
+        self.assertIsNone(self.game.shop.item_at((5, 5)))
 
 
     def test_shop_sells_individual_components_and_blocks(self):
@@ -1684,12 +1709,14 @@ class ShopTests(GameTestCase):
 
 
     def test_shop_shelf_is_five_item_slots_and_three_packs(self):
-        items = [i for i in self.game.shop.items
-                 if getattr(i, "kind", None) != "pack"]
-        packs = [i for i in self.game.shop.items
-                 if getattr(i, "kind", None) == "pack"]
+        shelf = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) != "unit"]
+        items = [i for i in shelf if getattr(i, "kind", None) != "pack"]
+        packs = [i for i in shelf if getattr(i, "kind", None) == "pack"]
+        # The shelf is the item offers, the packs and the fixed Board Unit tile
+        # (see Shop.refresh).
         self.assertEqual(len(self.game.shop.items),
-                         main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
+                         main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS + 1)
         # Five "any item" slots along the top row, one offer each of a drawn
         # kind (see Pack.SHELF_WEIGHTS).
         self.assertEqual(len(items), main.SHOP_ITEM_SLOTS)
@@ -1744,11 +1771,9 @@ class ShopTests(GameTestCase):
                          [(main.SHOP_PACK_COL + n, main.SHOP_PACK_ROW)
                           for n in range(main.SHOP_PACK_SLOTS)] + bonus[2:3])
         for item in shop.items:
-            cell = pygame.Rect(shop.rect.x + item.col * main.GRID_SIZE,
-                               shop.rect.y + item.row * main.GRID_SIZE,
-                               main.GRID_SIZE, main.GRID_SIZE)
-            self.assertTrue(shop.rect.contains(cell), (item.col, item.row))
-            self.assertIs(shop.item_at(cell.center), item)
+            self.assertLess(item.col, shop.cols)
+            self.assertLess(item.row, shop.rows)
+            self.assertIs(shop.offer_at_cell(self._item_cell(item)), item)
 
 
     def test_a_shelf_with_more_offers_than_the_panel_can_hold_keeps_only_what_fits(self):
@@ -1767,11 +1792,8 @@ class ShopTests(GameTestCase):
         self.assertEqual(len(set(cells)), len(cells))
         self.assertTrue(all(0 < col < shop.cols and 0 <= row < shop.rows
                             for col, row in cells))
-        self.assertTrue(all(shop.item_at(
-            pygame.Rect(shop.rect.x + col * main.GRID_SIZE,
-                        shop.rect.y + row * main.GRID_SIZE,
-                        main.GRID_SIZE, main.GRID_SIZE).center) is item
-            for item, (col, row) in zip(shop.items, cells)))
+        self.assertTrue(all(shop.offer_at_cell(self._item_cell(item)) is item
+                            for item in shop.items))
 
 
     def test_shop_never_offers_the_free_default_parts(self):
@@ -2248,32 +2270,38 @@ class ShopTests(GameTestCase):
 
     def test_a_v2_action_on_the_shelf_prices_in_gold(self):
         # The shelf flag has to be readable without hovering: an already-upgraded
-        # action's price is drawn in the gold of its own frame, so the tile worth
-        # an extra ACTION_UPGRADE_COST stands out across the shop.
-        gold = (255, 215, 0)
+        # action is worth an extra ACTION_UPGRADE_COST, so its tile is drawn
+        # gold-framed (see ui.draw_action). The offer lies on the board now — the
+        # shop panel is gone — so it wears the same tile it would anywhere else;
+        # the padlock the board marks it with is left out of the measurement.
         self.game.trials_enabled = False  # no Slim pickings trim to shift items
         self.game.shop_message = ""
 
-        def price_gold(version):
-            # The shelf deals an action only now and then, so this puts one
-            # there by hand: the price drawing is what is under test.
+        def gold_pixels(version):
+            # The shelf deals an action only now and then, so this draws one by
+            # hand: the tile's own drawing is what is under test.
             action = main.ActionItem(main.Action.DEATH,
                                      main.Action.PRICES[main.Action.DEATH],
                                      version=version, col=1,
                                      row=main.SHOP_ITEM_ROW)
-            self.game.shop.items = [action]
-            self.game.screen.fill(main.BLACK)
-            main.ui.draw_shop(self.game)
-            cx = (self.game.shop.rect.x + action.col * main.GRID_SIZE
-                  + main.GRID_SIZE // 2)
-            cy = (self.game.shop.rect.y + (action.row + 1) * main.GRID_SIZE
-                  + main.GRID_SIZE // 2)
-            return sum(self.game.screen.get_at((x, y))[:3] == gold
-                       for x in range(cx - 18, cx + 18)
-                       for y in range(cy - 8, cy + 9))
+            tile = pygame.Surface((main.GRID_SIZE, main.GRID_SIZE))
+            tile.fill(main.BLACK)
+            main.ui.draw_shop_item(tile, action, tile.get_rect())
+            return sum(self._is_gold(tile.get_at((x, y))[:3])
+                       for x in range(tile.get_width())
+                       for y in range(tile.get_height()))
 
-        self.assertEqual(price_gold(1), 0)  # a plain shelf prices white
-        self.assertGreater(price_gold(2), 0)
+        plain, upgraded = gold_pixels(1), gold_pixels(2)
+        # A v1 keeps the plain white frame, so only its small gold "v1" tag
+        # shows; a v2's whole frame is gold.
+        self.assertLess(plain, 200)
+        self.assertGreater(upgraded, plain * 2)
+
+    @staticmethod
+    def _is_gold(pixel):
+        """True for the golds a v2 action's frame breathes between."""
+        red, green, blue = pixel
+        return red == 255 and green >= 210 and blue <= 180
 
 
     def test_a_reroll_that_shelves_an_upgraded_action_says_so(self):
@@ -2322,6 +2350,7 @@ class ShopTests(GameTestCase):
         action = main.ActionItem(main.Action.DEATH, 60)
         self.game.actions.append(action)
         self.game.cash = 100
+        self.game.selection.append(block)
         self.game.selected_action = action
         self.game.selected_action_subject = block
         self.assertTrue(self.game._apply_action())
@@ -2337,6 +2366,7 @@ class ShopTests(GameTestCase):
         action = main.ActionItem(main.Action.DEATH, 60, version=2)
         self.game.actions.append(action)
         self.game.cash = 100
+        self.game.selection.append(block)
         self.game.selected_action = action
         self.game.selected_action_subject = block
         self.assertTrue(self.game._apply_action())
@@ -2350,6 +2380,7 @@ class ShopTests(GameTestCase):
         action = main.ActionItem(main.Action.DEATH, 60)
         self.game.actions.append(action)
         self.game.cash = 100
+        self.game.selection.append(card)
         self.game.selected_action = action
         self.game.selected_action_subject = card
         self.assertTrue(self.game._apply_action())
@@ -2569,7 +2600,7 @@ class ShopTests(GameTestCase):
         refreshed = [item.name for item in self.game.shop.items]
 
         self.assertEqual(len(refreshed),
-                         main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS)
+                         main.SHOP_ITEM_SLOTS + main.SHOP_PACK_SLOTS + 1)
         self.assertNotEqual(original, refreshed)
 
 
@@ -2637,11 +2668,17 @@ class ShopTests(GameTestCase):
                                     main.Scorer.CHIPS_ADD, 10, 20, "Rect +Chips")
         self.game.cash = 1000
         self.game._buy_shop_item(block_item)
-        self.assertIn(block_item, self.game.toolbox.items)
+        # The purchase is a COPY of the offer (see items.owned_copy), so the
+        # shelf keeps its own object and the player owns one of their own.
+        self.assertEqual(len(self.game.toolbox.items), 1)
+        bought = self.game.toolbox.items[0]
+        self.assertIsNot(bought, block_item)
+        self.assertEqual((bought.shape, bought.scorer, bought.price),
+                         (block_item.shape, block_item.scorer, block_item.price))
         self.assertIsNone(self.game.selected_shape)  # not auto-equipped
 
         # Equip from the toolbox, then place it via a click.
-        self.game._equip_block(block_item)
+        self.game._equip_block(bought)
         self.assertTrue(self.game.has_selected)
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN
@@ -2652,13 +2689,13 @@ class ShopTests(GameTestCase):
 
         self.assertIn((1, 1), self.game.grid)
         placed = self.game.grid[(1, 1)]
-        self.assertEqual(placed.shape, block_item.shape)
-        self.assertEqual(placed.scorer, block_item.scorer)
+        self.assertEqual(placed.shape, bought.shape)
+        self.assertEqual(placed.scorer, bought.scorer)
         # The block keeps the inventory spot it was bought into (user request:
         # "when a block is placed on the board, make its spot in the inventory
         # still occupied with the block").
-        self.assertIn(block_item, self.game.toolbox.items)
-        self.assertEqual(block_item.placed_cell, (1, 1))
+        self.assertIn(bought, self.game.toolbox.items)
+        self.assertEqual(bought.placed_cell, (1, 1))
         self.assertFalse(self.game.has_selected)
 
 
@@ -2705,10 +2742,11 @@ class ShopTests(GameTestCase):
     def test_assembling_consumes_one_copy_and_keeps_leftover(self):
         self.game.toolbox.items.clear()
         shape_c = main.Component.shape_component(main.Shape.RECT, 0, "Rect")
+        shape_twin = main.owned_copy(shape_c)   # a real second copy, not the same object
         effect_c = main.Component.effect_component(main.Effect.BOUNCY, 0, "Bouncy")
         scorer_c = main.Component.scorer_component(main.Scorer.CHIPS_ADD, 10, 0, "+Chips")
         self.game.toolbox.add(shape_c)
-        self.game.toolbox.add(shape_c)  # two copies
+        self.game.toolbox.add(shape_twin)       # the second copy
         self.game.toolbox.add(effect_c)
         self.game.toolbox.add(scorer_c)
         for component in (shape_c, effect_c, scorer_c):
@@ -2716,8 +2754,10 @@ class ShopTests(GameTestCase):
 
         self.game._assemble_block()
 
-        # Assembly consumed one copy; the leftover duplicate survives.
-        self.assertEqual(self.game.toolbox.items.count(shape_c), 1)
+        # Assembly consumed one copy; the leftover duplicate survives on the board.
+        self.assertEqual(self.game.toolbox.items.count(shape_c), 0)
+        self.assertEqual(self.game.toolbox.items.count(shape_twin), 1)
+        self.assertIsNotNone(self.game.item_cell(shape_twin))
         self.assertNotIn(effect_c, self.game.toolbox.items)
         self.assertNotIn(scorer_c, self.game.toolbox.items)
         self.assertEqual(len([i for i in self.game.toolbox.items if i.kind == "block"]), 1)
@@ -2741,24 +2781,44 @@ class ShopTests(GameTestCase):
         self.assertEqual(assembled.scorer, main.Scorer.FINISH)
 
 
-    def test_duplicate_component_reference_survives_assembly(self):
-        # Two references to the SAME component object: assigning one and assembling
-        # must not delete the other toolbox copy.
+    def test_the_inventory_never_holds_one_object_twice(self):
+        # The inventory holds ITEMS, not references to items (see Toolbox.add):
+        # adding an object the player already owns leaves the inventory alone, so
+        # one item can never occupy two board squares or wear two switches.
         self.game.toolbox.items.clear()
         eff = main.Component.effect_component(main.Effect.BOUNCY)
+        self.game.toolbox.add(eff)
+        self.game.toolbox.add(eff)  # the same object again
+
+        self.assertEqual(self.game.toolbox.items.count(eff), 1)
+        self.assertNotIn(eff, self.game.toolbox.stash)
+        # A real second copy is a different item, and both are laid out.
+        twin = main.owned_copy(eff)
+        self.game.toolbox.add(twin)
+        self.assertEqual(len(self.game.toolbox.items), 2)
+        self.assertIsNot(self.game.item_cell(eff), self.game.item_cell(twin))
+
+
+    def test_assembling_two_copies_consumes_one(self):
+        # Two COPIES of one component are two items: an assembly consumes the
+        # piece that was assigned and leaves the other one owned and on the board.
+        self.game.toolbox.items.clear()
+        eff = main.Component.effect_component(main.Effect.BOUNCY)
+        twin = main.owned_copy(eff)
         shape = main.Component.shape_component(main.Shape.RECT)
         scorer = main.Component.scorer_component(main.Scorer.CHIPS_ADD, 10)
-        self.game.toolbox.add(eff)
-        self.game.toolbox.add(eff)  # same object twice
-        self.game.toolbox.add(shape)
-        self.game.toolbox.add(scorer)
+        for piece in (eff, twin, shape, scorer):
+            self.game.toolbox.add(piece)
         for component in (eff, shape, scorer):
             self.game._use_component(component)
 
         self.game._assemble_block()
 
-        self.assertEqual(self.game.toolbox.items.count(eff), 1)  # leftover copy survives
-        self.assertEqual(len([i for i in self.game.toolbox.items if i.kind == "block"]), 1)
+        self.assertIn(twin, self.game.toolbox.items)  # the leftover copy survives
+        self.assertNotIn(eff, self.game.toolbox.items)
+        self.assertIsNotNone(self.game.item_cell(twin))
+        blocks = [i for i in self.game.toolbox.items if i.kind == "block"]
+        self.assertEqual(len(blocks), 1)
 
 
     def test_buying_same_shop_item_twice_is_allowed(self):
@@ -2774,8 +2834,13 @@ class ShopTests(GameTestCase):
         self.game._buy_shop_item(item)
 
         # Duplicate buys are allowed (the player may own several copies), but
-        # the second copy is more expensive.
-        self.assertEqual(self.game.toolbox.items.count(item), 2)
+        # the second copy is more expensive — and the two copies are two ITEMS:
+        # one object listed twice would share a single board square and a single
+        # selection switch (see items.owned_copy).
+        copies = [i for i in self.game.toolbox.items
+                  if i.kind == item.kind and i.value == item.value]
+        self.assertEqual(len(copies), 2)
+        self.assertIsNot(copies[0], copies[1])
         self.assertGreater(second, first)
         self.assertEqual(self.game.cash, 1000 - first - second)
 
@@ -2795,7 +2860,9 @@ class ShopTests(GameTestCase):
 
         self.assertGreater(price_second, first)
         self.assertGreater(price_third, price_second)
-        self.assertEqual(self.game.toolbox.items.count(item), 2)
+        copies = [i for i in self.game.toolbox.items
+                  if i.kind == item.kind and i.value == item.value]
+        self.assertEqual(len(copies), 2)
 
 
     def test_component_price_increase_is_permanent_after_sale(self):
@@ -2808,7 +2875,9 @@ class ShopTests(GameTestCase):
         base = item.price
         first = self.game._buy_price(item)
         self.game._buy_shop_item(item)
-        self.game.toolbox.items.remove(item)  # the copy is sold / used up
+        bought = self.game.toolbox.items[-1]  # the copy the player owns
+        self.assertIsNot(bought, item)        # never the shelf's own object
+        self.game.toolbox.items.remove(bought)  # the copy is sold / used up
         after = self.game._buy_price(item)
         expected = int(base * (1 + main.DUPLICATE_PRICE_INCREMENT))  # sqrt(1) == 1
         self.assertEqual(after, expected)  # still elevated with the copy gone
@@ -3290,7 +3359,8 @@ class ShopTests(GameTestCase):
         self.game._buy_shop_item(block)
 
         self.assertEqual(len(self.game.toolbox.items), 1)
-        self.assertIn(block, self.game.toolbox.items)
+        self.assertIsNot(self.game.toolbox.items[0], block)  # a copy, not the offer
+        self.assertEqual(self.game.toolbox.items[0].shape, block.shape)
 
 
     def test_a_portal_pair_still_joins_a_full_board(self):

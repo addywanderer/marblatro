@@ -37,6 +37,7 @@ BG_COLOR = _save_source.BG_COLOR
 ActionItem = _save_source.ActionItem
 Block = _save_source.Block
 BlockItem = _save_source.BlockItem
+BoardUnitOffer = _save_source.BoardUnitOffer
 CardItem = _save_source.CardItem
 Component = _save_source.Component
 DEFAULT_DIFFICULTY = _save_source.DEFAULT_DIFFICULTY
@@ -253,8 +254,19 @@ def _serialize_item_as_item(item):
             "kept": int(item.kept),
             "price": int(item.price),
             "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
             "name": item.name,
             "options": [_serialize_item(option) for option in item.options],
+        }
+    if kind == "unit":
+        # The shelf's Board Unit tile: not an item, but it stands on the board
+        # like the rest of the shelf (see items.BoardUnitOffer).
+        return {
+            "kind": "unit",
+            "price": int(item.price),
+            "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
+            "name": item.name,
         }
     # A Component (shape/effect/scorer piece).
     return {
@@ -293,17 +305,22 @@ def _deserialize_item(data):
 
 
 def _deserialize_item_kind(data):
+    if data["kind"] == "unit":
+        return _restore_board_cell(
+            BoardUnitOffer(data.get("price", 0),
+                           col=data.get("col", 0), row=data.get("row", 0)), data)
     if data["kind"] == "resource":
         return ResourceOption(data["scorer"], data.get("amount", 0),
                               data.get("points", 0))
     if data["kind"] == "pack":
-        return ItemPack(data["pack_type"], data["size"],
-                        [_deserialize_item(option)
-                         for option in data.get("options", [])],
-                        data.get("price", 0),
-                        col=data.get("col", 0), row=data.get("row", 0),
-                        keep=data.get("keep"),
-                        kept=data.get("kept", 0))
+        return _restore_board_cell(
+            ItemPack(data["pack_type"], data["size"],
+                     [_deserialize_item(option)
+                      for option in data.get("options", [])],
+                     data.get("price", 0),
+                     col=data.get("col", 0), row=data.get("row", 0),
+                     keep=data.get("keep"),
+                     kept=data.get("kept", 0)), data)
     if data["kind"] == "card":
         return _restore_random_rolls(
             _restore_board_cell(

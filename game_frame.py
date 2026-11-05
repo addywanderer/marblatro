@@ -245,6 +245,9 @@ class FrameMixin:
                     # A Satanic block dying is a block destroyed this run (the
                     # Undertaker scorer counts them).
                     self.run_blocks_destroyed += 1
+                    # The item the block was built from is destroyed with it (see
+                    # _release_block_item), so nothing is left to place twice.
+                    self._release_block_item(block)
             self._handle_block_contacts(self.board_blocks())
             # A marble that touched a block this frame is not airborne: its
             # air streak was read at the fresh contact above (block scorers /

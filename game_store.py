@@ -80,6 +80,7 @@ from items import (
     _s,
     make_card_item,
     offer_key,
+    owned_copy,
     resource_point_label,
 )
 from marble import Marble, _configure_marble_type
@@ -138,8 +139,14 @@ class StoreMixin:
         diminishing (a square-root curve), so each additional copy adds a
         smaller increment and prices climb more and more slowly. Rarity is
         unaffected: shop generation uses only the base COMPONENT_PRICES. The
-        inflation trial raises the final price 50% on top.
+        inflation trial raises the final price 50% on top. The price is only
+        ever SHOWN on hover (see ui.info_layout), but it is always this number.
         """
+        if getattr(item, "kind", None) == "unit":
+            # Board Units are not shop options: Coupon does not discount them
+            # (see _shop_discount), and the Mineshaft card is what makes them
+            # cheap (see _board_unit_price).
+            return self._board_unit_price()
         if getattr(item, "kind", None) in ("block", "card", "action", "pack"):
             return self._inflated(self._shop_discount(item.price))
         bought = self.component_purchases.get((item.kind, item.value), 0)
@@ -150,28 +157,33 @@ class StoreMixin:
         """A shop price after the Coupon card's discount.
 
         Coupon takes 25% off every shop OPTION — the components, blocks, cards
-        and actions in the shop grid. Board Units are bought through their own
-        tile (see _buy_board_unit) and the shop reroll through
-        _refresh_shop, so neither is discounted. The inflation trial then
+        and actions on offer. Board Units are their own offer (see
+        _buy_board_unit) and are not discounted. The inflation trial then
         applies on top (see _inflated).
         """
         if not self._has_card(Card.COUPON):
             return amount
         return int(amount * COUPON_PRICE_FACTOR)
 
-    def _consume_shop_offer(self, item):
-        """Take a bought card or action off the shop's shelf for this refresh.
+    def _consume_shop_offer(self, item, keep_cell=False):
+        """Take a bought offer off the shelf — it was never the player's stock.
 
-        A bought card moves into the card area and a bought action into the
-        action area, so leaving the offer on the shelf showed the same purchase
-        twice — and let the same action be bought again. The offer is removed
-        exactly like a Slim pickings removal (see _trim_shop_for_trial): the
-        slot simply stands empty until the next refresh. Components and blocks
-        are NOT removed: they are repeatable buys whose price rises with every
-        purchase (see _buy_price), so their offer is meant to stay.
+        A one-shot offer (a card, an action, a matched pair, a pack) leaves the
+        shelf when it is bought: the shelf's slot stands empty until the next
+        refresh. Repeatable offers (components, plain blocks, the Board Unit
+        tile) are NOT removed: they are bought over and over at a rising price
+        (see _buy_price), so their tile stays on the board, still locked.
+
+        ``keep_cell`` is for the offers that are handed over AS THEMSELVES — a
+        bought card or action keeps the square it was lying on, so the padlock
+        comes off exactly where the player was looking instead of the purchase
+        appearing somewhere else.
         """
         if item in self.shop.items:
             self.shop.items.remove(item)
+        if not keep_cell and hasattr(item, "board_cell"):
+            # The square it was lying on is free again: it was never owned.
+            item.board_cell = None
         # A bought offer cannot be held: its cell stands empty until the next
         # refresh, so the hold it had (if any) is released with it.
         slot = self.shop.slot_key(item)
@@ -179,6 +191,17 @@ class StoreMixin:
             self.shop.locked.remove(slot)
 
     def _buy_shop_item(self, item):
+        if self.owns_item(item):
+            # The same offer, clicked twice before the shelf redrew: the first
+            # click already bought it. One object is never owned twice (see
+            # Game.owns_item), so the second click is not a purchase.
+            return
+        # A BOARD UNIT is not an item at all: it is a counter the player spends
+        # by clicking a locked square, so its tile stays on the board to be
+        # bought again (see items.BoardUnitOffer).
+        if getattr(item, "kind", None) == "unit":
+            self._buy_board_unit()
+            return
         price = self._buy_price(item)
         if self.cash < price:
             self._set_shop_message(f"Need ${price} for {item.name}")
@@ -226,10 +249,13 @@ class StoreMixin:
             if self._owns_card(item.value) and not self._has_card(Card.SHOWMAN):
                 self._set_shop_message("Already own this card")
                 return
+            # The card the player just unlocked keeps the square the locked one
+            # was lying on: it leaves the shelf first (so the layout no longer
+            # treats it as an offer), then becomes an owned card in place.
+            self._consume_shop_offer(item, keep_cell=True)
             self._adopt_card(item)
             self.cash -= price
             self._discover_owned_card(item.value)
-            self._consume_shop_offer(item)
             self._set_shop_message(f"Bought card: {item.name}")
             sounds.play_coin()
             return
@@ -241,10 +267,11 @@ class StoreMixin:
                 self._set_shop_message(
                     f"You can only hold {self.max_actions} actions")
                 return
+            # It keeps the square it was lying on, unlocked in place.
+            self._consume_shop_offer(item, keep_cell=True)
             self._adopt_action(item)
             self.cash -= price
             self._discover_action(item.value)
-            self._consume_shop_offer(item)
             self._set_shop_message(f"Bought action: {self._item_name(item)}")
             sounds.play_coin()
             return
@@ -289,8 +316,11 @@ class StoreMixin:
             sounds.play_coin()
             return
         # The inventory is unbounded (see Toolbox), so the purchase always has a
-        # place: it joins the panel if there is a free cell, else the stash.
-        self.toolbox.add(item)
+        # place: it joins the panel if there is a free cell, else the stash. The
+        # player gets a COPY of the offer: the shelf keeps selling the same slot,
+        # and two purchases must be two items, not one item listed twice (see
+        # items.owned_copy).
+        self.toolbox.add(owned_copy(item))
         self._record_component_purchases(item)
         if getattr(item, "kind", None) == "block":
             self._discover_block(item)
@@ -315,7 +345,7 @@ class StoreMixin:
         sounds.play_coin()
         self._set_shop_message(
             f"{pack.name} (${price}) — keep {pack.remaining} of "
-            f"{len(pack.options)}  •  right-click or SKIP to leave the rest")
+            f"{len(pack.options)}  •  click SKIP to leave the rest")
 
     def pack_option_at(self, pos):
         """Which option of the open pack a screen position is over, or None."""
@@ -330,9 +360,9 @@ class StoreMixin:
         """Handle a click while a pack is open (see handle_events).
 
         Clicking an option keeps it, clicking SKIP takes nothing more and
-        closes the pack, and a right-click (anywhere but on the panel) does the
-        same. The pack is closed from here only once nothing is left to pick:
-        a mega pack stays open for its second choice.
+        closes the pack (a click that is not on the panel does the same). The
+        pack is closed from here only once nothing is left to pick: a mega pack
+        stays open for its second choice.
         """
         index = self.pack_option_at(pos)
         if index is not None:

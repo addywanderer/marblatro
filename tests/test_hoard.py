@@ -1,11 +1,11 @@
-"""Hoard: right-click a shop offer to hold it in place across rerolls.
+"""Hoard: middle-click a shop offer to hold it in place across refreshes.
 
 The card data lives in components.py with the other whole cards, the hold
-itself is Game._toggle_shop_lock / Shop.locked, and the shop draws a held cell
-framed and padlocked (see ui._draw_shop_held_marker). These tests cover the
-card's rule, its cap ("one held offer per copy of this card"), what happens
-when the card leaves, and the event wiring that keeps a right-click on the shop
-from erasing the board.
+itself is Game._toggle_shop_lock / Shop.locked, and a held offer says so in its
+hover hint (see Game._action_hint) while its tile wears the unbought padlock.
+These tests cover the card's rule, its cap ("one held offer per copy of this
+card"), what happens when the card leaves, and the event wiring: right-click
+BUYS an offer now, so the hold is on the middle button.
 """
 
 from tests.game_test_case import *  # noqa: F401,F403
@@ -19,13 +19,15 @@ class HoardCardTests(GameTestCase):
             self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
 
     def _cell_pos(self, item):
-        """A point inside a shop offer's cell."""
-        rect = self.game.shop.rect
-        return (rect.x + item.col * main.GRID_SIZE + main.GRID_SIZE // 2,
-                rect.y + item.row * main.GRID_SIZE + main.GRID_SIZE // 2)
+        """A point inside a shop offer's board square."""
+        return self._item_pos(item)
 
     def _offer(self, index=0):
         return self.game.shop.items[index]
+
+    def _offer_at(self, item):
+        """The offer lying on the square ``item`` occupies (None if it moved on)."""
+        return self.game.shop.offer_at_cell(self.game.item_cell(item))
 
     def test_hoard_card_data(self):
         self.assertIn(main.Card.HOARD, main.Card.ORDER)
@@ -33,7 +35,7 @@ class HoardCardTests(GameTestCase):
         self.assertEqual(main.Card.PRICES[main.Card.HOARD], 36)
         self.assertEqual(main.Card.rarity_name(main.Card.HOARD), "Unusual")
         self.assertTrue(main.Card.comment(main.Card.HOARD))
-        self.assertIn("Right-click", main.Card.description(main.Card.HOARD))
+        self.assertIn("Middle-click", main.Card.description(main.Card.HOARD))
         self.assertIn(main.Card.HOARD, main.Card.COLORS)
         self.assertIn(main.Card.HOARD, main.Card.GLYPHS)
         # A whole card: no group half and no scorer half to split it into.
@@ -51,7 +53,7 @@ class HoardCardTests(GameTestCase):
         self.assertEqual(self.game.shop_lock_cap(), 2)
 
 
-    def test_right_clicking_an_offer_holds_it_through_a_reroll(self):
+    def test_middle_clicking_an_offer_holds_it_through_a_reroll(self):
         self._own_hoard()
         held = self._offer(0)
         slot = self.game.shop.slot_key(held)
@@ -64,12 +66,12 @@ class HoardCardTests(GameTestCase):
 
         # The pinned cell holds the very same offer (not a re-rolled one that
         # merely looks the same), and the row is still a full row.
-        self.assertIs(self.game.shop.item_at(self._cell_pos(held)), held)
+        self.assertIs(self._offer_at(held), held)
         self.assertEqual(len(self.game.shop.items), count_before)
         self.assertEqual(self.game.shop.locked, [slot])
 
 
-    def test_right_clicking_a_held_offer_again_releases_it(self):
+    def test_middle_clicking_a_held_offer_again_releases_it(self):
         self._own_hoard()
         held = self._offer(0)
         self.game._toggle_shop_lock(self._cell_pos(held))
@@ -79,7 +81,7 @@ class HoardCardTests(GameTestCase):
         self.assertIn("Released", self.game.shop_message)
         # Released, so the next reroll is free to change it like any other cell.
         self.game._refresh_shop()
-        self.assertIsNot(self.game.shop.item_at(self._cell_pos(held)), held)
+        self.assertIsNot(self._offer_at(held), held)
 
 
     def test_a_second_hold_needs_a_second_copy_of_the_card(self):
@@ -97,20 +99,19 @@ class HoardCardTests(GameTestCase):
         self.assertEqual(len(self.game.shop.locked), 2)
 
 
-    def test_without_the_card_a_right_click_holds_nothing(self):
+    def test_without_the_card_a_middle_click_holds_nothing(self):
         held = self._offer(0)
         self.assertTrue(self.game._toggle_shop_lock(self._cell_pos(held)))
         self.assertEqual(self.game.shop.locked, [])
         self.assertIn("you do not own it", self.game.shop_message)
 
 
-    def test_a_right_click_on_an_empty_shop_cell_belongs_to_the_board(self):
-        # The cash header row holds no offer, so the click is NOT Hoard's: it
-        # falls through to the board's own right-click.
+    def test_a_middle_click_on_an_empty_square_does_nothing(self):
+        # The click only belongs to Hoard when it lands on an offer.
         self._own_hoard()
-        shop = self.game.shop.rect
-        empty = (shop.x + main.GRID_SIZE // 2, shop.y + main.GRID_SIZE // 2)
-        self.assertFalse(self.game._toggle_shop_lock(empty))
+        cell = (main.GRID_WIDTH - 1, main.GRID_HEIGHT - 1)
+        self.assertIsNone(self.game.item_at_cell(cell))
+        self.assertFalse(self.game._toggle_shop_lock(self._grid_pos(*cell)))
         self.assertEqual(self.game.shop.locked, [])
 
 
@@ -131,7 +132,7 @@ class HoardCardTests(GameTestCase):
         self.game._clip_shop_locks()
         self.assertEqual(self.game.shop.locked, [])
         self.game._refresh_shop()
-        self.assertIsNot(self.game.shop.item_at(self._cell_pos(first)), first)
+        self.assertIsNot(self._offer_at(first), first)
 
 
     def test_a_card_cutter_hoard_holds_nothing(self):
@@ -146,7 +147,7 @@ class HoardCardTests(GameTestCase):
         self.assertEqual(self.game.shop_lock_cap(), 0)
         self.game._refresh_shop()
         self.assertEqual(self.game.shop.locked, [])
-        self.assertIsNot(self.game.shop.item_at(self._cell_pos(held)), held)
+        self.assertIsNot(self._offer_at(held), held)
 
 
     def test_a_held_offer_survives_the_slim_pickings_trim(self):
@@ -163,37 +164,39 @@ class HoardCardTests(GameTestCase):
         self.assertIn(held, self.game.shop.items)
 
 
-    def test_right_clicking_a_shop_offer_never_erases_the_board(self):
-        # End to end through the real event handler: the click is Hoard's, so it
-        # never falls through to the board's erase.
+    def test_middle_clicking_a_shop_offer_never_erases_the_board(self):
+        # End to end through the real event handler: the middle button is the
+        # Hoard card's, so the board is untouched.
         self._own_hoard()
         self.game.grid[(2, 2)] = main.Block(2, 2, scorer=main.Scorer.CHIPS_ADD)
         held = self._offer(0)
-        event = mock.Mock()
-        event.type = main.pygame.MOUSEBUTTONDOWN
-        event.button = 3
-        with mock.patch("main.pygame.mouse.get_pos",
-                        return_value=self._cell_pos(held)), \
-                mock.patch("main.pygame.event.get", return_value=[event]):
-            self.game.handle_events()
+        self._middle_click(self._cell_pos(held))
 
         self.assertEqual(self.game.shop.locked, [self.game.shop.slot_key(held)])
-        self.assertFalse(self.game.erasing)
         self.assertIn((2, 2), self.game.grid)
 
 
-    def test_a_right_click_off_the_shop_still_erases(self):
-        # The other half of the wiring: away from the shop the right-click is
-        # the board's, so the erase still starts.
+    def test_right_clicking_a_shop_offer_buys_it_instead_of_holding_it(self):
+        # Right-click is the BUY click (user request), so a Hoard player's
+        # right-click unlocks the offer rather than pinning it.
+        self._own_hoard()
+        self.game.cash = 5000
+        offer = self._offer(0)
+        price = self.game._buy_price(offer)
+        self._right_click(self._cell_pos(offer))
+
+        self.assertEqual(self.game.cash, 5000 - price)
+        self.assertEqual(self.game.shop.locked, [])
+
+
+    def test_a_right_click_on_the_board_still_does_nothing(self):
+        # Right-clicking the board is not the board's business any more (user
+        # request: "remove whatever right-clicking does"). A block stays put and
+        # nothing is armed.
         self._own_hoard()
         self.game.grid[(2, 2)] = main.Block(2, 2, scorer=main.Scorer.CHIPS_ADD)
-        event = mock.Mock()
-        event.type = main.pygame.MOUSEBUTTONDOWN
-        event.button = 3
-        with mock.patch("main.pygame.mouse.get_pos",
-                        return_value=self._grid_pos(2, 2)), \
-                mock.patch("main.pygame.event.get", return_value=[event]):
-            self.game.handle_events()
+        self._right_click(self._grid_pos(2, 2))
 
-        self.assertTrue(self.game.erasing)
         self.assertEqual(self.game.shop.locked, [])
+        self.assertIn((2, 2), self.game.grid)
+        self.assertFalse(self.game.drawing)

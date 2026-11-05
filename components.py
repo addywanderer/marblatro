@@ -943,7 +943,7 @@ class Card:
     CONCERT = 98  # +1 trigger per run for every block that is not a plain rect
     # The two newest whole cards. Hoard takes the first free id of the 12..77
     # band (nothing has claimed 14 yet); Infinity takes the next one.
-    HOARD = 14  # right-click a shop option to hold it across rerolls
+    HOARD = 14  # middle-click a shop option to hold it across rerolls
     INFINITY = 15  # the distance and uniqueness score factors never level off
     # The two measured cards added after them. Both read a BUILD-state number
     # — the cards' own sell value, and the slots no OTHER card is filling — so
@@ -1115,7 +1115,7 @@ class Card:
         PROCRASTINATION: "Rewinds the run 1 second each time it finishes, refilling every trigger — one rewind per copy",
         ESSENCE: "Gives $10 at the end of every run, but takes a card slot away — selling it leaves 2 random permanent Spirit tokens",
         CONCERT: "Every block that is not a plain rect and has both an effect and a scorer can score 1 more time per run",
-        HOARD: "Right-click a shop option to hold it through rerolls; one held offer per copy of this card",
+        HOARD: "Middle-click a shop option to hold it through rerolls; one held offer per copy of this card",
         INFINITY: "Distance and uniqueness rise in straight lines instead of levelling off, meeting the usual curve at 0.75",
         SWASHBUCKLER: "Adds mult at the start of the run equal to 1/5 of the total sell price of your cards",
         STENCIL: "Gives +1 xMult at the start of the run for each empty card slot, counting its own",

@@ -47,7 +47,16 @@ class Toolbox:
         The item joins the list at once and takes a board square as soon as one
         is free (see Game.ensure_board_cells); a full board leaves it waiting in
         ``stash``, which never costs the player the item.
+
+        The inventory holds ITEMS, never two references to one item: an object
+        that is already the player's is left alone, because a second reference
+        would share that item's board square and its selection switch, and
+        selling or assembling one reference would silently take the other with
+        it (user report: glitches with several copies of the same item). Two
+        copies are two items — see items.owned_copy.
         """
+        if self.contains(item):
+            return True
         self.items.append(item)
         if self.game is not None:
             self.game.ensure_board_cells()

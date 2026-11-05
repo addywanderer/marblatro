@@ -257,7 +257,7 @@ class BuildMixin:
         (user request: "make sure all items are always in an unlocked square").
         """
         if item is None or not self.toolbox.contains(item) and item not in (
-                self.cards + self.actions + self.tokens):
+                self.cards + self.actions + self.tokens) and not self.is_shop_offer(item):
             return False
         if self.is_cell_locked(gx, gy):
             self._set_shop_message(
@@ -303,6 +303,94 @@ class BuildMixin:
                 return block
         return item
 
+    def actor(self):
+        """The item that will be USED when the player acts: the first selected.
+
+        The selection is a queue (user request: "make the first item selected be
+        the one to be used up"): the head of it is the ACTOR — the item S applies,
+        B sells and D upgrades — and everything behind it is a TARGET for the
+        actor (see selected_targets).
+        """
+        return self.selection[0] if self.selection else None
+
+    def selected_targets(self):
+        """Every selected item except the actor: what the actor is aimed at."""
+        return list(self.selection[1:])
+
+    def required_targets(self, item=None):
+        """How many targets ``item`` (the actor by default) needs, None = any.
+
+        An action that acts on a piece needs exactly one target (see
+        Action.needs_target) and a target-free action needs none; a component is
+        assembled with whatever other parts were selected, so any number is fine;
+        a block, a card or a token is applied by being put down rather than aimed,
+        so it needs none.
+        """
+        actor = self.actor() if item is None else item
+        kind = getattr(actor, "kind", None)
+        if kind == "action":
+            return 1 if Action.needs_target(actor.value) else 0
+        if kind in (Component.SHAPE, Component.EFFECT, Component.SCORER):
+            return None
+        return 0
+
+    def _refresh_actor(self):
+        """Re-arm the selection: the FIRST selected item is the one in hand.
+
+        Called after every switch flip. It never changes WHICH items are on — only
+        which of them is the actor and what that actor is aimed at.
+        """
+        self._clear_active_selection()
+        actor = self.actor()
+        if actor is not None:
+            self._select_in_hand(actor)
+        self._sync_assigned_parts()
+        self._sync_action_selection()
+
+    def _sync_assigned_parts(self):
+        """The parts the next assembly uses: every selected component.
+
+        The selected components ARE the targets of a shape/scorer actor, so the
+        assignment follows the selection rather than the other way round: a block
+        has one shape and one scorer (the most recently selected of each wins) and
+        any number of effects.
+        """
+        assigned = {}
+        for item in self.selection:
+            kind = getattr(item, "kind", None)
+            if kind not in (Component.SHAPE, Component.EFFECT, Component.SCORER):
+                continue
+            if kind in (Component.SHAPE, Component.SCORER):
+                for other in [c for c in assigned
+                              if getattr(c, "kind", None) == kind]:
+                    del assigned[other]
+            assigned[item] = self._shown_index_of(item)
+        self.assigned_toolbox_indexes = assigned
+
+    def _sync_action_selection(self):
+        """Keep the armed action and its subject in step with the selection.
+
+        The actor is the action being used (if it is an action at all), and its
+        subject is the FIRST target — which is what the gold outline marks. An
+        action a PACK armed is not in the selection at all (it was never put on
+        the board), so it stays armed and every selected item is its target.
+        """
+        pending = self.pending_pack_action
+        if pending is not None:
+            self.selected_action = pending
+            targets = [t for t in self.selection if self.is_action_target(t)]
+            self.selected_action_subject = targets[0] if targets else None
+            return
+        actor = self.actor()
+        if getattr(actor, "kind", None) == "action":
+            self.selected_action = actor
+            targets = [t for t in self.selected_targets()
+                       if self.is_action_target(t)]
+            self.selected_action_subject = targets[0] if targets else None
+        else:
+            self.selected_action = None
+            self.selected_action_subject = None
+
     def _toggle_item_selection(self, item):
         """Click an item: turn its switch ON, or OFF again.
 
@@ -315,18 +403,21 @@ class BuildMixin:
         land in ``Game.selection``, and wear the same green frame, with a white
         inner frame on the one IN HAND (see ui.draw).
 
-        What an item that is ON then does is what it always did:
+        The FIRST item switched on is the ACTOR — the one that is used up — and
+        every item switched on after it is a target of that actor (user request:
+        "make the first item selected be the one to be used up. assume all items
+        selected other than the first one is a target item").
+
+        What the actor then does:
 
         * a block — a loose one is armed so a click on a square builds it (see
           _equip_block), one already standing on the board is taken hold of so it
           can be moved (see _select_placed_block);
-        * a component joins the next assembly (see _use_component), so a block
-          can be built out of the pieces laid out on the board;
-        * a card or an action is held as itself: a click on a square MOVES it
-          (see _move_item_to), B sells it, and S applies an action.
-
-        The switch turned on LAST is the one IN HAND; turning it off hands that
-        place to the most recently switched-on item left.
+        * a component is assembled with the other selected parts (see
+          _assemble_block);
+        * an action is used on its targets with S (see _apply_action);
+        * a card or a token is held as itself: a click on a square MOVES it (see
+          _move_item_to), B sells it.
 
         Returns True when the item ended up ON.
         """
@@ -336,18 +427,29 @@ class BuildMixin:
         if self.is_item_selected(item):
             return self._unselect_item(item)
         self.selection.append(item)
-        self._select_in_hand(item)
+        self._refresh_actor()
         return True
 
     def _select_in_hand(self, item):
-        """Make a switched-on item the one IN HAND, arming what that item does.
+        """Arm ``item`` as the one IN HAND, doing what that kind of item does.
 
-        The single counterpart to _toggle_item_selection: whatever the item is,
-        this is what makes it the item a click on the board acts with, so the
-        green frame and the next click always agree. It never switches anything
-        else OFF — only the place in hand moves.
+        The single counterpart to _refresh_actor: whatever the item is, this is
+        what makes it the item a click on the board acts with, so the green frame
+        and the next click always agree. It never switches anything else OFF.
         """
         kind = getattr(item, "kind", None)
+        if not self.owns_item(item) and not isinstance(item, Block):
+            # A shop offer: the player does not own it yet, so selecting it does
+            # nothing but pick it up — it can be moved around the board like any
+            # other item (user request), and bought by right-clicking it (see
+            # InputMixin.handle_events).
+            self._clear_active_selection()
+            self.selected_toolbox_item = item
+            self.selected_toolbox_index = None
+            self._set_shop_message(
+                f"{self._item_name(item)} — right-click to buy it for "
+                f"${self._buy_price(item)}")
+            return
         if isinstance(item, Block):
             self._select_placed_block(item)
         elif kind == "block":
@@ -545,7 +647,7 @@ class BuildMixin:
 
 
     def _use_component(self, component, index=None):
-        """Add a board component to the block S will build, or drop it again.
+        """Add one component to the block S will build, or drop it again.
 
         The component stays on its square (highlighted green) — it is only
         consumed when a block is actually assembled. A shape or a scorer takes
@@ -554,6 +656,11 @@ class BuildMixin:
         block can carry several. ``index`` is the inventory cell the piece used
         to sit in; the board highlights it by its own square now, so it is kept
         only because the panel-era callers pass it.
+
+        In play a click goes through _toggle_item_selection instead, and the
+        parts are re-derived from the whole selection (see _sync_assigned_parts);
+        this helper assigns a single piece directly, which is what the tests use
+        it for.
         """
         assigned = self.assigned_toolbox_indexes
         if component.kind in (Component.SHAPE, Component.SCORER):
@@ -641,10 +748,6 @@ class BuildMixin:
         item = self._selection_key(item)
         return any(item is picked for picked in self.selection)
 
-    def _hand_over_to(self, item):
-        """Make a still-selected item the one IN HAND (see _toggle_item_selection)."""
-        self._select_in_hand(item)
-
     def _selection_entry(self, item):
         """The exact entry in the selection that IS ``item`` (by identity), or None.
 
@@ -656,7 +759,8 @@ class BuildMixin:
     def _unselect_item(self, item, announce=True):
         """Turn one item's switch OFF — the second click on it.
 
-        Only this item changes: every other switch keeps the state it was in.
+        Only this item changes: every other switch keeps the state it was in, and
+        the first item still on becomes (or stays) the actor.
         """
         item = self._selection_entry(item) or self._selection_key(item)
         self.selection = [picked for picked in self.selection if picked is not item]
@@ -664,30 +768,14 @@ class BuildMixin:
         if self.selected_action is item:
             # The action is no longer selected, so there is nothing left to aim.
             self._clear_action_selection(announce=False)
-        # A switched-off component cannot stay the part the next block uses: the
-        # most recently switched-on component of its kind takes the slot, exactly
-        # as it would have if the player had picked that one last.
-        self._reassign_part_of_kind(item)
         if self.selected_toolbox_item is item:
-            # The item in hand was switched off: the place goes to the most
-            # recently switched-on item left, so a block can still be placed.
             self._clear_active_selection()
-            if self.selection:
-                self._hand_over_to(self.selection[-1])
+        # The actor is always the first item still switched on (see _refresh_actor).
+        self._refresh_actor()
         if announce:
             self._set_shop_message(f"Deselected {self._item_name(item)} "
                                    f"({len(self.selection)} selected)")
         return False
-
-    def _reassign_part_of_kind(self, item):
-        """Give ``item``'s assembly slot to the last still-selected piece of its kind."""
-        kind = getattr(item, "kind", None)
-        if kind not in (Component.SHAPE, Component.EFFECT, Component.SCORER):
-            return
-        fallback = next((other for other in reversed(self.selection)
-                         if getattr(other, "kind", None) == kind), None)
-        if fallback is not None:
-            self._use_component(fallback, self._shown_index_of(fallback))
 
     def _forget_item(self, item, announce=False):
         """Switch an item OFF because it has left the player's ownership.
@@ -702,8 +790,7 @@ class BuildMixin:
             self._unselect_item(entry, announce=announce)
         elif self.selected_toolbox_item is item:
             self._clear_active_selection()
-            if self.selection:
-                self._hand_over_to(self.selection[-1])
+            self._refresh_actor()
 
     def prune_toolbox_selection(self):
         """Drop selected items the player no longer owns.
@@ -724,18 +811,17 @@ class BuildMixin:
         active = self.selected_toolbox_item
         if active is not None and not visible(active):
             self._clear_active_selection()
-            if self.selection:
-                self._hand_over_to(self.selection[-1])
+            self._refresh_actor()
         return self.selection
 
     def _select_toolbox_component(self, component, index=None):
-        """Select a toolbox component and assign it to the block S will build.
+        """Make a component the item in hand — a part of the next assembly.
 
-        A shape/effect/scorer click makes the piece part of the next block (the
-        scorer is shared with the card builder, which is commented out with the
-        conditions). Only the item IN HAND moves: the components already
-        selected stay selected (and assigned), which is what lets a block be
-        assembled from several pieces.
+        A shape/effect/scorer click makes the piece part of the block S will
+        build (see _sync_assigned_parts, which derives the parts from the whole
+        selection rather than from this click). Only the item IN HAND moves: the
+        components already selected stay selected and stay assigned, which is
+        what lets a block be assembled from several pieces.
         """
         self._clear_active_selection()
         self.selected_toolbox_item = component
@@ -771,9 +857,15 @@ class BuildMixin:
         #     self._set_shop_message(
         #         f"Scorer: {component.name} — press S to build the card")
         #     return
-        # The assigned piece rides along, so the board highlights exactly the
-        # piece that was clicked, not every piece that shares the same identity.
-        self._use_component(component, self.selected_toolbox_index)
+        # The assigned pieces are re-derived from the whole selection, so the
+        # board lights up exactly the components the next block is built from
+        # (the actor first, its targets behind it).
+        self._sync_assigned_parts()
+        kind_label = {Component.SHAPE: "Shape", Component.EFFECT: "Effect",
+                      Component.SCORER: "Scorer"}.get(component.kind,
+                                                     "Component")
+        self._set_shop_message(
+            f"{kind_label}: {component.name} — press S to assemble")
 
     # -----------------------------------------------------------------------
     # COMMENTED OUT with the conditions (user request: "comment out all the code
@@ -1020,9 +1112,40 @@ class BuildMixin:
         if block is None or getattr(block, "source_item", None) is not item:
             return
         self.grid.pop(cell, None)
+        # The block's switch goes off with it (it is the same existence as the
+        # item that just left), so no selection outlives the board.
+        self._forget_item(block)
         if block.scorer == Scorer.START:
             self.marbles = [m for m in self.marbles
                             if getattr(m, "start_block", None) is not block]
+
+    def _release_block_item(self, block):
+        """A block that leaves the board for good takes its item with it.
+
+        A placed block keeps the inventory item it was built from (see
+        _place_block_at): the two are one existence. So a block that is SOLD,
+        disassembled, sacrificed or destroyed has to take that item out of the
+        inventory too — otherwise the item lingers as a ghost: still owned, still
+        marked as placed, drawn nowhere and clickable nowhere, and the square it
+        still claims is never given to another item. Worse, erasing a square
+        something else later stands on would refund the ghost as a second copy of
+        a block the player no longer had (user report: glitches with several
+        copies of one item).
+
+        A block with no item of its own (one an older save restored, or one an
+        effect put down) has nothing to take.
+        """
+        source = getattr(block, "source_item", None)
+        if source is None:
+            return
+        block.source_item = None
+        source.placed_cell = None
+        if self.toolbox.contains(source):
+            # Taking the item out of the inventory is the ordinary door: the
+            # toolbox's own hook clears the item's square (see _drop_placed_copy).
+            self.toolbox.remove(source)
+        self.assigned_toolbox_indexes.pop(source, None)
+        self._forget_item(source)
 
     def _unplace_block(self, block):
         """Take a block off the board and give it back to the inventory.
@@ -1034,11 +1157,15 @@ class BuildMixin:
         the trial put on it). A block with no spot of its own — a save written
         before blocks kept one, or a block another effect put down — is refunded
         into the inventory the way it always was (see _refund_block).
+
+        An ORPHAN block — one whose item has already left the player's ownership
+        (see _release_block_item) — is refunded to nobody: giving it back would
+        hand out a second copy of something the player no longer owns.
         """
         source = getattr(block, "source_item", None)
         if source is not None and self.toolbox.contains(source):
             self._restore_item_from_block(block, source)
-        else:
+        elif block.source_item is None:
             self._refund_block(block)
 
     def _restore_item_from_block(self, block, item):
@@ -1075,13 +1202,13 @@ class BuildMixin:
 
         Only a BLOCK is the eraser's business: the other items on the board (a
         component, a card, an action) are scenery the player arranges by moving
-        it, so right-clicking one leaves it where it is.
+        it, so erasing one leaves it where it is.
         """
         standing = self.item_at_cell((grid_x, grid_y))
         if standing is not None and not isinstance(standing, Block):
             self._set_shop_message(
-                f"{self._item_name(standing)} stays where it is — right-click "
-                f"erases blocks")
+                f"{self._item_name(standing)} stays where it is — only blocks "
+                f"can be taken up")
             return False
         block = self.grid.pop((grid_x, grid_y), None)
         if block is not None:

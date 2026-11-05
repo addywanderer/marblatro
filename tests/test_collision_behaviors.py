@@ -1926,6 +1926,119 @@ class CollisionBehaviorTests(unittest.TestCase):
         self.assertGreater(fast.spin, slow.spin)
         self.assertAlmostEqual(fast.spin, (1800 * main.DT * 10) % 360.0, delta=1e-6)
 
+    # --- seams between blocks ------------------------------------------
+    #
+    # Two flush blocks make ONE flat surface. A marble landing near their shared
+    # edge touches the CORNER of one of them, whose closest-point normal points
+    # diagonally into the other block — a phantom corner, not a surface. Bouncing
+    # off it flung the marble sideways at an angle that depended only on which
+    # block happened to be nearer (user report: "bounces off things in weird
+    # directions, especially when it hits the exact point on the borders between
+    # blocks"), and answering both blocks reflected the marble a second time.
+
+    def _floor(self, xs, y=8, effects=None, amounts=None):
+        return [main.Block(x, y, shape=main.Shape.RECT,
+                           scorer=main.Scorer.NONE,
+                           effects=list(effects or [main.Effect.NONE]),
+                           effect_amounts=dict(amounts or {}))
+                for x in xs]
+
+    def test_a_drop_onto_a_flat_floor_of_blocks_never_goes_sideways(self):
+        # Dropped straight down at EVERY pixel across a floor laid out of four
+        # blocks: the marble must never gain sideways speed, seam or no seam.
+        for effects, amounts in (([main.Effect.NONE], {}),
+                                 ([main.Effect.BOUNCY], {}),
+                                 ([main.Effect.SLIPPERY], {}),
+                                 ([main.Effect.STICKY], {})):
+            blocks = self._floor((4, 5, 6, 7), effects=effects, amounts=amounts)
+            left = blocks[0].rect.left
+            right = blocks[-1].rect.right
+            for px in range(int(left) + 9, int(right) - 9):
+                marble = main.Marble(px, blocks[0].rect.top - 60)
+                marble.velocity = np.array([0.0, 420.0])
+                worst = 0.0
+                for _ in range(25):
+                    marble.physics.update(marble, main.DT, blocks)
+                    worst = max(worst, abs(float(marble.velocity[0])))
+                self.assertAlmostEqual(
+                    worst, 0.0, places=6,
+                    msg=f"{effects} at x={px - left}: sideways speed {worst}")
+
+    def test_a_rubber_ball_bounces_straight_up_off_a_seam(self):
+        # The rubber ball reflects off every surface, so a phantom corner would
+        # be plain to see: dropped exactly on the seam between two blocks it
+        # bounces straight back up, exactly as it would off one block.
+        def bounce(offset):
+            blocks = self._floor((5, 6), effects=[main.Effect.BOUNCY])
+            seam = blocks[1].rect.left
+            marble = main.Marble(seam + offset, blocks[0].rect.top - 60)
+            main._configure_marble_type(marble, main.MarbleType.RUBBER_BALL)
+            marble.velocity = np.array([0.0, 420.0])
+            for _ in range(40):
+                marble.physics.update(marble, main.DT, blocks)
+            return float(marble.velocity[0]), float(marble.velocity[1])
+
+        for offset in (-2, 0, 2):
+            vx, vy = bounce(offset)
+            self.assertAlmostEqual(vx, 0.0, places=6, msg=f"offset {offset}")
+            self.assertLess(vy, 0.0)   # it came back up
+
+    def test_two_flush_bouncy_blocks_bounce_once_not_twice(self):
+        # Answering both blocks of one surface reflected the marble twice: the
+        # second answer sent it back DOWN into the floor (or off at an angle).
+        def peak(x_offset):
+            blocks = self._floor((5, 6), effects=[main.Effect.BOUNCY])
+            marble = main.Marble(blocks[0].rect.left + 40 + x_offset,
+                                 blocks[0].rect.top - 60)
+            marble.velocity = np.array([0.0, 420.0])
+            highest = 0.0
+            for _ in range(45):
+                marble.physics.update(marble, main.DT, blocks)
+                highest = max(highest, float(marble.position[1]))
+            return highest
+
+        one = peak(-40)          # over the middle of the LEFT block
+        seam = peak(0)           # exactly on the seam between the two
+        self.assertAlmostEqual(seam, one, delta=1.0)
+
+    def test_a_concave_corner_still_stops_both_axes(self):
+        # The fix must not soften a real corner: a marble that falls into the nook
+        # between a floor and the wall standing on it is stopped sideways by the
+        # wall and can only roll along the floor.
+        blocks = self._floor((5, 6, 7, 8)) + [
+            main.Block(8, 7, shape=main.Shape.RECT, scorer=main.Scorer.NONE)]
+        wall = blocks[-1]
+        marble = main.Marble(wall.rect.left - 12, blocks[0].rect.top - 50)
+        marble.velocity = np.array([90.0, 420.0])
+        for _ in range(40):
+            marble.physics.update(marble, main.DT, blocks)
+        self.assertLessEqual(float(marble.velocity[0]), 1e-6)
+        self.assertLess(abs(float(marble.position[0]) - wall.rect.left),
+                        main.MARBLE_RADIUS + 1)
+
+    def test_a_marble_exactly_on_a_corners_point_is_pushed_back_the_way_it_came(self):
+        # With no offset at all there is no natural normal, and the fixed
+        # up-left diagonal this used to return threw the marble off at an angle
+        # nothing to do with how it arrived.
+        engine = main.PhysicsEngine()
+        corner = np.array([200.0, 200.0])
+        marble = main.Marble(300.0, 200.0)
+        marble.velocity = np.array([-400.0, 0.0])
+        marble.position = np.array(corner, dtype=float)   # exactly on the point
+        marble._pre_move_position = np.array([300.0, 200.0])
+
+        normal = engine._arrival_direction(marble, corner)
+
+        self.assertAlmostEqual(float(normal[0]), 1.0, places=6)   # back to the right
+        self.assertAlmostEqual(float(normal[1]), 0.0, places=6)
+
+        # Without a pre-move position it falls back to the opposite of the
+        # velocity — still the direction it came from, never a fixed diagonal.
+        marble._pre_move_position = None
+        normal = engine._arrival_direction(marble, corner)
+        self.assertAlmostEqual(float(normal[0]), 1.0, places=6)
+        self.assertAlmostEqual(float(normal[1]), 0.0, places=6)
+
 
 if __name__ == "__main__":
     unittest.main()

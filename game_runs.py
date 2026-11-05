@@ -723,24 +723,30 @@ class RunsMixin:
                               + list(self.shop.items))
 
     def _sync_portal_pair_triggers(self, block, blocks):
-        """Make a portal share its trigger count with its paired portal.
+        """Make a portal share its trigger count with every portal it pairs with.
 
         Portal pairs have ONE trigger count: a marble passing through either
-        portal uses up the whole pair. Both portals are set to the lower of the
-        two remaining counts so they stay in lockstep and their red borders
-        agree — e.g. a freshly placed portal inherits an exhausted partner's
-        count of zero.
+        portal uses up the whole pair. Both portals are set to the lowest of the
+        remaining counts so they stay in lockstep and their red borders agree —
+        e.g. a freshly placed portal inherits an exhausted partner's count of
+        zero. Recognition can leave more than two portals sharing a number (see
+        _delete_paired_portal), so EVERY partner is synced, not just the first
+        one found: a third copy left at its own count would spend triggers its
+        partners never agreed to.
         """
         if not block.has_effect(Effect.PORTAL):
             return
         number = getattr(block, "portal_number", 0)
-        for other in blocks:
-            if (other is not block and other.has_effect(Effect.PORTAL)
-                    and getattr(other, "portal_number", 0) == number):
-                shared = min(block.triggers_left, other.triggers_left)
-                block.triggers_left = shared
-                other.triggers_left = shared
-                return
+        partners = [other for other in blocks
+                    if other is not block and other.has_effect(Effect.PORTAL)
+                    and getattr(other, "portal_number", 0) == number]
+        if not partners:
+            return
+        shared = min([block.triggers_left]
+                     + [other.triggers_left for other in partners])
+        block.triggers_left = shared
+        for other in partners:
+            other.triggers_left = shared
 
     def _score_factors(self):
         """The run's normalized score factors, each in 0..1 (1 = best).

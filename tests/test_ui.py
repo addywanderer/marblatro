@@ -219,17 +219,27 @@ class UiTests(GameTestCase):
 
 
 
-    def test_shop_title_stays_while_the_mouse_is_over_the_shop(self):
-        # The SHOP title is part of the panel's own furniture too: it is drawn
-        # wherever the mouse is, hovering over the shop included.
+    def test_the_bar_keeps_the_cash_captions(self):
+        # The shop panel is gone, but the two readouts it reported — the purse
+        # and what the last run earned — stay in the top bar (user request).
+        self.game.cash = 321
+        self.game.last_run_cash_gained = 45
+        self.game.shop_message = ""
         with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
+            self.game.screen.fill(main.BLACK)
             self.game.draw()
-        self.assertTrue(self._region_has_white(self._shop_title_region()))
-        with mock.patch("main.pygame.mouse.get_pos",
-                        return_value=(main.SHOP_COORDS[0] + 5,
-                                      main.SHOP_COORDS[1] + 5)):
-            self.game.draw()
-        self.assertTrue(self._region_has_white(self._shop_title_region()))
+        cash = main.ui.cash_caption_rect(self.game)
+        gained = main.ui.last_run_cash_rect(self.game)
+        self.assertTrue(self._region_has_color(cash, main.WHITE))
+        self.assertTrue(self._region_has_color(gained, main.GREEN))
+        self.assertGreaterEqual(gained.top, cash.bottom)
+        self.assertLessEqual(gained.bottom + 1, main.TOP_BAR_HEIGHT)
+
+    def _region_has_color(self, rect, color):
+        """True when the exact ``color`` appears in the given screen region."""
+        return any(self.game.screen.get_at((x, y))[:3] == color
+                   for x in range(rect.left, rect.right)
+                   for y in range(rect.top, rect.bottom))
 
 
 
@@ -768,11 +778,11 @@ class UiTests(GameTestCase):
 
 
     def test_info_box_targets_hovered_shop_item_without_buying(self):
+        # A shop offer is an item lying on the board now, so the info box finds
+        # it by the square it stands on — and hovering never buys it.
         item = self.game.shop.items[0]
         cash_before = self.game.cash
-        pos = (self.game.shop.rect.x + item.col * main.GRID_SIZE + 5,
-               self.game.shop.rect.y + item.row * main.GRID_SIZE + 5)
-        target, source = self.game._info_target_at(pos)
+        target, source = self.game._info_target_at(self._item_pos(item))
         self.assertIs(target, item)
         self.assertEqual(source, "shop")
         self.assertEqual(self.game.cash, cash_before)
@@ -837,8 +847,7 @@ class UiTests(GameTestCase):
         # several lines rather than hanging out past the box's edge.
         self.game.cards.append(main.CardItem(main.Card.HOARD, 50))
         item = self._place_shop_offer(main.Component.SHAPE)
-        pos = (self.game.shop.rect.x + item.col * main.GRID_SIZE + 5,
-               self.game.shop.rect.y + item.row * main.GRID_SIZE + 5)
+        pos = self._item_pos(item)
         width, height, _names, _desc, hint_lines = self.game._info_layout(item, "shop")
         self.assertGreater(len(hint_lines), 1, hint_lines)
         self.assertTrue(all(self.game.small_font.size(line)[0] <= width
@@ -1683,10 +1692,11 @@ class UiTests(GameTestCase):
                                                main.Trial.ALL_FINISHES))
 
     def test_a_running_trials_panels_take_its_own_colour(self):
-        # The board and the shop are filled with the running trial's tile colour,
-        # a little lighter, so the play areas take the run's palette instead of
-        # the game's own panel colour. (The inventory and the trays are gone: the
-        # board carries the items — see Game.ensure_board_cells.)
+        # The board is filled with the running trial's tile colour, a little
+        # lighter, so the play area takes the run's palette instead of the game's
+        # own panel colour. (The shop panel is gone — its offers are items on the
+        # board now — and the inventory and trays went the same way: the board
+        # carries the items, see Game.ensure_board_cells.)
         self.game.trials_enabled = True
         self.game.unlocked_cells = {(x, y) for x in range(main.GRID_WIDTH)
                                     for y in range(main.GRID_HEIGHT)}
@@ -1697,12 +1707,12 @@ class UiTests(GameTestCase):
         self.assertEqual(tint, components.shade(main.Trial.COLORS[main.Trial.SPEEDRUN],
                                                 main.Trial.PANEL_LIGHT))
         self.assertNotEqual(tint, main.MARBLE_BOX_COLOR)
-        for label, pos in (("board", (main.MARBLE_BOX_COORDS[0] + 3 + 10 * main.GRID_SIZE,
-                                      main.MARBLE_BOX_COORDS[1] + 3 + main.BORD_WIDTH)),
-                           ("shop", (main.SHOP_COORDS[0] + 3,
-                                     main.SHOP_COORDS[1] + 3))):
-            with self.subTest(panel=label):
-                self.assertEqual(tuple(self.game.screen.get_at(pos))[:3], tint)
+        # A square no item stands on, so the board's own fill is what is read.
+        cell = (2, main.GRID_HEIGHT - 3)
+        self.assertIsNone(self.game.item_at_cell(cell))
+        x, y = self.game.cell_to_screen(*cell)
+        pos = (x + main.GRID_SIZE // 2, y + main.GRID_SIZE // 2)
+        self.assertEqual(tuple(self.game.screen.get_at(pos))[:3], tint)
 
     def test_the_panels_stay_readable_under_every_trial(self):
         # The panels carry white text, so no trial may tint them so light that
@@ -1861,37 +1871,40 @@ class UiTests(GameTestCase):
                 self.assertEqual(right.right, main.TRIAL_BOX_RECT.right)
 
 
-    def test_shop_message_sits_along_the_panels_bottom_strip(self):
-        # A shop dialog lives in the panel's bottom strip: right of the SHOP
-        # title (bottom-left) and clear of the panel's right edge, on the row
-        # under the offers and their prices.
-        shop = self.game.shop.rect
-        title_right = shop.x + 8 + self.game.font.size("SHOP")[0]
-        # The strip is narrow, so only a short message is a single line...
+    def test_shop_message_sits_in_the_top_bar(self):
+        # A shop dialog lives in the top bar now that the panel is gone: under
+        # the cash captions, inside the bar's own left column, and never over the
+        # board below it.
+        bar = main.TOP_BAR_HEIGHT
+        cash = main.ui.cash_caption_rect(self.game)
+        gained = main.ui.last_run_cash_rect(self.game)
+        self.assertGreaterEqual(gained.top, cash.bottom)
+        # The strip the messages share is under the two readouts, so a short
+        # message is a single line...
         lines, rect = main.ui.shop_message_layout(self.game, "Sold")
         self.assertEqual(len(lines), 1)
-        self.assertGreaterEqual(rect.left, title_right)
-        self.assertLessEqual(rect.right, shop.right)
-        self.assertGreater(rect.top, shop.bottom - main.GRID_SIZE)
-        self.assertLessEqual(rect.bottom, shop.bottom)
+        self.assertEqual(rect.left, cash.left)
+        self.assertGreater(rect.top, gained.bottom)
+        self.assertLessEqual(rect.right, cash.left + main.BAR_TEXT_WIDTH)
+        self.assertLessEqual(rect.bottom, bar)
         # ...and a full shop message is laid out there too: one line if it fits,
-        # two tiny ones when it does not, always inside the panel.
+        # two tiny ones when it does not, always inside the bar.
         for message in ("Refreshed shop ($20)",
                         "Disassembled Slippery Fragile Pipe +Chips v2 ($56)"):
             long_lines, long_rect = main.ui.shop_message_layout(self.game, message)
             self.assertIn(len(long_lines), (1, 2))
-            self.assertGreaterEqual(long_rect.left, title_right)
-            self.assertLessEqual(long_rect.right, shop.right)
-            self.assertLessEqual(long_rect.bottom, shop.bottom)
+            self.assertEqual(long_rect.left, cash.left)
+            self.assertLessEqual(long_rect.right, cash.left + main.BAR_TEXT_WIDTH)
+            self.assertLessEqual(long_rect.bottom, bar)
 
 
-    def test_shop_message_draws_in_the_bottom_strip(self):
-        # Drawing the shop with a message paints it where the layout puts it.
+    def test_shop_message_draws_in_the_top_bar(self):
+        # Drawing the game with a shop message paints it where the layout puts it.
         self.game.shop_message = "Refreshed shop ($20)"
         _lines, rect = main.ui.shop_message_layout(self.game, self.game.shop_message)
         with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
             self.game.screen.fill(main.BLACK)
-            main.ui.draw_shop(self.game)
+            self.game.draw()
         colors = {self.game.screen.get_at((x, y))[:3]
                   for x in range(rect.left, rect.right)
                   for y in range(rect.top, rect.bottom)}
@@ -2252,37 +2265,47 @@ class UiTests(GameTestCase):
         self.assertNotIn(cable, on_board)
 
 
-    def test_a_held_shop_offer_is_framed_and_padlocked(self):
-        # Hoard's held cell wears a gold frame and a padlock, so the player can
-        # tell at a glance which offers a reroll will leave alone (see
-        # ui._draw_shop_held_marker).
-        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
-        held = self.game.shop.items[0]
-        rect = pygame.Rect(self.game.shop.rect.x + held.col * main.GRID_SIZE,
-                           self.game.shop.rect.y + held.row * main.GRID_SIZE,
-                           main.GRID_SIZE, main.GRID_SIZE)
+    def test_an_unbought_shop_offer_wears_a_lock_and_chain(self):
+        # The panel that fenced the shelf off is gone, so an unbought offer says
+        # "not yours yet" itself: a dark wash, a chain across the tile and a gold
+        # padlock (see ui.draw_locked_marker). Buying it in place takes the lock
+        # off.
+        offer = main.ActionItem(main.Action.DEATH,
+                                main.Action.PRICES[main.Action.DEATH])
+        self.game.shop.items = [offer]
+        rect = self.game._board_item_rect(*self._item_cell(offer))
 
         def draw():
             with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
                 self.game.screen.fill(main.BLACK)
-                main.ui.draw_shop(self.game)
+                self.game.draw()
 
         draw()
-        plain = self._pixel_hash(self.game.screen.subsurface(rect).copy())
+        locked = self._pixel_hash(self.game.screen.subsurface(rect).copy())
+        # The padlock's gold body sits in the middle of the tile.
+        body = {tuple(self.game.screen.get_at((x, y)))[:3]
+                for x in range(rect.centerx - 8, rect.centerx + 8)
+                for y in range(rect.centery, rect.centery + 5)}
+        self.assertIn((255, 215, 0), body)
+
+        self.game.cash = 5000
+        self.game._buy_shop_item(offer)  # an action unlocks where it lies
+        self.assertFalse(self.game.is_shop_offer(offer))
+        draw()
+        self.assertNotEqual(
+            self._pixel_hash(self.game.screen.subsurface(rect).copy()), locked)
+
+
+    def test_a_held_shop_offer_says_it_is_held(self):
+        # Hoard's held offer is the one the next refresh leaves alone. Every
+        # unbought offer is padlocked, so the HELD state is what the hover hint
+        # adds (see Game._action_hint).
+        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
+        held = self.game.shop.items[0]
+        before = self.game._action_hint(held, "shop")
 
         self.game.shop.locked = [self.game.shop.slot_key(held)]
-        draw()
-        marked = self._pixel_hash(self.game.screen.subsurface(rect).copy())
+        after = self.game._action_hint(held, "shop")
 
-        self.assertNotEqual(marked, plain)
-        # The frame sits on the cell's own edge, in the game's gold.
-        self.assertEqual(
-            tuple(self.game.screen.get_at((rect.left, rect.centery)))[:3],
-            (255, 215, 0))
-        # The padlock's dark plate and its gold body are both in the corner,
-        # clear of the item's own art in the middle of the cell.
-        corner = {(tuple(self.game.screen.get_at((x, y)))[:3])
-                  for x in range(rect.left + 1, rect.left + 17)
-                  for y in range(rect.top + 1, rect.top + 17)}
-        self.assertIn((20, 20, 28), corner)
-        self.assertIn((255, 215, 0), corner)
+        self.assertNotEqual(before, after)
+        self.assertIn("held", after.lower())

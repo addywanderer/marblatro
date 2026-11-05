@@ -158,10 +158,10 @@ class EconomyMixin:
         """Hoard: hold (or release) the shop offer under the mouse.
 
         Returns True when the click was this card's business — the offer is now
-        held, or released, or the player is told why it cannot be — so that the
-        caller does not fall through to the board's own right-click (which
-        erases blocks). A right-click on an EMPTY shop cell is not this card's
-        business at all, so it stays the board's.
+        held, or released, or the player is told why it cannot be. Middle-click
+        is this card's alone (user request: right-click BUYS an offer now), so
+        nothing falls through to the board; a middle-click on an EMPTY square
+        simply does nothing.
         """
         item = self.shop.item_at(pos)
         if item is None:
@@ -171,12 +171,12 @@ class EconomyMixin:
         if slot in self.shop.locked:
             self.shop.locked.remove(slot)
             self._set_shop_message(
-                f"Released {item.name} — it will change on the next reroll")
+                f"Released {item.name} — the next refresh may change it")
             return True
         cap = self.shop_lock_cap()
         if cap <= 0:
             self._set_shop_message(
-                "Hoard holds a shop offer in place through rerolls — "
+                "Hoard holds a shop offer in place through a refresh — "
                 "you do not own it")
             return True
         if len(self.shop.locked) >= cap:
@@ -187,7 +187,7 @@ class EconomyMixin:
         self.shop.locked.append(slot)
         self._set_shop_message(
             f"Holding {item.name} ({len(self.shop.locked)}/{cap}) — it stays "
-            "on the shelf through rerolls")
+            "on the board through the next refresh")
         sounds.play_mech()
         return True
 
@@ -597,6 +597,10 @@ class EconomyMixin:
             self.grid.pop((item.x, item.y), None)
             if item.scorer == Scorer.START:
                 self.marbles = [m for m in self.marbles if getattr(m, "start_block", None) is not item]
+            # The block is parts now, so the item it was built from is gone too
+            # (see _release_block_item) — a block and its item are one existence.
+            self._forget_item(item)
+            self._release_block_item(item)
         elif in_toolbox:
             self.toolbox.remove(item)
         self.cash -= cost
@@ -626,12 +630,16 @@ class EconomyMixin:
             self._delete_paired_key(item.key_number)
 
     def _delete_paired_key(self, number):
-        """Delete the Key/Lock block paired with the given key number.
+        """Delete every Key/Lock block paired with the given key number.
 
         A Key and its Lock always come as a pair (two blocks with the same key
         number). Removing one half deletes the other so a lone, unusable half
-        never lingers. The paired block lives either in the toolbox or, if it
-        was placed, on the grid.
+        never lingers. Recognition can leave MORE than two blocks sharing a
+        number (two keys for one door), so every block that shares it goes —
+        removing only the first would leave a half with nothing to pair with
+        (user report: glitches with several copies of one item).
+
+        The paired blocks live either in the toolbox or, if placed, on the grid.
         """
         if not number:
             return
@@ -642,22 +650,28 @@ class EconomyMixin:
         for item in list(self.toolbox.every_item()):
             if getattr(item, "key_number", 0) == number:
                 self.toolbox.remove(item)
-                return
+                self.assigned_toolbox_indexes.pop(item, None)
+                # The partner is gone, so its switch goes off with it: a
+                # selection that outlived the item would be a ghost the player
+                # could still act on (see _forget_item).
+                self._forget_item(item)
         for key, block in list(self.grid.items()):
             if getattr(block, "key_number", 0) == number:
                 self.grid.pop(key, None)
                 if block.scorer == Scorer.START:
                     self.marbles = [m for m in self.marbles
                                     if getattr(m, "start_block", None) is not block]
-                return
+                self._forget_item(block)
+                self._release_block_item(block)
 
     def _delete_paired_portal(self, number):
-        """Delete the portal block paired with the given pairing number.
+        """Delete every portal block paired with the given pairing number.
 
         Portals come in pairs (two blocks with the same number). Removing one
-        portal (via disassembly) deletes the other so a lone, unusable portal
-        never lingers. The paired block lives either in the toolbox or, if it
-        was placed, on the grid.
+        portal (via disassembly) deletes the rest so a lone, unusable portal
+        never lingers — every block sharing the number, because Recognition can
+        leave more than two of them (see _delete_paired_key). The paired blocks
+        live either in the toolbox or, if placed, on the grid.
         """
         if not number:
             return
@@ -666,13 +680,16 @@ class EconomyMixin:
         for item in list(self.toolbox.every_item()):
             if getattr(item, "portal_number", 0) == number:
                 self.toolbox.remove(item)
-                return
+                self.assigned_toolbox_indexes.pop(item, None)
+                # Its partner is gone, so the item's switch goes off with it.
+                self._forget_item(item)
         for key, block in list(self.grid.items()):
             if getattr(block, "portal_number", 0) == number:
                 self.grid.pop(key, None)
                 if block.scorer == Scorer.START:
                     self.marbles = [m for m in self.marbles if getattr(m, "start_block", None) is not block]
-                return
+                self._forget_item(block)
+                self._release_block_item(block)
 
     def _sell_selected_item(self):
         """Sell the selected item (block, component, card, or action) for half its price."""

@@ -107,8 +107,9 @@ class BoardItemTests(GameTestCase):
 
 
     def test_right_clicking_a_board_item_leaves_it_alone(self):
-        # The eraser is for blocks: a component (or a card) is scenery the player
-        # arranges by moving it.
+        # Right-click belongs to the shop alone now (user request: "remove
+        # whatever right-clicking does"), so a component on the board is
+        # untouched and nothing changes.
         comp = self._lay(self._component(main.Component.SHAPE, main.Shape.PIPE), 2, 2)
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN
@@ -120,7 +121,7 @@ class BoardItemTests(GameTestCase):
             self.game.handle_events()
 
         self.assertIs(self.game.item_at_cell((2, 2)), comp)
-        self.assertIn("erases blocks", self.game.shop_message)
+        self.assertEqual(self.game.selection, [])
 
 
     def test_a_card_on_the_board_can_be_sold(self):
@@ -221,8 +222,12 @@ class BoardItemTests(GameTestCase):
         self.assertEqual(len(self.game.selection), len(everything))
         for item in everything:
             self.assertTrue(self.game.is_item_selected(item), item)
-        # Only the last one switched on is the item IN HAND.
-        self.assertIs(self.game.selected_toolbox_item, action)
+        # The FIRST one switched on is the actor — the item IN HAND, the one that
+        # gets used (user request: "make the first item selected be the one to be
+        # used up"); the rest are its targets.
+        self.assertIs(self.game.selected_toolbox_item, shape)
+        self.assertIs(self.game.actor(), shape)
+        self.assertEqual(self.game.selected_targets(), [effect, card, action])
 
         # Switching one off leaves every other switch exactly as it was.
         self._click(self._grid_pos(*self._item_cell(effect)))
@@ -296,8 +301,78 @@ class BoardItemTests(GameTestCase):
         self.assertFalse(self.game.is_item_selected(card))
         self.assertTrue(self.game.is_item_selected(shape))
 
-    def test_a_moved_block_is_not_selectable_on_the_square_it_left(self):
-        # A block whose item was laid out on one square and built on another
+    def test_the_first_item_selected_is_the_one_that_gets_used_up(self):
+        # The selection is a queue (user request: "make the first item selected
+        # be the one to be used up"): with two cards switched on, B sells the
+        # FIRST one — the actor — and leaves the second alone.
+        first = main.CardItem(main.Card.GARDEN, 36)
+        second = main.CardItem(main.Card.COUPON, 24)
+        self.game._adopt_card(first)
+        self.game._adopt_card(second)
+        self._click(self._grid_pos(*self._item_cell(first)))
+        self._click(self._grid_pos(*self._item_cell(second)))
+        self.assertIs(self.game.actor(), first)
+        self.assertEqual(self.game.selected_targets(), [second])
+        cash = self.game.cash
+
+        self._press(main.pygame.K_b)
+
+        self.assertNotIn(first, self.game.cards)   # the actor was used up
+        self.assertIn(second, self.game.cards)     # the target is untouched
+        self.assertGreater(self.game.cash, cash)
+        self.assertTrue(self.game.is_item_selected(second))
+        self.assertIs(self.game.actor(), second)
+
+    def test_an_action_needs_exactly_one_target_or_nothing_happens(self):
+        # Every selected item after the action is a target (user request). An
+        # action that acts on a piece needs exactly one, so with two targets —
+        # or with none — pressing S does nothing at all and the action is kept.
+        action = main.ActionItem(main.Action.DEATH, 60)
+        self.game._adopt_action(action)
+        first = main.Block(2, 3, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        second = main.Block(4, 3, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
+        self.game.grid[(2, 3)] = first
+        self.game.grid[(4, 3)] = second
+        cash = self.game.cash
+
+        self._click(self._grid_pos(*(self.game.item_cell(action))))
+        self.assertFalse(self.game._apply_action())   # no target: nothing
+        self._click(self._grid_pos(2, 3))
+        self._click(self._grid_pos(4, 3))
+        self.assertEqual(len(self.game.selected_targets()), 2)
+
+        self.assertFalse(self.game._apply_action())   # two targets: nothing
+
+        self.assertIn(action, self.game.actions)      # not spent
+        self.assertEqual(self.game.cash, cash)
+        self.assertEqual(sorted(self.game.grid), [(2, 3), (4, 3)])
+        # Turning one of them off leaves exactly one target, and S applies it.
+        self._click(self._grid_pos(4, 3))
+        self.assertTrue(self.game._apply_action())
+        self.assertNotIn(action, self.game.actions)
+        self.assertGreater(self.game.cash, cash)      # Death pays for the block
+        self.assertNotIn((2, 3), self.game.grid)
+
+    def test_clicking_the_void_with_items_selected_deselects_everything(self):
+        # A click that is not on an item turns every switch off (user request).
+        shape = self._lay(self._component(main.Component.SHAPE, main.Shape.PIPE), 6, 2)
+        card = main.CardItem(main.Card.GARDEN, 36)
+        self.game._adopt_card(card)
+        self._click(self._grid_pos(6, 2))
+        self._click(self._grid_pos(*self._item_cell(card)))
+        self.assertEqual(len(self.game.selection), 2)
+
+        # The bar above the board is not board space at all.
+        self._click((main.MARBLE_BOX_COORDS[0] + 4,
+                     main.MARBLE_BOX_COORDS[1] - 4))
+
+        self.assertEqual(self.game.selection, [])
+        self.assertFalse(self.game.has_selected)
+        self.assertIsNone(self.game.selected_toolbox_item)
+        self.assertIsNone(self.game.selected_action)
+        self.assertIs(self.game.item_at_cell(self.game.item_cell(shape)), shape)
+
+    def test_a_moved_block_is_not_selectable_on_the_square_it_left(self):        # A block whose item was laid out on one square and built on another
         # answers only on the square it STANDS on (user report: "if I move the
         # start block to a different place, I can still select that block by
         # selecting the top left board square").

@@ -324,29 +324,31 @@ class PackShopTests(GameTestCase):
         return pack
 
     def test_the_shelf_holds_five_item_slots_and_three_packs(self):
-        items = [i for i in self.game.shop.items
-                 if getattr(i, "kind", None) != "pack"]
-        packs = [i for i in self.game.shop.items
-                 if getattr(i, "kind", None) == "pack"]
+        shelf = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) != "unit"]
+        items = [i for i in shelf if getattr(i, "kind", None) != "pack"]
+        packs = [i for i in shelf if getattr(i, "kind", None) == "pack"]
         self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
         self.assertEqual([i.col for i in packs],
                          [main.SHOP_PACK_COL + n
                           for n in range(main.SHOP_PACK_SLOTS)])
         self.assertTrue(all(i.kind == "pack" for i in packs))
-        # The Board Unit's own tile sits beside them and holds no item.
+        # The Board Unit is an offer of its own now — a locked item on the board
+        # bought by right-click (see items.BoardUnitOffer) — and it takes the
+        # slot right of the packs.
+        units = [i for i in self.game.shop.items
+                 if getattr(i, "kind", None) == "unit"]
+        self.assertEqual(len(units), 1)
         self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
         self.assertEqual(main.BOARD_UNIT_COL,
                          main.SHOP_PACK_COL + main.SHOP_PACK_SLOTS)
-        self.assertIsNone(self.game.shop.item_at(
-            self.game._board_unit_tile().center))
+        self.assertEqual((units[0].col, units[0].row),
+                         (main.BOARD_UNIT_COL, main.BOARD_UNIT_ROW))
 
-    def test_left_clicking_a_pack_buys_and_opens_it(self):
+    def test_right_clicking_a_pack_buys_and_opens_it(self):
         pack = self._place_pack(main.Pack.SHAPE, main.Pack.JUMBO)
         cash_before = self.game.cash
-        rect = pygame.Rect(self.game.shop.rect.x + pack.col * main.GRID_SIZE,
-                           self.game.shop.rect.y + pack.row * main.GRID_SIZE,
-                           main.GRID_SIZE, main.GRID_SIZE)
-        self._click(rect.center)
+        self._right_click(self._item_pos(pack))
         self.assertIs(self.game.open_pack, pack)
         self.assertEqual(self.game.cash, cash_before - pack.price)
         self.assertNotIn(pack, self.game.shop.items)  # bought off the shelf
@@ -676,7 +678,7 @@ class PackActionRuleTests(GameTestCase):
                            scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
         self.game.grid[(2, 2)] = block
         self.game.run_active = True
-        self.game._pick_action_subject(block)
+        self.game._toggle_item_selection(block)
         self.assertTrue(self.game._apply_action())
         self.assertIsNone(self.game.pending_pack_action)
         self.assertEqual(block.trigger_limit, 2)
@@ -698,7 +700,7 @@ class PackActionRuleTests(GameTestCase):
         # is a real placed block — see _action_deja_vu.)
         subject = main.Block(1, 1, scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
         self.game.grid[(1, 1)] = subject
-        self.game.selected_action_subject = subject
+        self.game._toggle_item_selection(subject)
         self.assertTrue(self.game._apply_action())
         self.assertEqual(subject.trigger_limit, 2)
         self.assertIsNone(self.game.pending_pack_action)

@@ -87,6 +87,21 @@ class BoardTests(unittest.TestCase):
         return (main.MARBLE_BOX_COORDS[0] + gx * main.GRID_SIZE + main.GRID_SIZE // 2,
                 main.MARBLE_BOX_COORDS[1] + gy * main.GRID_SIZE + main.GRID_SIZE // 2)
 
+    def _item_pos(self, item):
+        """A screen point on the board square ``item`` stands on."""
+        self.game.ensure_board_cells()
+        cell = self.game.item_cell(item)
+        self.assertIsNotNone(cell, f"{item!r} has no board square")
+        return self._cell_center(*cell)
+
+    def _right_click(self, pos):
+        event = mock.Mock()
+        event.type = main.pygame.MOUSEBUTTONDOWN
+        event.button = 3
+        with mock.patch("main.pygame.mouse.get_pos", return_value=pos), \
+             mock.patch("main.pygame.event.get", return_value=[event]):
+            self.game.handle_events()
+
     def test_default_game_starts_with_full_board_unlocked(self):
         g = self.game  # a plain Game() (tests construct one directly)
         self.assertEqual(len(g.unlocked_cells), main.GRID_WIDTH * main.GRID_HEIGHT)
@@ -163,31 +178,33 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.cash, 3)
         self.assertEqual(g.board_units, 2)
 
-    def test_shop_board_unit_tile_is_always_buyable(self):
+    def test_the_board_unit_offer_is_always_buyable(self):
         g = self._start_locked_game()
         g.cash = 60
-        # The fixed tile sits in the rightmost cell of the shop's top row.
-        tile = g._board_unit_tile()
-        self.assertEqual(tile.centerx,
-                         g.shop.rect.x + main.BOARD_UNIT_COL * main.GRID_SIZE
-                         + main.GRID_SIZE // 2)
-        self._click(tile.center)
+        # The Board Unit is an offer like any other: a locked item on the board,
+        # unlocked by right-clicking it (user request).
+        tile = g.shop.items[-1]
+        self.assertEqual(getattr(tile, "kind", None), "unit")
+        self._right_click(self._item_pos(tile))
         self.assertEqual(g.board_units, 1)
         self.assertEqual(g.cash, 52)
-        # It survives a shop refresh (it is always offered, not a random slot).
+        # It survives a shop refresh (it is always offered, not a random slot),
+        # and stays on the board after being bought.
         g._refresh_shop()  # costs $20, so top the cash back up first
         g.cash = 60
-        self._click(tile.center)
+        self.assertIn(tile, g.shop.items)
+        self._right_click(self._item_pos(tile))
         self.assertEqual(g.board_units, 2)
         self.assertEqual(g.cash, 52)
 
     def test_shop_layout_items_and_packs_share_the_offer_row(self):
         g = self._start_locked_game()
         g.shop.refresh()
+        shelf = [i for i in g.shop.items
+                 if getattr(i, "kind", None) != "unit"]
         # The offer row is the shelf's "any item" slots: five of them, from the
         # second column, each one offer of a drawn kind (see Pack.SHELF_WEIGHTS).
-        items = [i for i in g.shop.items
-                 if getattr(i, "kind", None) != "pack"]
+        items = [i for i in shelf if getattr(i, "kind", None) != "pack"]
         self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
         self.assertEqual([i.row for i in items], [main.SHOP_ITEM_ROW] * 5)
         self.assertTrue(all(
@@ -197,8 +214,8 @@ class BoardTests(unittest.TestCase):
                                           "block", "card", "action")
             for i in items))
         # The three packs sit on the same row, to the right of the items and
-        # left of the Board Unit (the bar has room for one row of tiles).
-        packs = [i for i in g.shop.items if getattr(i, "kind", None) == "pack"]
+        # left of the Board Unit (the shelf has room for one row of tiles).
+        packs = [i for i in shelf if getattr(i, "kind", None) == "pack"]
         self.assertEqual([i.col for i in packs],
                          [main.SHOP_PACK_COL + n
                           for n in range(main.SHOP_PACK_SLOTS)])
@@ -206,17 +223,13 @@ class BoardTests(unittest.TestCase):
         # The row under the offers carries the prices, and stays empty of stock.
         self.assertEqual([i for i in g.shop.items
                           if i.row == main.SHOP_ITEM_ROW + 1], [])
-        # The Board Unit shares the offer row, right of the packs, and its cell
-        # holds no shop item.
-        tile = g._board_unit_tile()
-        self.assertEqual((tile.x - g.shop.rect.x) // main.GRID_SIZE,
-                         main.BOARD_UNIT_COL)
-        self.assertEqual((tile.y - g.shop.rect.y) // main.GRID_SIZE,
-                         main.BOARD_UNIT_ROW)
+        # The Board Unit shares the offer row, right of the packs.
+        unit = g.shop.items[-1]
+        self.assertEqual((unit.col, unit.row),
+                         (main.BOARD_UNIT_COL, main.BOARD_UNIT_ROW))
         self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
         self.assertEqual(main.BOARD_UNIT_COL,
                          main.SHOP_PACK_COL + main.SHOP_PACK_SLOTS)
-        self.assertIsNone(g.shop.item_at((tile.centerx, tile.centery)))
 
     def test_clicking_locked_square_spends_a_board_unit(self):
         g = self._start_locked_game()
@@ -235,9 +248,11 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.board_units, 0)
         self.assertTrue(g.shop_message)  # a "buy a Board Unit" hint
 
-    def test_clicking_locked_square_unlocks_even_with_a_block_in_hand(self):
-        # A locked square is always an "unlock this" click: holding a block must
-        # not shadow it, or the player could never buy the board open.
+    def test_clicking_a_locked_square_with_a_block_in_hand_deselects(self):
+        # A click on anything that is not an item turns every switch off while
+        # something is selected (user request), and a locked square is no
+        # exception — even with a Board Unit owned. The next click, with nothing
+        # selected, is the one that unlocks it.
         g = self._start_locked_game()
         g.cash = 60
         g._buy_board_unit()
@@ -245,10 +260,14 @@ class BoardTests(unittest.TestCase):
         g._equip_block(block)
         self.assertTrue(g.has_selected)
         self._click(self._cell_center(0, 0))
+        self.assertTrue(g.is_cell_locked(0, 0))  # not unlocked
+        self.assertEqual(g.board_units, 1)       # unit kept
+        self.assertFalse(g.has_selected)         # the block was deselected
+        # With nothing selected the same click unlocks.
+        self._click(self._cell_center(0, 0))
         self.assertFalse(g.is_cell_locked(0, 0))
         self.assertEqual(g.board_units, 0)
         self.assertNotIn((0, 0), g.grid)  # nothing was put down
-        self.assertTrue(g.has_selected)   # the block stays in hand
 
     def test_a_bought_offer_is_laid_out_on_the_board_not_on_its_shop_cell(self):
         # An offer keeps the SHOP cell it was drawn in (its col/row) after it is
@@ -280,12 +299,17 @@ class BoardTests(unittest.TestCase):
         g.toolbox.add(block)
         g._equip_block(block)
         self.assertTrue(g.has_selected)
-        # Clicking a locked square must NOT place the block.
+        # Clicking a locked square must NOT place the block (and, because the
+        # block is selected, it deselects instead — see
+        # test_clicking_a_locked_square_with_a_block_in_hand_deselects).
         self._click(self._cell_center(0, 0))
         self.assertNotIn((0, 0), g.grid)
-        self.assertTrue(g.has_selected)
-        # Clicking an unlocked square places it normally.
-        cell = self._start_cell()
+        # Clicking an unlocked square places it normally. (The block's own square
+        # is not usable: a click on an item is that item's switch, see
+        # _toggle_item_selection, so a free square is picked.)
+        g._equip_block(block)
+        cell = next(c for c in sorted(self._start_region())
+                    if g.item_at_cell(c) is None)
         self._click(self._cell_center(*cell))
         self.assertIn(cell, g.grid)
         self.assertEqual(g.grid[cell].shape, main.Shape.RECT)

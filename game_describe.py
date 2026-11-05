@@ -299,6 +299,16 @@ class DescribeMixin:
                             f"{resource_point_label(item.scorer)} point{plural} "
                             f"at once")),
             ]
+        if getattr(item, "kind", None) == "unit":
+            # The Board Unit is not an item: it is one square of board the
+            # player can open (see Game._buy_board_unit).
+            return [
+                ("Board Unit",
+                 ("Buy one to unlock a locked square: the marble can travel "
+                  "there, and items can be laid out on it.")),
+                ("In hand", f"{self.board_units} unit"
+                            f"{'' if self.board_units == 1 else 's'}"),
+            ]
         if getattr(item, "kind", None) == "token":
             # A token is a whole kept block, so it describes itself the way that
             # block did on the board (shape, effects, scorer), plus when it
@@ -461,15 +471,29 @@ class DescribeMixin:
     def _action_hint(self, item, source):
         """A short hint telling the player how to act on the hovered item."""
         if source == "shop":
-            # A pack is bought to be opened, so the hint says so rather than
-            # offering Hoard's hold (a pack that is opened leaves the shelf
-            # anyway — see _open_pack).
-            if getattr(item, "kind", None) == "pack":
-                return f"Left-click to buy and open ({Pack.size_description(item.size)})"
-            if self._has_card(Card.HOARD):
-                return ("Left-click to buy | Right-click to hold it in place "
-                        "across rerolls")
-            return "Left-click to buy"
+            # A shop offer lies on the board like any other item and is BOUGHT by
+            # right-clicking it (user request); its price is only shown here, on
+            # hover (see ui.info_layout), so the hint is where the player reads
+            # it.
+            hint = None
+            if getattr(item, "kind", None) == "unit":
+                in_hand = getattr(self, "board_units", 0)
+                ready = (f"{in_hand} in hand — click a locked square to open it"
+                         if in_hand else
+                         "then click a locked square to open it")
+                hint = f"Right-click to buy for ${self._buy_price(item)} — {ready}"
+            elif getattr(item, "kind", None) == "pack":
+                hint = (f"Right-click to buy and open for ${self._buy_price(item)} "
+                        f"({Pack.size_description(item.size)})")
+            else:
+                hint = (f"Right-click to buy for ${self._buy_price(item)} | "
+                        f"click to pick it up and move it")
+            # The Hoard card's middle-click pins an offer in place, and the only
+            # thing that says so while the tile itself wears the unbought lock is
+            # this line (see Game._toggle_shop_lock).
+            if self.shop.slot_key(item) in self.shop.locked:
+                hint = f"Held through the next refresh — middle-click to release | {hint}"
+            return hint
         if source == "pack":
             # The open pack's overlay: the hovered OPTION is one click away, and
             # it is named by its own kind — a pack deals the same goods the
@@ -488,7 +512,7 @@ class DescribeMixin:
             if pack is not None and pack.remaining > 0:
                 plural = "" if pack.remaining == 1 else "s"
                 hint += (f" ({pack.remaining} pick{plural} left) | "
-                         f"Right-click to leave the rest")
+                         f"SKIP to leave the rest")
             return hint
         if source == "tokens":
             if item.fires_at_end:
@@ -507,7 +531,7 @@ class DescribeMixin:
             if (isinstance(item, Block)
                     or getattr(item, "placed_cell", None) is not None):
                 hint = ("Click to pick the block up and move it "
-                        "(right-click it to erase it)")
+                        "(V takes every block up)")
             elif kind == "block":
                 hint = ("Click to select it, then click a square to build it "
                         "| D to disassemble")

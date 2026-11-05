@@ -8,71 +8,46 @@ import random
 
 import pygame
 
-import components
+import rolling
 from components import (
-    CARD_SCORERS,
-    COMPONENT_PRICES,
-    DEFAULT_DIFFICULTY,
-    MAGNITUDE_ATAN_LIMIT,
-    MAGNITUDE_MAX_STEPS,
-    MAGNITUDE_SCALE,
-    MAGNITUDE_STEP_DIVISOR,
-    MAGNITUDES,
-    MATCH_GROUPS,
-    PIPE_GROUP_SHAPES,
     RESOURCE_PACK_FACTOR,
-    RESOURCE_THRESHOLD,
     Action,
     Card,
     Component,
-    Difficulty,
     Effect,
-    MarbleType,
     Pack,
-    Rarity,
     Scorer,
     Shape,
-    Trial,
     block_price_for,
-    card_description,
-    card_price_for,
-    card_scorer,
-    effect_component_price,
-    effect_description,
-    effect_magnitude_floor,
     magnitude_precision,
-    magnitude_step,
-    match_group_card,
-    match_group_card_meta,
-    match_group_label,
-    match_group_trigger,
     pack_price,
-    paired_shape,
-    points_text,
     resource_points_for,
-    scorer_component_price,
-    scorer_description,
-    scorer_magnitude_floor,
-    shape_description,
 )
 from config import *
-import rolling
-from rolling import *
 from items import (
     ActionItem,
     BlockItem,
+    BoardUnitOffer,
     ItemPack,
     ResourceOption,
     make_card_item,
     offer_key,
 )
-
-
+from rolling import *
 
 
 class Shop:
-    """A grid-based shop: two random blocks plus two of each component type."""
+    """The shelf: the offers the player may buy, each an item lying on the board.
+
+    There is no shop PANEL any more (user request: "completely remove the shop's
+    box"): the offers stand on unlocked board squares, are bought by
+    right-clicking them and are drawn with the rest of the board's items. What
+    is left here is the shelf's LOGICAL grid — how many offers a refresh deals,
+    which slot each one came from and where a restored save's offers are
+    seated (see refresh / reseat / slot_key).
+    """
     def __init__(self, rect, game=None):
+        # The logical grid only: no panel is drawn at these coordinates.
         self.rect = pygame.Rect(rect)
         self.cols = rect[2] // GRID_SIZE
         self.rows = rect[3] // GRID_SIZE
@@ -155,6 +130,14 @@ class Shop:
         self.locked = self.locked[:self._lock_cap()]
         held_offers = {self.slot_key(item): item for item in self.items
                        if self.slot_key(item) in self.locked}
+        # The Board Unit offer rides with the shelf: it is always on offer (see
+        # items.BoardUnitOffer), so a refresh answers the same board-expansion
+        # question the first shelf did. The offer the player already has is KEPT
+        # rather than replaced, so the square it was moved to is the square it
+        # stays on (it is put back at the end of this method).
+        units = [item for item in self.items
+                 if getattr(item, "kind", None) == "unit"]
+        unit = units[0] if units else BoardUnitOffer(BOARD_UNIT_PRICE)
         self.items = []
         # SHOP_ITEM_SLOTS "any item" offers along the shelf's top row: each is
         # one component, block, card or action, drawn uniformly and kept apart
@@ -223,6 +206,10 @@ class Shop:
             kept = held_offers.get(self.slot_key(item))
             if kept is not None:
                 self.items[index] = kept
+        # ...and last, the Board Unit offer captured at the top, in the last slot
+        # the layout has.
+        unit.col, unit.row = BOARD_UNIT_COL, BOARD_UNIT_ROW
+        self.items.append(unit)
 
     def _bonus_cells(self):
         """The cells an offer may take past the two standard rows, in order.
@@ -260,11 +247,16 @@ class Shop:
         item_col = 1
         pack_col = SHOP_PACK_COL
         for item in self.items:
-            is_pack = getattr(item, "kind", None) == "pack"
-            if is_pack and pack_col < SHOP_PACK_COL + SHOP_PACK_SLOTS:
+            kind = getattr(item, "kind", None)
+            if kind == "unit":
+                # The Board Unit offer's cell is FIXED (see Shop.refresh), so it
+                # goes back to the slot right of the packs and takes no other
+                # cell — a save can never push it into a bonus cell.
+                cell = (BOARD_UNIT_COL, BOARD_UNIT_ROW)
+            elif kind == "pack" and pack_col < SHOP_PACK_COL + SHOP_PACK_SLOTS:
                 cell = (pack_col, SHOP_PACK_ROW)
                 pack_col += 1
-            elif not is_pack and item_col <= SHOP_ITEM_SLOTS:
+            elif kind != "pack" and item_col <= SHOP_ITEM_SLOTS:
                 cell = (item_col, SHOP_ITEM_ROW)
                 item_col += 1
             else:
@@ -555,13 +547,27 @@ class Shop:
                 return option
         return option
 
-    def item_at(self, pos):
-        """Return the shop item occupying a screen position, or None."""
-        if not self.rect.collidepoint(pos):
+    def offer_at_cell(self, cell):
+        """The offer lying on a board square, or None (see Game.ensure_board_cells).
+
+        Offers are ITEMS on the board now (user request: "make each shop option
+        an item ... allow shop items to be selected and moved around"), so the
+        square — not a panel cell — is where an offer is found.
+        """
+        if cell is None:
             return None
-        gx = (pos[0] - self.rect.x) // GRID_SIZE
-        gy = (pos[1] - self.rect.y) // GRID_SIZE
+        cell = tuple(cell)
         for item in self.items:
-            if item.col == gx and item.row == gy:
+            if getattr(item, "board_cell", None) == cell:
                 return item
         return None
+
+    def is_offer(self, item):
+        """True when ``item`` is one of the shelf's offers."""
+        return any(item is offer for offer in self.items)
+
+    def item_at(self, pos):
+        """The offer lying on the board square under a screen position, or None."""
+        if self.game is None:
+            return None
+        return self.offer_at_cell(self.game.screen_to_cell(pos))

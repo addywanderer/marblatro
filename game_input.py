@@ -367,10 +367,9 @@ class InputMixin:
                             continue
                         if (self.run_complete and self.awaiting_after_run):
                             self._retry_run()
-                        # Every owned item stands on the board (see
-                        # Game.ensure_board_cells): a click on a square is a
-                        # click on whatever item is lying there.
-                        item = self.shop.item_at(mouse_pos)
+                        # Every item on the board — the player's, and the shop's
+                        # locked offers (see Game.ensure_board_cells) — is found
+                        # by the square it lies on.
                         cell = (grid_x, grid_y) if inside_grid else None
                         board_item = self.item_at_cell(cell) if cell else None
                         # A press on board space that holds no item starts a
@@ -399,34 +398,15 @@ class InputMixin:
                             # The action-upgrade button upgrades the selected action.
                             keep_selection = True
                             self._upgrade_action()
-                        elif item is not None:
-                            self._buy_shop_item(item)
-                        elif self._board_unit_tile().collidepoint(mouse_pos):
-                            # The shop's fixed Board Unit tile: buy an expansion
-                            # to spend on any locked board square.
-                            keep_selection = True
-                            self._buy_board_unit()
-                        elif (self.selected_action is not None
-                                and self.is_action_target(board_item)):
-                            # An armed action and a click on a block or card: the
-                            # click means both things it could mean. The item
-                            # flips its own switch (every item is a switch — see
-                            # _toggle_item_selection — so an armed action never
-                            # stops the player selecting anything), and the
-                            # action takes it as its subject for S.
-                            keep_selection = True
-                            self._toggle_item_selection(board_item)
-                            self._pick_action_subject(board_item)
-                        elif SHOP_REFRESH_BUTTON_RECT.collidepoint(mouse_pos):
-                            self._refresh_shop()
-                        elif cell is not None and self.is_cell_locked(*cell):
-                            # A click on a LOCKED square always means the same
-                            # thing: open it. With a Board Unit in hand the unit
-                            # is spent and the square becomes playable (the
-                            # marble can travel there, and items can be laid out
-                            # on it); without one the click explains where units
-                            # come from. The player can therefore always unlock
-                            # a square — whatever they happen to be holding.
+                        elif (cell is not None and self.is_cell_locked(*cell)
+                                and not self.selection
+                                and self.selected_toolbox_item is None):
+                            # With NOTHING selected, a click on a locked square
+                            # means "open it": with a Board Unit in hand the unit
+                            # is spent and the square becomes playable. While an
+                            # item IS selected the same click is not an unlock at
+                            # all — it deselects everything, like any other click
+                            # that is not on an item (user request).
                             keep_selection = True
                             if self.board_units > 0:
                                 self._unlock_cell(*cell)
@@ -443,29 +423,26 @@ class InputMixin:
                                 self._set_shop_message(
                                     f"Locked square — buy a Board Unit "
                                     f"(${self._board_unit_price()}) to expand it")
-                        elif board_item is not None and (
-                                not self.in_hand
-                                or not (isinstance(self.selected_toolbox_item, Block)
-                                        or getattr(self.selected_toolbox_item,
-                                                   "kind", None) == "block")):
-                            # Clicking an item on the board flips that item's own
-                            # switch (see _toggle_item_selection): the first click
-                            # turns it on, a second one turns it off, and no
-                            # other item changes. A block is taken in hand to be
-                            # moved; a component joins the next assembly; a card
-                            # or an action is held too, so a click on a square
-                            # moves it.
-                            #
-                            # A BLOCK in hand still goes down on an occupied
-                            # square (it swaps the block out, see
-                            # _place_block_at); anything else in hand selects
-                            # what it clicked instead of moving onto it, so two
-                            # pieces can be picked for one assembly.
+                        elif board_item is not None:
+                            # Clicking an item flips that item's own switch (see
+                            # _toggle_item_selection): the first click turns it
+                            # on, a second one turns it off, and no other item
+                            # changes. The FIRST item switched on is the actor —
+                            # the one that gets used up — and every item switched
+                            # on after it is one of its targets.
                             keep_selection = True
                             self._toggle_item_selection(board_item)
-                        else:
+                        elif cell is not None and not self.is_cell_locked(*cell):
+                            # An empty UNLOCKED square is the "put it down"
+                            # gesture: a block is built there, anything else is
+                            # moved there (see _place_block_at).
                             self.drawing = True
                             keep_selection = inside_grid and self.in_hand
+                        else:
+                            # Anything else that is not an item — the void
+                            # around the board, or a locked square while an item
+                            # is selected — turns every switch off.
+                            keep_selection = False
                         # A left-click on empty space is the one gesture that
                         # turns EVERY switch off at once (see
                         # _clear_toolbox_selection): the selected items and the
@@ -475,20 +452,21 @@ class InputMixin:
                                 and (self.selection
                                      or self.selected_toolbox_item is not None)):
                             self._clear_toolbox_selection()
-                # Right-clicking a SHOP OPTION is the Hoard whole card's
-                # business: it holds that offer in place across rerolls (and
-                # says so when it cannot — no Hoard, or the cap is full).
-                # Anywhere else, right-click erases blocks; the info box is
-                # hover-driven now.
-                self.erasing = False
+                # Right-click BUYS the shop offer under the cursor (user request:
+                # "Buy a shop item by right-clicking on it"). Every offer is an
+                # item lying on the board now, so this is a plain lookup: an
+                # owned item (or empty space) does nothing.
                 if (event.button == 3 and not self.game_over
-                        and self.open_pack is not None):
-                    # Right-clicking anywhere while a pack is open leaves the
-                    # options that are still on the table (see _click_pack).
-                    self._close_pack()
-                elif (event.button == 3 and not self.game_over
-                        and not self._toggle_shop_lock(mouse_pos)):
-                    self.erasing = True
+                        and self.open_pack is None and inside_grid):
+                    offer = self.shop.offer_at_cell((grid_x, grid_y))
+                    if offer is not None:
+                        self._buy_shop_item(offer)
+                # Middle-click is the Hoard card's: it holds an offer in place
+                # through the next refresh (see _toggle_shop_lock). Right-click
+                # is the buy click now, so the hold needed a button of its own.
+                elif (event.button == 2 and not self.game_over
+                      and self.open_pack is None and inside_grid):
+                    self._toggle_shop_lock(mouse_pos)
 
             elif event.type == pygame.MOUSEMOTION:
                 # Dragging the view: the board follows the cursor (see
@@ -509,8 +487,6 @@ class InputMixin:
                 if event.button == 1:
                     self.drawing = False
                     self.panning = False
-                elif event.button == 3:
-                    self.erasing = False
 
         if inside_grid and not self.pan_moved:
             # Blocks can only be built on unlocked squares (see
@@ -519,9 +495,7 @@ class InputMixin:
             if (self.drawing and self.in_hand
                     and not self.is_cell_locked(grid_x, grid_y)):
                 self._place_block_at(grid_x, grid_y)
-            elif self.erasing:
-                self._erase_block_at(grid_x, grid_y)
-            if (self.drawing or self.erasing):
+            if self.drawing:
                 # Building/editing the board keeps the current run's trial.
                 self.reset_run(False)
                 self.run_active = False

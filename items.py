@@ -5,6 +5,7 @@ magnitudes it was rolled with — plus the labels the info box and the shop prin
 for it. The rules that use them live on Game.
 """
 
+import copy as _copy
 import math
 import random
 
@@ -179,6 +180,26 @@ class ActionItem:
         self.name = Action.name(value)
 
 
+def owned_copy(offer):
+    """A fresh item carrying exactly what a shop offer sells.
+
+    A component or a repeatable block is bought again and again from the SAME
+    shelf slot (see Game._buy_shop_item: the offer is not consumed, its price
+    just rises), so the offer must stay on the shelf while the player owns
+    something of their own. Handing the offer itself to the inventory made the
+    shelf and the player the same object, so "two copies" of one item were one
+    object listed twice: they shared a single board square and a single
+    selection switch, the second purchase added nothing to look at, and selling
+    or assembling one copy left the other behind as a ghost (user report:
+    glitches with several copies of the same item).
+
+    Everything a copied item carries is its own — its rolled magnitudes, its
+    effects, its pairing numbers — so a copy behaves exactly like the offer it
+    came from, without ever being the same thing.
+    """
+    return _copy.deepcopy(offer)
+
+
 class ResourceOption:
     """One option of a resource pack: points of one scorer, ready to bank.
 
@@ -196,6 +217,25 @@ class ResourceOption:
         self.points = points    # what keeping it banks
         self.name = f"{points_text(points)} {resource_point_label(scorer)} point" \
                     f"{'' if points == 1 else 's'}"
+
+
+class BoardUnitOffer:
+    """The shelf's Board Unit: a locked tile that buys one square of board.
+
+    A Board Unit is not an item the player owns — it is counted in
+    ``Game.board_units`` and spent by clicking a locked square — so the shelf's
+    tile never leaves the shelf (see Game._buy_shop_item). It stands on a board
+    square like every other offer, which is what lets the player buy it by
+    right-clicking it where it lies.
+    """
+    kind = "unit"
+
+    def __init__(self, price, col=0, row=0):
+        self.price = price
+        self.col = col      # the shelf slot it was dealt into (see Shop.reseat)
+        self.row = row
+        self.board_cell = None   # the board square the tile lies on
+        self.name = "Board Unit"
 
 
 class ItemPack:
@@ -217,6 +257,9 @@ class ItemPack:
         self.price = price
         self.col = col
         self.row = row
+        # The board square the pack lies on while it is on the shelf (see
+        # Game.ensure_board_cells).
+        self.board_cell = None
         # How many options the player keeps (from the size), and how many they
         # already have: a pack saved mid-choice comes back with its count.
         self.keep = Pack.keep(size) if keep is None else keep
