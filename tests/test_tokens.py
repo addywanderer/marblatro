@@ -25,11 +25,13 @@ class TokensTests(GameTestCase):
 
     def test_tokens_stand_on_board_squares_like_everything_else(self):
         # A token is owned, so it lies on a board square of its own (see
-        # Game.ensure_board_cells), which is where the hit test and the sidebar
+        # Game._on_item_gained), which is where the hit test and the sidebar
         # find it.
         self.game.toolbox.items.clear()
         self.game.tokens = [_token(main.Scorer.CASH, 15, runs_left=2),
                             _token(main.Scorer.MULT_ADD, 4, runs_left=2)]
+        for token in self.game.tokens:
+            self.game._on_item_gained(token)
         first = self.game._token_rect(0)
         second = self.game._token_rect(1)
 
@@ -199,6 +201,7 @@ class TokensTests(GameTestCase):
         # stored block.
         token = _token(main.Scorer.CASH, 15, x=3, y=4, runs_left=2)
         self.game.tokens = [token]
+        self.game._on_item_gained(token)
         rect = self.game._token_rect(0)
 
         visual = main.ui._token_visual(token, rect)

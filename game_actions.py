@@ -781,6 +781,7 @@ class ActionsMixin:
         self._forget_item(subject)
         self._delete_pairing_partners(subject)
         self.tokens.append(token)
+        self._on_item_gained(token)
         left = "permanently" if runs_left is None else f"for {runs_left} run(s)"
         self._set_shop_message(
             f"{action.name} kept {Scorer.name(token.scorer)} from {name} {left}")

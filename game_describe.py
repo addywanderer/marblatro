@@ -494,6 +494,14 @@ class DescribeMixin:
             if self.shop.slot_key(item) in self.shop.locked:
                 hint = f"Held through the next refresh — middle-click to release | {hint}"
             return hint
+        if source == "deck":
+            # The deck overlay's tiles: these are the items waiting in the deck
+            # (or the ones already drawn), so the hint says where the item stands
+            # and how the overlay closes.
+            drawn = self.item_cell(item) is not None
+            where = ("drawn onto the board this run" if drawn
+                     else "in the deck — the next draw may deal it")
+            return f"{where} | click anywhere to close the deck"
         if source == "pack":
             # The open pack's overlay: the hovered OPTION is one click away, and
             # it is named by its own kind — a pack deals the same goods the

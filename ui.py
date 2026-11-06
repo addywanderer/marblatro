@@ -32,6 +32,8 @@ BAR_COLOR = _ui_source.BAR_COLOR
 BAR_TEXT_X = _ui_source.BAR_TEXT_X
 BAR_TEXT_Y = _ui_source.BAR_TEXT_Y
 BAR_TEXT_WIDTH = _ui_source.BAR_TEXT_WIDTH
+DECK_BUTTON_RECT = _ui_source.DECK_BUTTON_RECT
+DECK_OVERLAY_BUTTON_RECT = _ui_source.DECK_OVERLAY_BUTTON_RECT
 BLACK = _ui_source.BLACK
 BLOCK_INTERIOR_COLOR = _ui_source.BLOCK_INTERIOR_COLOR
 BLUE = _ui_source.BLUE
@@ -383,6 +385,22 @@ def draw_board(game, border_color=(30, 30, 30)):
     pygame.draw.rect(game.screen, border_color, view, BORD_WIDTH)
 
 
+def background_scroll(game):
+    """The blit offset that makes the tiled background move with the board.
+
+    The trial tessellation is drawn behind everything (see draw_background) and
+    again on the locked squares (see _draw_locked_backdrop). It used to sit still
+    while the board was dragged, which made the world slide under a fixed pattern;
+    the pattern now scrolls WITH the board — the same place it moves, pixel for
+    pixel (user request: "make the background also move, matching the same place
+    the board moves"). The pattern repeats every TILE_SIZE, so only the offset
+    inside one tile matters, and it is expressed as the negative of the camera:
+    the camera moves opposite the board (see Game.pan_board).
+    """
+    camera = getattr(game, "camera", (0, 0))
+    return (-camera[0] % TILE_SIZE, -camera[1] % TILE_SIZE)
+
+
 def _draw_locked_backdrop(game, view):
     """Fill the window with the background's pattern: the locked squares' look.
 
@@ -397,9 +415,14 @@ def _draw_locked_backdrop(game, view):
     if source is None:
         pygame.draw.rect(game.screen, BG_COLOR, view)
         return
-    # Blitted from the SCREEN's own origin, so the pattern behind the board and
-    # the pattern on the locked squares are the same pattern, in phase.
-    game.screen.blit(_tile_background(source, value), view.topleft, view)
+    # Drawn from the same offset as the screen's own background, so the pattern
+    # behind the board and the pattern on the locked squares are the same
+    # pattern, in phase — and both of them scroll with the board.
+    offset = background_scroll(game)
+    game.screen.blit(_tile_background(source, value),
+                     (view.left + offset[0] - TILE_SIZE,
+                      view.top + offset[1] - TILE_SIZE),
+                     view)
 
 
 def draw_shop_item(screen, item, rect):
@@ -1475,19 +1498,25 @@ _TILE_BACKGROUND_CACHE = {}
 
 
 def _tile_background(source, value):
-    """The cached full-screen background for a modifier: its tile edge to edge.
+    """The cached tiled background for a modifier: its tile edge to edge.
 
     Built once per modifier (the screen never changes size) instead of every
     frame, because it is 15x10 tile blits. The tile size divides the screen, so
     no partial tile is left at the edges and no shading pass is needed on top:
     the tessellation IS the background (the panels drawn over it echo it in a
     lighter shade — see panel_fill).
+
+    It is built one tile WIDER and TALLER than the screen, so the whole screen can
+    still be covered by one blit when the pattern is scrolled by up to a tile (see
+    background_scroll).
     """
     background = _TILE_BACKGROUND_CACHE.get((source, value))
     if background is None:
-        background = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-        for y in range(0, SCREEN_HEIGHT, TILE_SIZE):
-            for x in range(0, SCREEN_WIDTH, TILE_SIZE):
+        width = SCREEN_WIDTH + TILE_SIZE
+        height = SCREEN_HEIGHT + TILE_SIZE
+        background = pygame.Surface((width, height))
+        for y in range(0, height, TILE_SIZE):
+            for x in range(0, width, TILE_SIZE):
                 draw_tile(background, source, value,
                           pygame.Rect(x, y, TILE_SIZE, TILE_SIZE))
         _TILE_BACKGROUND_CACHE[(source, value)] = background
@@ -1517,12 +1546,18 @@ def draw_background(game):
     collection and other full-screen tabs, which fill their own background) it
     is the plain background colour. This is one of the two places a tile is ever
     drawn — see draw_tile.
+
+    The tessellation scrolls with the board (see background_scroll), so dragging
+    the board carries the pattern along with it instead of sliding the world
+    under a fixed backdrop.
     """
     source, value = game.tile_source
     if source is None:
         game.screen.fill(BG_COLOR)
         return
-    game.screen.blit(_tile_background(source, value), (0, 0))
+    offset = background_scroll(game)
+    game.screen.blit(_tile_background(source, value),
+                     (offset[0] - TILE_SIZE, offset[1] - TILE_SIZE))
 
 
 def _build_whole_card_art(card):
@@ -3364,8 +3399,9 @@ def draw(game):
     if (inside_grid and game.in_hand
             and not game.is_cell_locked(grid_x, grid_y)):
         held = game.selected_toolbox_item
-        if not (isinstance(held, Block) or getattr(held, "kind", None) == "block"):
-            # Any other item is MOVED to the cell as itself (see Game._move_item_to), so
+        if not game.in_hand_is_block():
+            # Any other item — a component, a card, an action, a shop offer of
+            # any kind — is MOVED to the cell as itself (see _move_item_to), so
             # the preview is the item in the cell, not a block built from it.
             cell = game._board_item_rect(grid_x, grid_y)
             draw_shop_item(game.screen, held, cell)
@@ -3423,6 +3459,11 @@ def draw(game):
     draw_pack_overlay(game)
     draw_sidebar(game)
     draw_game_over(game)
+    # The DECK overlay is a look at everything the player owns: it covers the
+    # play screen (and the pack overlay's own panel) until it is closed, and the
+    # game-over screen draws over it, so a finished game still reads clearly.
+    if game.deck_open() and not game.game_over:
+        draw_deck_overlay(game)
     # The bottom popups (achievement unlocks, collection discoveries) draw
     # last so they sit on top of the HUD.
     draw_popups(game)
@@ -3861,6 +3902,104 @@ def draw_bar_readouts(game):
         for line in lines:
             game.screen.blit(line, (rect.x, y))
             y += line.get_height() + 1
+    draw_deck_button(game)
+
+
+def deck_button_label(game):
+    """The text on the DECK button: how many items the deck holds, and the draw.
+
+    The deck is the player's whole collection (user request: "a button in the top
+    bar that shows the player's whole deck"), so the button counts every item they
+    own and reports how many of them the current hand was drawn from.
+    """
+    total = len(game.owned_items())
+    drawn = len(game.hand_items())
+    return f"DECK {total} ({drawn} drawn)"
+
+
+def draw_deck_button(game):
+    """Draw the bar's DECK button (see Game.toggle_deck).
+
+    It is the way into the deck overlay: the board shows only the hand, so the
+    player needs one place to see what they actually own.
+    """
+    rect = DECK_BUTTON_RECT
+    hovered = rect.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(game.screen, (52, 60, 92) if not hovered else (74, 86, 132),
+                     rect, border_radius=4)
+    pygame.draw.rect(game.screen, WHITE, rect, 1, border_radius=4)
+    label = game.tiny_font.render(deck_button_label(game), True, WHITE)
+    game.screen.blit(label, label.get_rect(center=rect.center))
+
+
+def deck_grid(game=None):
+    """The (columns, rows, cell size) the deck overlay lays its items out in."""
+    per_row = 12
+    rows = 6
+    return per_row, rows, GRID_SIZE
+
+
+def deck_panel_rect(game=None):
+    """The panel the deck overlay draws its items on."""
+    columns, rows, size = deck_grid(game)
+    width = columns * size + 32
+    height = rows * size + 74
+    return pygame.Rect((SCREEN_WIDTH - width) // 2, 70, width, height)
+
+
+def deck_overlay_rect(game=None):
+    """The panel the deck overlay draws its items on (see deck_panel_rect)."""
+    return deck_panel_rect(game)
+
+
+def deck_item_rect(index):
+    """The screen rect of the deck overlay's ``index``th item."""
+    columns, rows, size = deck_grid()
+    panel = deck_panel_rect()
+    column = index % columns
+    row = index // columns
+    return pygame.Rect(panel.x + 16 + column * size,
+                       panel.y + 56 + row * size, size, size)
+
+
+def draw_deck_overlay(game):
+    """Draw the player's whole deck: every item they own, drawn once.
+
+    The HAND — the items drawn onto the board for this run — is framed green, so
+    the overlay answers both questions at once: what the deck holds, and which
+    part of it the player is playing with (see Game.deck_items / hand_items).
+    """
+    screen = game.screen
+    shade = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
+    shade.fill((0, 0, 0, 170))
+    screen.blit(shade, (0, 0))
+    panel = deck_overlay_rect(game)
+    pygame.draw.rect(screen, BAR_COLOR, panel, border_radius=6)
+    pygame.draw.rect(screen, WHITE, panel, 2, border_radius=6)
+    items = game.deck_overlay_items()
+    drawn = {id(item) for item in game.hand_items()}
+    title = game.font.render(f"DECK — {len(items)} item(s)", True, WHITE)
+    screen.blit(title, (panel.x + 16, panel.y + 8))
+    hint = game.tiny_font.render(
+        f"{len(drawn)} drawn onto the board this run — click anywhere to close",
+        True, YELLOW)
+    screen.blit(hint, (panel.x + 16, panel.y + 8 + title.get_height() + 2))
+    for index, item in enumerate(items):
+        rect = deck_item_rect(index)
+        if not panel.collidepoint(rect.topleft) or not rect.colliderect(panel):
+            break                      # more items than the overlay has slots
+        draw_shop_item(screen, item, rect)
+        if id(item) in drawn:
+            pygame.draw.rect(screen, GREEN, rect, 2)
+        else:
+            wash = pygame.Surface(rect.size, pygame.SRCALPHA)
+            wash.fill((0, 0, 0, 110))
+            screen.blit(wash, rect.topleft)
+    close = DECK_OVERLAY_BUTTON_RECT
+    pygame.draw.rect(screen, (52, 60, 92), close, border_radius=4)
+    pygame.draw.rect(screen, WHITE, close, 1, border_radius=4)
+    label = game.small_font.render("CLOSE", True, WHITE)
+    screen.blit(label, label.get_rect(center=close.center))
 
 
 # ---------------------------------------------------------------------------

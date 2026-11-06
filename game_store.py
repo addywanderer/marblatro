@@ -249,9 +249,10 @@ class StoreMixin:
             if self._owns_card(item.value) and not self._has_card(Card.SHOWMAN):
                 self._set_shop_message("Already own this card")
                 return
-            # The card the player just unlocked keeps the square the locked one
-            # was lying on: it leaves the shelf first (so the layout no longer
-            # treats it as an offer), then becomes an owned card in place.
+            # The card is unlocked ON THE SPOT: it leaves the shelf (it was never
+            # the player's stock) and takes the square the locked offer was lying
+            # on, so the player can use it during this run (user request: "when
+            # an item in the shop is bought, unlock that item on the spot").
             self._consume_shop_offer(item, keep_cell=True)
             self._adopt_card(item)
             self.cash -= price
@@ -267,7 +268,7 @@ class StoreMixin:
                 self._set_shop_message(
                     f"You can only hold {self.max_actions} actions")
                 return
-            # It keeps the square it was lying on, unlocked in place.
+            # It is unlocked where it lies, like a card.
             self._consume_shop_offer(item, keep_cell=True)
             self._adopt_action(item)
             self.cash -= price
@@ -279,18 +280,21 @@ class StoreMixin:
         # fresh pairing number (they teleport marbles between each other).
         if getattr(item, "kind", None) == "block" and item.has_effect(Effect.PORTAL):
             number = next_portal_number()
-            self.toolbox.add(BlockItem(0, 0, item.shape, Effect.NONE, item.scorer,
-                                       item.scorer_amount, item.price, item.name, portal_number=number,
-                                       effects=item.effects,
-                                       effect_amounts=getattr(item, "effect_amounts", None)))
-            self.toolbox.add(BlockItem(0, 0, item.shape, Effect.NONE, item.scorer,
-                                       item.scorer_amount, item.price, item.name, portal_number=number,
-                                       effects=item.effects,
-                                       effect_amounts=getattr(item, "effect_amounts", None)))
+            self._unlock_purchase(BlockItem(
+                0, 0, item.shape, Effect.NONE, item.scorer,
+                item.scorer_amount, item.price, item.name, portal_number=number,
+                effects=item.effects,
+                effect_amounts=getattr(item, "effect_amounts", None)))
+            self._unlock_purchase(BlockItem(
+                0, 0, item.shape, Effect.NONE, item.scorer,
+                item.scorer_amount, item.price, item.name, portal_number=number,
+                effects=item.effects,
+                effect_amounts=getattr(item, "effect_amounts", None)))
             self._record_component_purchases(item)
             self._discover_block(item)
             self.cash -= price
-            self._set_shop_message(f"Bought {item.name} (portal pair #{number})")
+            self._set_shop_message(
+                f"Bought {item.name} (portal pair #{number})")
             sounds.play_coin()
             return
         # A Key/Lock block is bought as a matched pair too: the bought half keeps
@@ -299,28 +303,30 @@ class StoreMixin:
         pair_shape = paired_shape(getattr(item, "shape", None))
         if getattr(item, "kind", None) == "block" and pair_shape is not None:
             number = next_key_number()
-            self.toolbox.add(BlockItem(0, 0, item.shape, Effect.NONE, item.scorer,
-                                       item.scorer_amount, item.price, item.name,
-                                       key_number=number, effects=item.effects,
-                                       effect_amounts=getattr(item, "effect_amounts", None)))
-            self.toolbox.add(BlockItem(0, 0, pair_shape, Effect.NONE, item.scorer,
-                                       item.scorer_amount, item.price,
-                                       f"{Shape.name(pair_shape)} {Scorer.name(item.scorer)}",
-                                       key_number=number, effects=item.effects,
-                                       effect_amounts=getattr(item, "effect_amounts", None)))
+            self._unlock_purchase(BlockItem(
+                0, 0, item.shape, Effect.NONE, item.scorer,
+                item.scorer_amount, item.price, item.name,
+                key_number=number, effects=item.effects,
+                effect_amounts=getattr(item, "effect_amounts", None)))
+            self._unlock_purchase(BlockItem(
+                0, 0, pair_shape, Effect.NONE, item.scorer,
+                item.scorer_amount, item.price,
+                f"{Shape.name(pair_shape)} {Scorer.name(item.scorer)}",
+                key_number=number, effects=item.effects,
+                effect_amounts=getattr(item, "effect_amounts", None)))
             self._record_component_purchases(item)
             self._discover_block(item)
             self._discover_component(Component.SHAPE, pair_shape)
             self.cash -= price
-            self._set_shop_message(f"Bought {item.name} (key/lock pair #{number})")
+            self._set_shop_message(
+                f"Bought {item.name} (key/lock pair #{number})")
             sounds.play_coin()
             return
-        # The inventory is unbounded (see Toolbox), so the purchase always has a
-        # place: it joins the panel if there is a free cell, else the stash. The
-        # player gets a COPY of the offer: the shelf keeps selling the same slot,
-        # and two purchases must be two items, not one item listed twice (see
-        # items.owned_copy).
-        self.toolbox.add(owned_copy(item))
+        # The player gets a COPY of the offer: the shelf keeps selling the same
+        # slot, and two purchases must be two items, not one item listed twice
+        # (see items.owned_copy). The copy joins the DECK, so the offer stays on
+        # the shelf (still locked) and can be bought again.
+        self._unlock_purchase(owned_copy(item))
         self._record_component_purchases(item)
         if getattr(item, "kind", None) == "block":
             self._discover_block(item)
@@ -329,6 +335,21 @@ class StoreMixin:
         self.cash -= price
         self._set_shop_message(f"Bought {item.name}")
         sounds.play_coin()
+
+    def _unlock_purchase(self, item):
+        """Hand a bought item over and unlock it on the board: it is usable now.
+
+        The purchase joins the player's deck AND is laid out at once (user
+        request: "when an item in the shop is bought, unlock that item on the
+        spot so that the player can use it during that run"), so buying feels
+        like Balatro's: the thing you paid for is on the board for the run you are
+        building. The shelf keeps its own offer — the copy the player bought is a
+        different object (see items.owned_copy) — so the same slot can be bought
+        again and again, and the next deck cycle takes the copy back into the deck
+        with everything else (see Game._cycle_deck).
+        """
+        self.toolbox.add(item)
+        return item
 
     def _open_pack(self, pack, price):
         """Buy a pack and open it for the player to choose from.

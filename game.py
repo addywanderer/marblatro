@@ -17,6 +17,7 @@ from game_actions import ActionsMixin
 from game_inventory import InventoryMixin
 from game_economy import EconomyMixin
 from game_describe import DescribeMixin
+from game_deck import DeckMixin
 from game_frame import FrameMixin
 from game_runs import RunsMixin
 from game_contact import ContactMixin
@@ -26,7 +27,8 @@ from game_ending import EndingMixin
 
 class Game(CoreMixin, InputMixin, BuildMixin, StoreMixin, SlotsMixin,
            ActionsMixin, InventoryMixin, EconomyMixin, DescribeMixin,
-           FrameMixin, RunsMixin, ContactMixin, PayoffsMixin, EndingMixin):
+           DeckMixin, FrameMixin, RunsMixin, ContactMixin, PayoffsMixin,
+           EndingMixin):
     """One game in progress: the board, the shop, the inventory and the run.
 
     The state itself is created in CoreMixin.__init__; the behaviour is spread over

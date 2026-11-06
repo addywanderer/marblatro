@@ -63,13 +63,59 @@ class CameraTests(GameTestCase):
     def test_dragging_empty_board_space_moves_the_board(self):
         start = self._empty_spot()
         self._drag(start, (-120, -60))
-        self.assertEqual(self.game.camera, (-120, -60))
+        # The board is grabbed, not scrolled: dragging the cursor left/up pulls
+        # the board left/up with it, which moves the CAMERA the other way (user
+        # request: "reverse the direction that the board moves").
+        self.assertEqual(self.game.camera, (120, 60))
         # The window is what moved: no square of the board changed hands, and the
         # item that was lying on one is still on it — now drawn somewhere else.
         item = self.game.owned_items()[0]
         cell = self.game.item_cell(item)
         self.assertIsNotNone(cell)
         self.assertNotEqual(self.game.cell_to_screen(*cell), self._cell_centre(*cell))
+
+    def test_the_board_follows_the_cursor(self):
+        # Grab-and-drag: dragging the cursor right/down carries the board right
+        # and down with it (user request: "reverse the direction that the board
+        # moves").
+        start = self._empty_spot()
+        cell = (3, 2)
+        was = self.game.cell_to_screen(*cell)
+
+        self._drag(start, (80, 40))
+
+        now = self.game.cell_to_screen(*cell)
+        self.assertEqual((now[0] - was[0], now[1] - was[1]), (80, 40))
+
+    def test_the_background_scrolls_with_the_board(self):
+        # The trial tessellation behind and around the board moves with it, so
+        # dragging the board carries the pattern along instead of sliding the
+        # world under a fixed backdrop (user request: "make the background also
+        # move, matching the same place the board moves").
+        game = self.game
+        game.trials_enabled = True
+        game.current_trial = main.Trial.SPEEDRUN
+        game._reset_board_to_start()      # locked squares wear the pattern too
+
+        def paint():
+            game.screen.fill(main.BLACK)
+            main.ui.draw_background(game)
+            main.ui._draw_locked_backdrop(game, game.board_viewport())
+
+        self.assertEqual(main.ui.background_scroll(game), (0, 0))
+        paint()
+        reference = game.screen.copy()
+
+        game.pan_board(10, 0)             # the board (and its pattern) moves 10px
+        paint()
+
+        self.assertNotEqual(self._pixel_hash(game.screen),
+                            self._pixel_hash(reference))
+        for point in ((200, 300), (401, 512), (1000, 700)):
+            self.assertEqual(
+                tuple(game.screen.get_at(point))[:3],
+                tuple(reference.get_at((point[0] - 10, point[1])))[:3],
+                point)
 
     def test_a_drag_does_not_move_the_item_in_hand(self):
         # A brand-new game's board is locked down to its start region, which is
@@ -106,7 +152,9 @@ class CameraTests(GameTestCase):
         item = self.game.owned_items()[0]
         cell = self.game.item_cell(item)
         was = self._cell_centre(*cell)
-        self.game.pan_board(-100, -50)
+        # A drag of (100, 50) moves the BOARD right/down by that much (see
+        # pan_board), so the item stays well inside the window.
+        self.game.pan_board(100, 50)
         now = self._cell_centre(*cell)
         self.assertNotEqual(was, now)
 
@@ -182,6 +230,7 @@ class TopBarTests(GameTestCase):
             "main menu": main.RETURN_TO_MENU_BUTTON_RECT,
             "score": main.SCORE_PANEL_RECT,
             "action upgrade": main.ACTION_UPGRADE_RECT,
+            "deck": main.DECK_BUTTON_RECT,
         }
         for name, rect in pieces.items():
             with self.subTest(piece=name):

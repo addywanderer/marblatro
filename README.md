@@ -34,18 +34,25 @@ board**, drawn with a padlock and chain until it is bought. The price is shown
 only on hover, the offer can be picked up and moved like any other item, and a
 right-click unlocks it.
 
+Everything the player owns lives in their **deck**, and the board shows only the
+**hand** drawn from it: `DECK_DRAW_SIZE` (4) random items, dealt onto the board
+whenever a run is committed. The two role blocks — the **Start** and **Finish**
+blocks — are never dealt; they stay on the board so a run can always be built.
+The **DECK** button in the bar opens an overlay listing the whole deck, with the
+items currently drawn framed green.
+
 ## Controls
 
-Every item the player owns lies on the board — the inventory panel, the card
-tray and the action row are gone, and the board is the inventory.
+The board is the hand: the four items drawn from the deck lie on board squares,
+and the rest of the deck waits behind them.
 
 | Input | What it does |
 |---|---|
 | Click an item on the board | Flip its switch — every item is selected by the same toggle: on turns it green, a second click turns it off, and no other item changes. Any number can be on at once. **The first item switched on is the actor** — the one that gets used up — and every item switched on after it is one of its targets |
 | Click anything that is not an item | Turn every switch off: the void around the board, a locked square (even with a Board Unit in hand), the bar |
 | Left-click an empty unlocked square | Put the selected item down: a block is built on that square, anything else — a component, a card, an action — is moved there |
-| Drag from an empty square | Scroll the board: it follows the cursor, so you can travel anywhere on the infinite board. A press that never moves is still a click |
-| Right-click a shop offer | Buy it: it unlocks where it lies (a card or an action stays on that square, a component or block hands over a copy and the offer stays on sale, a pack opens its overlay) |
+| Drag from an empty square | Grab the board and drag it: the board (and the background pattern behind it) moves with the cursor, so you can travel anywhere on the infinite board. A press that never moves is still a click |
+| Right-click a shop offer | Buy it: the item is unlocked on the board at once, so it can be used this run, and the offer stays on sale so the same slot can be bought again; a pack opens its overlay |
 | Middle-click a shop offer | Hoard: hold that offer in place through the next refresh (one offer per copy of the card) |
 | Right-click anywhere else | Nothing |
 | Hover anything | The sidebar describes it: shape, effects, scorer, trigger limit |
@@ -56,6 +63,7 @@ tray and the action row are gone, and the board is the inventory.
 | **G** | Odyssey: put the selected block/component away for the run |
 | Click a locked square with nothing selected | Unlock it if you own a Board Unit (the marble can travel there, and items can be laid out on it); without one, a hint to buy one |
 | Right-click the Board Unit offer | Buy one Board Unit ($8), then click a locked square to open it |
+| Click the DECK button in the bar | Open the deck overlay: every item you own, the ones drawn onto the board framed green. Any click (or Esc) closes it |
 | **T** | Start a fresh run (rolls a new trial) |
 | **R** | Restart the current run, keeping its trial |
 | **V** | Turn every placed block back into a loose block |
@@ -77,7 +85,8 @@ tray and the action row are gone, and the board is the inventory.
 | `blocks.py` | `Block`: one square of the board, with its shape, effects, scorer and rolled magnitudes. |
 | `items.py` | What the player owns: `BlockItem`, `CardItem`, `ActionItem`, `ItemPack`, `ResourceOption`, `ScorerToken`, `CashBreakdown`. |
 | `shop.py` | The `Shop`: its shelf of offers — every one of them an item lying on the board — and the logical cells they are dealt from. |
-| `toolbox.py` | `Toolbox`: the player's portable items (loose blocks and components). They lie on board squares — the board is the inventory — so this is only the ownership list the placement code reads. |
+| `toolbox.py` | `Toolbox`: the player's portable items (loose blocks and components). Ownership only — where an item stands is the game's business, and an item with no square is in the deck (see `game_deck.py`). |
+| `game_deck.py` | The deck: which items are drawn into the hand, the draw at the end of a run, and returning a purchase to the deck. |
 | `marble.py` | `Marble`: the ball's physics state and its trail. |
 | `game.py` | `Game`, assembled from the feature mixins below — one object, but its ~300 methods live in the module that owns their subject. |
 | `game_*.py` | The mixins: `game_core` (setup, locked squares, profiles), `game_input` (the event loop), `game_build` (placing and assembling), `game_store` (purchases and packs), `game_slots` (cards, actions, slots), `game_actions` (the one-shot actions), `game_inventory` (Spirit tokens, banking and selling), `game_economy` (money and resource points), `game_describe` (info-box text), `game_frame` (update, autosave, achievements), `game_runs` (runs, trials, score, gondolas), `game_contact` (what touching a block does), `game_payoffs` (xMult, Procrastination, block scoring), `game_ending` (cash out, retry, the main loop). |
@@ -109,24 +118,41 @@ Conventions worth knowing before editing:
 * **The board is infinite, and the camera is the window onto it.** A square is
   any pair of integers, so there is no edge, no `GRID_WIDTH` bound and nothing
   to fall off: `Game.cell_to_screen` / `screen_to_cell` convert between a square
-  and the screen through `Game.camera`, and `Game.pan_board` scrolls the view
-  (the flat `GRID_WIDTH x GRID_HEIGHT` count is only how many squares fit on
-  screen at once). Dragging with the button down on board space that holds no
-  item pans the board; a press that never moves is still a click.
+  and the screen through `Game.camera`, and `Game.pan_board` drags the board (the
+  flat `GRID_WIDTH x GRID_HEIGHT` count is only how many squares fit on screen at
+  once). The board is GRABBED, not scrolled: dragging right pulls the board right
+  with the cursor, which moves the camera the other way. Pressing on board space
+  that holds no item starts the drag; a press that never moves is still a click.
+  The trial tessellation behind the board scrolls with it (`ui.background_scroll`),
+  so the pattern and the squares move as one.
 * **Locked squares are the void, not board.** They are painted with the
   background's own pattern (the run's tessellation, or the flat background
   colour), so the playable region floats in it, and they are solid: only the
   FRONTIER of locked squares around the unlocked region needs a wall, because a
   marble can only reach a locked square through one (`Game._board_wall_blocks`).
+  The pattern is drawn from the same scroll offset as the screen behind it (see
+  `ui.background_scroll`), so it stays in phase across the boundary and moves
+  with the board.
   The marble's hard clamp is the unlocked region plus two squares, which leaves
   room for the Phase effect to carry it into a wall.
-* **The board IS the inventory.** There is no inventory panel, card tray or
-  action row: every owned item — a loose block (`BlockItem`), a component, a
-  card, an action, a Spirit token — stands on a board square, and is drawn,
-  clicked and selected there. `Game.ensure_board_cells` lays them out on
-  UNLOCKED squares only (an item never stands on a locked one): an item keeps
-  the square it claims, and a new one takes the first free unlocked square in
-  reading order. A block that is placed owns its square and hides its item.
+* **The board is the HAND; the deck holds everything else.** There is no
+  inventory panel, card tray or action row, and the board no longer shows
+  everything the player owns: it shows the DECK_DRAW_SIZE items *drawn* from the
+  deck (`Game.deck_items` / `hand_items`), each standing on a board square and
+  drawn, clicked and selected there. `Game.ensure_board_cells` keeps the hand on
+  UNLOCKED squares only (an item never stands on a locked one) and no longer
+  deals a square to everything: an item with no square is simply in the deck. A
+  block that is placed owns its square and hides its item. `Game._cycle_deck`
+  empties the board into the deck when a run is committed and deals a fresh hand;
+  the START and FINISH blocks and Spirit tokens are never dealt, and the shop's
+  offers are laid out beside the hand.
+* **Buying unlocks on the spot.** A shop purchase is laid out on the board at
+  once (`Game._unlock_purchase`), so it can be used during the run being built;
+  the shelf keeps its own offer, so the same slot can be bought again and again,
+  each purchase a separate copy (`items.owned_copy`, which never inherits the
+  offer's square). Anything else GAINED during play (an assembled block, the
+  parts of a disassembly, a pack's pick, a reward) joins the hand the same way.
+  The next deck cycle takes all of it back into the deck with everything else.
 * **The board starts partly locked, and the player opens it.** A brand-new
   game unlocks only a centered `BOARD_START_WIDTH x BOARD_START_HEIGHT` region;
   the ring around it is solid wall. Clicking a locked square spends a Board Unit
@@ -135,8 +161,9 @@ Conventions worth knowing before editing:
   right-clicking it), the Drill and Conquistador payoffs and the Packed scorer.
   Unlocking a square re-lays the layout, so a stashed item takes it.
 * **The board can fill up, and nothing is lost.** `Toolbox.stash` holds the
-  portable items the board has no square for; they are still owned and still
-  sellable, and they take a square as soon as one opens up.
+  items the board had no room for as they were gained; they are still owned and
+  still sellable, and they take a square as soon as one opens up. (An item the
+  player simply has not drawn is not stashed: it is in the deck.)
 * **A placed block and its inventory item are one existence.** Placing does
   not consume the item: it records the square its block stands on
   (`BlockItem.placed_cell`), and the block points back at it
@@ -148,7 +175,10 @@ Conventions worth knowing before editing:
   disassembling) takes its block off the board with it.
 * **Only blocks are physical.** The marble never meets anything that is not a
   `Block`: the simulation reads `Game.board_blocks()`, not `grid.values()`, so
-  a card or a component lying on a square is scenery.
+  a card or a component lying on a square is scenery. A shop offer is scenery
+  too, even when it is a BLOCK offer (`Game.in_hand_is_block`): it is moved
+  around the board and bought by right-click, never built into a block, and the
+  keys that spend cash on a block (sell, disassemble, upgrade) refuse it.
 * **Two flush blocks make one surface.** A marble near the seam between two
   blocks used to touch the *corner* of one of them, whose closest-point normal
   points diagonally into the block next door — a phantom corner that threw it
@@ -197,7 +227,7 @@ Conventions worth knowing before editing:
 ## Tests
 
 ```powershell
-python -m unittest discover -s tests -q        # 1563 tests, ~35 s
+python -m unittest discover -s tests -q        # 1580 tests, ~37 s
 python -m unittest discover -s tests -k concert -q     # just one topic
 ```
 
@@ -210,6 +240,7 @@ produces.
 | `game_test_case.py` | The shared `GameTestCase`: the per-test `Game`, its temp player-data paths, and every helper (clicking, key presses, placing blocks, flying a marble into a block, pixel probes). |
 | `test_ui.py` | The HUD, sidebar, panels, info boxes, fonts, popups, particles and the CRT filter. |
 | `test_shop.py` | The shop, prices and rarity, buying, selling, assembly/disassembly, the economy. |
+| `test_deck.py` | The deck, the hand drawn from it, buying into the deck and the DECK overlay. |
 | `test_toolbox.py` | The inventory: selection, assignment and clicks on the board. |
 | `test_board_items.py` | Only blocks being physical, selecting items on the board, assembling there, selling a card from its square, and the save round-trip. |
 | `test_inventory.py` | The board as the inventory: the layout, one square per item, the stash when the board is full, moving items, and the card cap. |

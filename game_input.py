@@ -109,6 +109,17 @@ class InputMixin:
                 # F2 works on every screen, and is handled before the per-screen
                 # branches so it never also counts as a "post-run" keypress.
                 self._toggle_crt_filter()
+            elif (self.deck_open() and not self.title_screen
+                    and not self.game_over):
+                # The DECK overlay is modal: any click closes it (its CLOSE
+                # button, the DECK button again, or anywhere on the panel) and so
+                # does Esc. Nothing underneath it takes the click (user request:
+                # the button only SHOWS the deck).
+                if ((event.type == pygame.MOUSEBUTTONDOWN and event.button == 1)
+                        or (event.type == pygame.KEYDOWN
+                            and event.key in (pygame.K_ESCAPE, pygame.K_d))):
+                    self.deck_shown = False
+                continue
             elif self.title_screen:
                 # The title screen only accepts clicks on a save slot, the
                 # ACHIEVEMENTS / UPGRADES / COLLECTION buttons, the bottom-left
@@ -357,6 +368,11 @@ class InputMixin:
                         if RETURN_TO_MENU_BUTTON_RECT.collidepoint(mouse_pos):
                             # Leave the play screen and return to the title screen.
                             self._return_to_main_menu()
+                            continue
+                        if DECK_BUTTON_RECT.collidepoint(mouse_pos):
+                            # The DECK button opens the overlay that shows every
+                            # item the player owns (see Game.toggle_deck).
+                            self.toggle_deck()
                             continue
                         if self.open_pack is not None:
                             # An OPEN PACK owns the click: its overlay is what

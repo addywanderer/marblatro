@@ -598,6 +598,9 @@ class CoreMixin:
         self.selected_scorer_amount = None  # Scorer.DEFAULT_AMOUNT[Scorer.CHIPS_ADD]
         self.current_block_angle = 0
         self.drawing = False
+        # The deck overlay (see Game.toggle_deck / ui.draw_deck_overlay) is
+        # showing while this is True.
+        self.deck_shown = False
         # The pan gesture: a press on board space with no item under it starts
         # one (see InputMixin.handle_events), and a drag from there scrolls the
         # board (see Game.pan_board).
@@ -696,14 +699,17 @@ class CoreMixin:
                 for dx in range(GRID_WIDTH + 2)]
 
     def pan_board(self, dx, dy):
-        """Scroll the board by a screen delta, so it follows the cursor.
+        """Drag the board by a screen delta: it moves WITH the cursor.
 
         Only the WINDOW moves: the board's squares keep their own coordinates, so
         an item stays on square (3, 4) however far the player drags the view
         (user request: "if the player clicks down on something that is not an
-        item, and drags, the board moves with the cursor").
+        item, and drags, the board moves with the cursor"). The board is grabbed,
+        not scrolled: dragging right pulls the board right with the cursor, which
+        means the camera moves the other way (user request: "reverse the direction
+        that the board moves").
         """
-        self.camera = (self.camera[0] + dx, self.camera[1] + dy)
+        self.camera = (self.camera[0] - dx, self.camera[1] - dy)
 
     def reset_camera(self):
         """Put the window back where a fresh game starts: square (0, 0) at its corner."""
@@ -942,25 +948,27 @@ class CoreMixin:
                 + list(self.actions) + list(self.tokens))
 
     def _adopt_card(self, item):
-        """Take ownership of a card and lay it out on the board at once.
+        """Take ownership of a card and deal it a square at once.
 
-        Taking an item is what puts it on the board: without the layout pass a
-        card bought from the shelf would sit with no square until something else
-        happened to run it (see ensure_board_cells). The very same card object
-        is never owned twice (see Game.owns_item): a second reference would share
-        the first one's board square and its switch.
+        Taking an item is what puts it in the hand: without seating it the card
+        would sit with no square until something else happened to run the layout,
+        which now means "in the deck" rather than "on the board" (see
+        Game._on_item_gained). The very same card object is never owned twice (see
+        Game.owns_item): a second reference would share the first one's board
+        square and its switch. A purchase returns it to the deck instead (see
+        Game._to_deck).
         """
         if self.owns_item(item):
             return
         self.cards.append(item)
-        self.ensure_board_cells()
+        self._on_item_gained(item)
 
     def _adopt_action(self, item):
-        """Take ownership of an action and lay it out on the board at once."""
+        """Take ownership of an action and deal it a square at once."""
         if self.owns_item(item):
             return
         self.actions.append(item)
-        self.ensure_board_cells()
+        self._on_item_gained(item)
 
     def owns_item(self, item):
         """True when this EXACT object is one of the player's items.
@@ -1033,19 +1041,20 @@ class CoreMixin:
         return None
 
     def ensure_board_cells(self):
-        """Give every owned item an UNLOCKED board square; return the squares taken.
+        """Keep every item that is ON the board on a valid square; say which are taken.
 
-        Every owned item stands on the board (there is no panel to hold it), so
-        this is what lays the inventory out: an item keeps the square it already
-        claims unless a BLOCK has taken it or the square is (or has become)
-        LOCKED, and anything without a square takes the first free unlocked one
-        (see _free_board_cell). An item the unlocked board has no room for waits
-        in the toolbox's stash, and takes a square as soon as one opens up —
-        which is what unlocking a square does.
+        The board is the player's HAND now (user request: "create a deck ... draw
+        4 random cards from the deck onto the board"), so this no longer deals a
+        square to everything the player owns: an item lying on the board keeps the
+        square it claims unless a BLOCK has taken it or the square is (or has
+        become) LOCKED, and an item that has no square is simply IN THE DECK (see
+        Game.deck_items) until a draw deals it one. Only two kinds are always
+        placed: the START and FINISH role blocks (so a run can always begin) and
+        the shop's offers.
 
-        It is idempotent and cheap (a few dozen items over 12x14 squares), so the
-        board reads it whenever it draws or hit-tests rather than every owner
-        having to remember to call it after a change.
+        It is idempotent and cheap (a few dozen items over the unlocked squares),
+        so the board reads it whenever it draws or hit-tests rather than every
+        owner having to remember to call it after a change.
 
         An item that is standing as its BLOCK (a placed block keeps its item —
         see BlockItem.placed_cell) is not laid out afresh: the block already
@@ -1070,11 +1079,26 @@ class CoreMixin:
                 self.set_item_cell(item, None)
             else:
                 claimed.add(cell)
+        # A role block is never in the deck: the START and FINISH blocks stay on
+        # the board so the player can always build a run (see _cycle_deck).
+        for item in items:
+            if (self.item_cell(item) is None
+                    and getattr(item, "scorer", None) in (Scorer.START,
+                                                          Scorer.FINISH)):
+                cell = self._free_board_cell(claimed)
+                if cell is None:
+                    continue
+                self.set_item_cell(item, cell)
+                claimed.add(cell)
+        # The player's own items come before the shelf's: something that was
+        # waiting for a square (see _on_item_gained) takes a newly opened one
+        # before an offer is dealt it.
+        self._sync_stash(claimed)
         # The shop's offers stand on the board too (user request: "make each
         # shop option an item ... allow shop items to be selected and moved
-        # around"), and their squares are claimed BEFORE the owned items that
-        # have none are dealt squares: a new item must never be laid out on top
-        # of an offer the player can see and click.
+        # around"), and their squares are claimed BEFORE the offered items are
+        # dealt squares: a new hand must never be laid out on top of an offer the
+        # player can see and click.
         offers = list(self.shop.items) if getattr(self, "shop", None) else []
         # An offer the player already owns (a purchase that has just been adopted
         # while the shelf still lists it) is laid out as the owned item it now
@@ -1087,13 +1111,6 @@ class CoreMixin:
                 self.set_item_cell(offer, None)
             else:
                 claimed.add(cell)
-        for item in items:
-            if self.item_cell(item) is None:
-                cell = self._free_board_cell(claimed)
-                if cell is None:
-                    continue
-                self.set_item_cell(item, cell)
-                claimed.add(cell)
         for offer in offers:
             if self.item_cell(offer) is None:
                 cell = self._free_board_cell(claimed)
@@ -1101,19 +1118,27 @@ class CoreMixin:
                     continue
                 self.set_item_cell(offer, cell)
                 claimed.add(cell)
-        self._sync_stash(items)
         return claimed
 
-    def _sync_stash(self, items=None):
-        """Keep the portable items the board has no room for in the stash."""
-        items = self.owned_items() if items is None else items
-        cell_of = self.item_cell
-        for item in list(self.toolbox.items):
-            if cell_of(item) is None:
-                self.toolbox.items.remove(item)
-                self.toolbox.stash.append(item)
+    def _sync_stash(self, claimed=None):
+        """Seat the stashed items the board has room for; keep them owned otherwise.
+
+        An item only ever lands in the stash when the board had no room for it as
+        it was gained (see _on_item_gained), so a square opening up — the player
+        unlocking one, or a block being taken off the board — is what brings it
+        out. Items with no square that are simply IN THE DECK are not stashed, and
+        are never seated here: the deck deals them (see Game.draw_deck_hand).
+        """
+        if claimed is None:
+            claimed = set(self.grid)
         for item in list(self.toolbox.stash):
-            if cell_of(item) is not None or self.is_item_selected(item):
+            if self.item_cell(item) is None:
+                cell = self._free_board_cell(claimed)
+                if cell is not None:
+                    self.set_item_cell(item, cell)
+                    claimed.add(cell)
+            if (self.item_cell(item) is not None
+                    or self.is_item_selected(item)):
                 self.toolbox.stash.remove(item)
                 self.toolbox.items.append(item)
 
@@ -1329,6 +1354,21 @@ class CoreMixin:
         # A shop offer is not owned yet, but it lies on the board and can be
         # arranged like everything else on it.
         return self.is_shop_offer(item)
+
+    def in_hand_is_block(self):
+        """True when the item in hand is a BLOCK to build, not an item to move.
+
+        The two gestures a click on a square can mean are "build this block here"
+        (see _place_block_at) and "move this item here" (see _move_item_to), and
+        only a block the PLAYER has is built. A shop offer is scenery even when
+        it is a block offer — it is not the player's yet — so it is arranged on
+        the board and bought by right-click, never stamped into the grid.
+        """
+        item = self.selected_toolbox_item
+        if isinstance(item, Block):
+            return True
+        return (getattr(item, "kind", None) == "block"
+                and not self.is_shop_offer(item))
 
     def _switch_profile(self, name):
         """Make ``name`` the active profile from the title screen.

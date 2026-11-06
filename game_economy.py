@@ -101,6 +101,13 @@ class EconomyMixin:
         that are already placed in the marble box, and the shop's "Last run
         cash gained" readout (which breaks the run's earnings down).
         """
+        # The DECK overlay owns the hover while it is open: it is the only place
+        # the items that are NOT on the board can be read out (see
+        # Game.deck_item_at / ui.draw_deck_overlay).
+        if self.deck_open():
+            deck_item = self.deck_item_at(pos)
+            if deck_item is not None:
+                return deck_item, "deck"
         # An OPEN PACK owns the hover as well as the clicks: its options are
         # what the player is looking at, so the sidebar reads out the option
         # under the cursor (see _click_pack and ui.draw_pack_overlay).
@@ -585,6 +592,13 @@ class EconomyMixin:
         item = self.selected_toolbox_item
         if item is None or not isinstance(item, (Block, BlockItem)):
             self._set_shop_message("Select a block to disassemble")
+            return
+        if self.is_shop_offer(item):
+            # An offer is not the player's block: taking it apart would turn the
+            # shelf's stock into the player's components for a fee (see
+            # _buy_shop_item).
+            self._set_shop_message(
+                f"{self._item_name(item)} is not yours yet — right-click to buy it")
             return
         cost = self._inflated(DISASSEMBLE_COST)
         if self.cash < cost:

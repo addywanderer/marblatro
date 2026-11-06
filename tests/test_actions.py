@@ -809,6 +809,8 @@ class ForesightTests(GameTestCase):
         self.assertTrue(self._use())
         self.game.actions = [main.ActionItem(main.Action.DEATH, 24)
                              for _ in range(self.game.max_actions)]
+        for action in self.game.actions:
+            self.game._on_item_gained(action)
         self.assertFalse(self.game._grant_random_action())
         self.assertIn("only hold", self.game.shop_message)
         first = self.game.actions[0]

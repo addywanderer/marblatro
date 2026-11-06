@@ -195,9 +195,17 @@ def owned_copy(offer):
 
     Everything a copied item carries is its own — its rolled magnitudes, its
     effects, its pairing numbers — so a copy behaves exactly like the offer it
-    came from, without ever being the same thing.
+    came from, without ever being the same thing. The copy stands NOWHERE yet,
+    though: it must not inherit the shelf square the offer is lying on (or a
+    placed block's link to it), because that square belongs to the offer until
+    the copy is dealt one of its own (see Game._unlock_purchase).
     """
-    return _copy.deepcopy(offer)
+    copy = _copy.deepcopy(offer)
+    if hasattr(copy, "board_cell"):
+        copy.board_cell = None
+    if hasattr(copy, "placed_cell"):
+        copy.placed_cell = None
+    return copy
 
 
 class ResourceOption:

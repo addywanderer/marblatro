@@ -351,6 +351,7 @@ class ToolboxTests(GameTestCase):
         self.game.toolbox.add(block)
         action = main.ActionItem(main.Action.DEATH, 60)
         self.game.actions.append(action)
+        self.game._on_item_gained(action)
         self.game.cash = 100
         # Click the action on its square to select it.
         self._click(self._item_pos(action))

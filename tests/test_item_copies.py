@@ -42,7 +42,8 @@ class ItemCopyTests(GameTestCase):
         # The shelf keeps its own offer (a component slot is a repeatable buy),
         # so the player's copies must be copies, not the shelf's object twice:
         # one object listed twice shares a square and a switch (see
-        # items.owned_copy).
+        # items.owned_copy). Each copy is unlocked on the board at once, on a
+        # square of its own (see Game._unlock_purchase).
         self.game.toolbox.items.clear()
         self.game.cash = 1000
         offer = self.game.shop._offer_of(main.Pack.EFFECT, 1, main.SHOP_ITEM_ROW)
@@ -57,8 +58,13 @@ class ItemCopyTests(GameTestCase):
         self.assertIsNot(copies[0], copies[1])
         self.assertIsNot(copies[0], offer)
         self.assertIsNot(copies[1], offer)
+        # Both are usable now, each on its own square — never the shelf's.
         self.assertNotEqual(self.game.item_cell(copies[0]),
                             self.game.item_cell(copies[1]))
+        self.assertNotEqual(self.game.item_cell(copies[0]),
+                            self.game.item_cell(offer))
+        # Both are still on the shelf's offer list to be bought again.
+        self.assertIn(offer, self.game.shop.items)
 
         # Each copy is its own switch: clicking one selects exactly it.
         self._click(self._grid_pos(*self.game.item_cell(copies[0])))

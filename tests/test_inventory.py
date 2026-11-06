@@ -53,6 +53,8 @@ class BoardInventoryTests(GameTestCase):
         action = main.ActionItem(main.Action.INACTION, 24)
         self.game.cards.append(card)
         self.game.actions.append(action)
+        self.game._on_item_gained(card)
+        self.game._on_item_gained(action)
 
         card_cell = self._item_cell(card)
         action_cell = self._item_cell(action)
@@ -64,15 +66,25 @@ class BoardInventoryTests(GameTestCase):
         self.assertIs(self.game.item_at_cell(action_cell), action)
 
 
-    def test_every_owned_item_gets_a_square_of_its_own(self):
+    def test_every_owned_item_is_either_on_the_board_or_in_the_deck(self):
+        # The board shows the HAND (the items drawn from the deck), so an item
+        # the player owns either lies on a square of its own or waits in the
+        # deck — never on top of another item (user request: "create a deck").
         for shape in (main.Shape.PIPE, main.Shape.SLOPE, main.Shape.RECT):
             self.game.toolbox.add(self._component(shape))
         self.game.cards.append(main.CardItem(main.Card.COUPON, 40))
 
-        cells = self._cells_of(self.game.owned_items())
+        hand = self.game.hand_items()
+        deck = self.game.deck_items()
+        cells = self._cells_of(hand)
 
         self.assertNotIn(None, cells)
         self.assertEqual(len(cells), len(set(cells)))
+        self.assertEqual(len(hand) + len(deck), len(self.game.owned_items()))
+        # What the board has no room for is IN THE DECK, not lost: a card the
+        # player owns is a card in the deck.
+        self.assertIn(self.game.cards[0], deck)
+        self.assertEqual(len(deck), 1)
 
 
     def test_items_never_lie_on_a_locked_square(self):

@@ -495,6 +495,11 @@ class GameTestCase(unittest.TestCase):
             self.game.cards = list(cards)
         elif own_card:
             self.game.cards = [main.CardItem(main.Card.PROCRASTINATION, 46)]
+        # A card is only on the BOARD while it is drawn from the deck, so the
+        # cards a test is about are dealt squares here (see
+        # Game._on_item_gained).
+        for card in self.game.cards:
+            self.game._on_item_gained(card)
         self.game.reset_run()
         return self.game.marbles[0], self.game.grid[(5, 5)]
 

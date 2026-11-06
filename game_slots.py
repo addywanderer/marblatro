@@ -203,6 +203,12 @@ class SlotsMixin:
         if item is None or not isinstance(item, (Block, BlockItem)):
             self._set_shop_message("Select a block to upgrade")
             return
+        if self.is_shop_offer(item):
+            # An offer is not the player's block yet: upgrading it would spend
+            # cash on something the shelf still owns (see _buy_shop_item).
+            self._set_shop_message(
+                f"{self._item_name(item)} is not yours yet — right-click to buy it")
+            return
         cost = self._trigger_upgrade_cost(item)
         if self.cash < cost:
             self._set_shop_message(f"Need ${cost} to upgrade the trigger")
@@ -463,6 +469,8 @@ class SlotsMixin:
             # A permanent token's Random/Lucky reward is rolled once, here, and
             # kept for every run the token fires in (see _roll_kept_reward).
             self._roll_kept_reward(block)
-            self.tokens.append(ScorerToken(block))
+            token = ScorerToken(block)
+            self.tokens.append(token)
+            self._on_item_gained(token)
             granted += 1
         return granted

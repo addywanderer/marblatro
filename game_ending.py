@@ -322,6 +322,14 @@ class EndingMixin:
         self.shop.refresh()
         # Slim pickings removes two random shop options for this run.
         self._trim_shop_for_trial()
+        # The committed run is over, so the board is rebuilt from the deck: every
+        # item the player owns goes back in it, and a fresh hand of
+        # DECK_DRAW_SIZE is drawn where the shop's new offers are laid out (user
+        # request: "when the run ends, all items owned by the player (except the
+        # start and finish) are returned to the deck and 4 new random items are
+        # drawn"). A RETRY never comes here, so retrying keeps the board it
+        # re-runs.
+        self._cycle_deck()
         self.run_number += 1
         # Once the player has clicked CONTINUE on a game-over screen, the
         # overlay never shows again for this save: those runs just advance
@@ -377,6 +385,10 @@ class EndingMixin:
         self.run_in_round = self.run_number % RUNS_PER_ROUND
         self.target_forced = False
         self._refresh_run_target()
+        # The deck was already cycled by the _continue_run that ended the game
+        # (it does that before it decides win or loss), so the hand this run was
+        # built from is the one that is on the board: cycling again here would
+        # throw it away and deal a different one behind the player's back.
 
     def _refresh_run_target(self):
         """Re-derive this run's required score: the schedule's number, scaled by

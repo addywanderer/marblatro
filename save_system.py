@@ -304,6 +304,17 @@ def _deserialize_item(data):
     return _deserialize_item_kind(data)
 
 
+def _restored_shape(data):
+    """The block shape a save carries, defaulting to the free Rect.
+
+    A block is always SOMETHING: a save that lost its shape (or one written by a
+    build that could stamp a shapeless block) comes back as the free Rect rather
+    than as a block nothing can draw, price or save again.
+    """
+    value = data.get("shape")
+    return Shape.RECT if value is None else value
+
+
 def _deserialize_item_kind(data):
     if data["kind"] == "unit":
         return _restore_board_cell(
@@ -336,7 +347,7 @@ def _deserialize_item_kind(data):
         if data.get("placed"):
             block = Block(
                 data["x"], data["y"],
-                shape=data["shape"],
+                shape=_restored_shape(data),
                 effect=Effect.NONE,
                 scorer=data["scorer"],
                 scorer_amount=data.get("scorer_amount"),
@@ -361,7 +372,7 @@ def _deserialize_item_kind(data):
             return _restore_random_rolls(block, data)
         item = BlockItem(
             data.get("col", 0), data.get("row", 0),
-            data["shape"], data.get("effect", Effect.NONE), data["scorer"],
+            _restored_shape(data), data.get("effect", Effect.NONE), data["scorer"],
             data.get("scorer_amount", 0), data.get("price", 0), data.get("name", ""),
             portal_number=data.get("portal_number", 0),
             key_number=data.get("key_number", 0),

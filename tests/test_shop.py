@@ -1389,6 +1389,7 @@ class ShopTests(GameTestCase):
         card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
                           main.Scorer.MULT_ADD)
         self.game.cards.append(card)
+        self.game._on_item_gained(card)
         self._click(self._item_pos(card))
         self.assertIs(self.game.selected_toolbox_item, card)
 

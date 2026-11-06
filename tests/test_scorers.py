@@ -222,7 +222,11 @@ class ScorersTests(GameTestCase):
                                              scorer_amount=10)
         self.game.run_complete = True
         self.game.awaiting_after_run = True
-        with mock.patch("main.random.random", return_value=0.0):  # always destroyed
+        # The deck cycle takes every block off the board when a run is
+        # continued, so it is held aside here: what is under test is the SHARP
+        # destruction rule, not the rebuild.
+        with mock.patch.object(self.game, "_cycle_deck"), \
+                mock.patch("main.random.random", return_value=0.0):  # always destroyed
             self.game._continue_run()
         self.assertNotIn((1, 1), self.game.grid)
         self.assertNotIn((2, 2), self.game.grid)
@@ -233,7 +237,8 @@ class ScorersTests(GameTestCase):
         self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.SHARP)
         self.game.run_complete = True
         self.game.awaiting_after_run = True
-        with mock.patch("main.random.random", return_value=0.9):  # no destruction
+        with mock.patch.object(self.game, "_cycle_deck"), \
+                mock.patch("main.random.random", return_value=0.9):  # no destruction
             self.game._continue_run()
         self.assertIn((1, 1), self.game.grid)
 

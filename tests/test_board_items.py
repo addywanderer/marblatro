@@ -30,6 +30,15 @@ class BoardItemTests(GameTestCase):
         return item
 
 
+    def _block_offer(self):
+        """A shop BLOCK offer, on its own shelf (the shelf is rolled at random)."""
+        offer = self.game.shop._random_block_offer(1, main.SHOP_ITEM_ROW)
+        self.game.shop.items = [offer]
+        self.game.ensure_board_cells()
+        self.assertIsNotNone(self.game.item_cell(offer))
+        return offer
+
+
     def test_clicking_a_component_selects_it_on_the_board(self):
         comp = self._component(main.Component.SHAPE, main.Shape.SLOPE)
         self.game.toolbox.items.clear()
@@ -128,6 +137,7 @@ class BoardItemTests(GameTestCase):
         card = _card_item(main.match_group_for_shape(main.Shape.PIPE),
                           main.Scorer.MULT_ADD)
         self.game.cards.append(card)
+        self.game._on_item_gained(card)
         cash = self.game.cash
         self._click(self._item_pos(card))
 
@@ -144,6 +154,8 @@ class BoardItemTests(GameTestCase):
         # that highlights selected items in green or yellow").
         self.game.cards.append(main.CardItem(main.Card.GARDEN, 36))
         self.game.actions.append(main.ActionItem(main.Action.EXPANSION, 24))
+        self.game._on_item_gained(self.game.cards[-1])
+        self.game._on_item_gained(self.game.actions[-1])
         items = list(self.game.owned_items())      # blocks, a card and an action
 
         for item in items:
@@ -406,3 +418,83 @@ class BoardItemTests(GameTestCase):
                   and item.value == main.Shape.DRAIN]
         self.assertTrue(loaded)
         self.assertEqual(fresh.item_cell(loaded[0]), (3, 5))
+
+
+    def test_a_shop_block_offer_is_moved_not_built(self):
+        # A shop offer is scenery like every other board item, even when it is a
+        # BLOCK offer: clicking a square arranges it there and the board gets no
+        # block out of it (user report: a locked shop block "did not work" when
+        # moved — it used to build an empty block on the square instead, and that
+        # shapeless block then crashed the autosave).
+        offer = self._block_offer()
+
+        self._click(self._item_pos(offer))
+        self.assertFalse(self.game.in_hand_is_block())
+        self._click(self._grid_pos(17, 7))
+
+        self.assertEqual(self.game.item_cell(offer), (17, 7))
+        self.assertNotIn((17, 7), self.game.grid)
+        self.assertEqual(self.game.grid, {})
+        self.assertIn("Moved", self.game.shop_message)
+        # ...and the game still saves.
+        self.assertIsNotNone(save_system._save_data(self.game))
+
+
+    def test_a_shapeless_placement_gets_the_free_defaults(self):
+        # A block is always SOMETHING: even with the build tool's values unset,
+        # placing a block stamps the free Rect / no effect / no scorer rather
+        # than a block nothing can draw, price or save.
+        block = main.BlockItem(0, 0, main.Shape.RECT, main.Effect.NONE,
+                               main.Scorer.CHIPS_ADD, 10, 20, "B")
+        self._lay(block, 4, 4)
+        self.game._equip_block(block)
+        self.game.selected_shape = None
+        self.game.selected_effect = None
+        self.game.selected_scorer = None
+        self.game.selected_scorer_amount = None
+
+        self.assertTrue(self.game._place_block_at(6, 6))
+
+        placed = self.game.grid[(6, 6)]
+        self.assertEqual(placed.shape, main.Shape.RECT)
+        self.assertEqual(placed.effect, main.Effect.NONE)
+        self.assertEqual(placed.scorer, main.Scorer.NONE)
+        self.assertIsNotNone(save_system._save_data(self.game))
+
+
+    def test_a_shop_offer_cannot_be_sold_upgraded_or_disassembled(self):
+        # Every key that spends cash on the selected item refuses an OFFER: the
+        # shelf still owns it, so only a right-click buys it (see _buy_shop_item).
+        offer = self._block_offer()
+        self._click(self._item_pos(offer))
+        cash = self.game.cash
+        parts = len(self.game.toolbox.items)
+
+        self._press(main.pygame.K_d)      # D: pay to raise the trigger limit
+        self.assertEqual(self.game.cash, cash)
+        self.assertIn("not yours yet", self.game.shop_message)
+
+        self._press(main.pygame.K_s)      # S: disassemble it into its parts
+        self.assertEqual(self.game.cash, cash)
+        self.assertEqual(len(self.game.toolbox.items), parts)
+        self.assertIn("not yours yet", self.game.shop_message)
+
+        self._press(main.pygame.K_b)      # B: sell it
+        self.assertEqual(self.game.cash, cash)
+        self.assertFalse(self.game.toolbox.contains(offer))
+        self.assertIn(offer, self.game.shop.items)
+        self.assertIsNotNone(save_system._save_data(self.game))
+
+
+    def test_a_shapeless_saved_block_comes_back_as_rect(self):
+        # A save written by a build that could stamp a shapeless block must not
+        # brick the game: it loads as the free Rect.
+        item = save_system._deserialize_item({
+            "kind": "block", "placed": False, "col": 0, "row": 0,
+            "shape": None, "effects": [int(main.Effect.NONE)],
+            "scorer": int(main.Scorer.CHIPS_ADD), "scorer_amount": 4,
+            "price": 10, "name": "B",
+        })
+
+        self.assertEqual(item.shape, main.Shape.RECT)
+        self.assertEqual(item.effect, main.Effect.NONE)

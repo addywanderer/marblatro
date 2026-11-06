@@ -45,7 +45,7 @@ class Toolbox:
         """Take an item into the inventory; it can never be refused.
 
         The item joins the list at once and takes a board square as soon as one
-        is free (see Game.ensure_board_cells); a full board leaves it waiting in
+        is free (see Game._on_item_gained); a full board leaves it waiting in
         ``stash``, which never costs the player the item.
 
         The inventory holds ITEMS, never two references to one item: an object
@@ -59,7 +59,7 @@ class Toolbox:
             return True
         self.items.append(item)
         if self.game is not None:
-            self.game.ensure_board_cells()
+            self.game._on_item_gained(item)
         return True
 
     def remove(self, item, refill=True):

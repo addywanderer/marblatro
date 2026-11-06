@@ -273,8 +273,9 @@ class BoardTests(unittest.TestCase):
         # An offer keeps the SHOP cell it was drawn in (its col/row) after it is
         # bought, so laying items out from those numbers would drop a purchase
         # onto whatever board square its price tag hung over — the board's locked
-        # top-left corner, for a block built at (0, 0). Every bought item gets a
-        # real board square instead (see Game.item_cell).
+        # top-left corner, for a block built at (0, 0). A bought item is unlocked
+        # on the board instead, on a square of its own (see
+        # Game._unlock_purchase), never on a locked one.
         g = self._start_locked_game()
         g.cash = 9999
         bought = 0
@@ -282,14 +283,21 @@ class BoardTests(unittest.TestCase):
             for offer in list(g.shop.items):
                 if getattr(offer, "kind", None) == "pack":
                     continue
+                before = {id(item) for item in g.owned_items()}
                 g._buy_shop_item(offer)
-                bought += 1
                 for owned in g.owned_items():
+                    if id(owned) in before:
+                        continue          # the shelf's own offer, not the player's
                     cell = g.item_cell(owned)
                     self.assertIsNotNone(cell, owned)
                     self.assertFalse(g.is_cell_locked(*cell), owned)
+                bought += 1
             g.shop.refresh()
         self.assertGreater(bought, 0)
+        # Every item the player owns stands on a square of its own (or waits in
+        # the deck, which no purchase leaves anything in on its own).
+        cells = [g.item_cell(item) for item in g.hand_items()]
+        self.assertEqual(len(cells), len(set(cells)))
 
     def test_cannot_place_block_on_locked_square(self):
         g = self._start_locked_game()

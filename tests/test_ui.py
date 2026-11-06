@@ -1500,6 +1500,10 @@ class UiTests(GameTestCase):
     def test_joker_card_spawns_blue_particle_at_card_area(self):
         self.game.cards.append(main.CardItem(main.Card.JOKER, 20))
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        # The card is only on the BOARD once it is drawn from the deck, so it is
+        # dealt a square (see Game._on_item_gained) — after the Start block has
+        # its own, so the card cannot be laid out on top of it.
+        self.game._on_item_gained(self.game.cards[0])
         self.game.reset_run()
         p = self.game.score_particles[0]
         self.assertEqual(p.text, "4")
@@ -1943,6 +1947,7 @@ class UiTests(GameTestCase):
         joker = _card_item(main.match_group_for_shape(main.Shape.PIPE),
                            main.Scorer.MULT_ADD)
         self.game.cards.append(joker)
+        self.game._on_item_gained(joker)
         self.game.disabled_card = joker
         self.game.draw()  # renders the dimmed card without raising
 

@@ -235,6 +235,11 @@ OFFER_DUPLICATE_TRIES = 8
 # 22% scorer, 20% block), and are read per kind, so they follow this list.
 SHELF_OFFER_TYPES = (Pack.SHAPE, Pack.EFFECT, Pack.SCORER, Pack.BLOCK,
                      Pack.CARD, Pack.ACTION)
+# The player's DECK: every item they own. The board shows a HAND of
+# DECK_DRAW_SIZE items drawn from it (see Game._cycle_deck), and the rest wait in
+# the deck until the next run draws them again. The Start and Finish blocks are
+# never in the deck — they stay on the board so a run can always be built.
+DECK_DRAW_SIZE = 4
 SHOP_ACTION_SLOTS = 2
 # Spirit tokens (see Action.SPIRIT): a token keeps the whole block a Spirit
 # destroyed and is drawn as that block (see ui.draw_token). A token is PART of
@@ -319,6 +324,12 @@ FIRE_DECAY_SPEED = 1.5  # fire strength lost per second after the run ends
 BAR_TEXT_X = 10
 BAR_TEXT_Y = 10
 BAR_TEXT_WIDTH = 380
+# The DECK button: a bar button that opens the deck overlay, showing every item
+# the player owns and which DECK_DRAW_SIZE of them are drawn into the hand for
+# the run (see ui.draw_deck_button / ui.draw_deck_overlay).
+DECK_BUTTON_RECT = pygame.Rect(440, 120, 140, 34)
+DECK_OVERLAY_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 60,
+                                      180, 36)
 # The trial display above the cards. Its LEFT half buys a different random
 # trial and its RIGHT half buys no trial for the run (see
 # _click_trial_display); hovering it shows both prices.

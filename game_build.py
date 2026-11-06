@@ -129,9 +129,13 @@ class BuildMixin:
         if not self.in_hand or self.is_cell_locked(gx, gy):
             return False
         item = self.selected_toolbox_item
-        # A Block (picked up off the board) and a BlockItem are both blocks to
-        # build; anything else is simply moved to the square.
-        if not (isinstance(item, Block) or getattr(item, "kind", None) == "block"):
+        # A Block (picked up off the board) and a player's own BlockItem are both
+        # blocks to build; anything else — a component, a card, an action, and a
+        # shop offer of ANY kind, a block offer included — is simply moved to the
+        # square. A shop offer is scenery even when it is a block: it is not the
+        # player's yet, so it must never be built into the board (see
+        # in_hand_is_block).
+        if not self.in_hand_is_block():
             return self._move_item_to(item, gx, gy)
         moving_placed = isinstance(item, Block)
         old = self.grid.get((gx, gy))
@@ -146,13 +150,21 @@ class BuildMixin:
         for other in self.owned_items():
             if other is not item and self.item_cell(other) == (gx, gy):
                 self.set_item_cell(other, None)
+        # The build tool's own values, with the same free defaults an assembly
+        # uses (see _assemble_block): a block is never stamped with a None shape,
+        # which would leave a block nothing can draw, price or save.
+        shape = (self.selected_shape if self.selected_shape is not None
+                 else Shape.RECT)
         self.grid[(gx, gy)] = Block(
             gx,
             gy,
-            shape=self.selected_shape,
-            effect=self.selected_effect,
-            scorer=self.selected_scorer,
-            scorer_amount=self.selected_scorer_amount,
+            shape=shape,
+            effect=(self.selected_effect if self.selected_effect is not None
+                    else Effect.NONE),
+            scorer=(self.selected_scorer if self.selected_scorer is not None
+                    else Scorer.NONE),
+            scorer_amount=(self.selected_scorer_amount
+                           if self.selected_scorer_amount is not None else 0),
             angle=self.current_block_angle,
             portal_number=getattr(item, "portal_number", 0),
             key_number=getattr(item, "key_number", 0),
