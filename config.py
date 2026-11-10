@@ -104,7 +104,7 @@ MARBLE_BOX_COORDS = (0, TOP_BAR_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT - TOP_BAR_HE
 # item stands on a board square instead.
 CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and on the board
 # The shelf's LOGICAL grid: the shape Shop.refresh deals into (5 item slots,
-# 3 pack slots, the Board Unit tile and Picky's bonus offers below them). The
+# 3 pack slots and Picky's bonus offers below them). The
 # panel that used to be drawn here is gone (user request: "completely remove the
 # shop's box") — every offer is an item lying on the board now — but the grid
 # still decides how many offers a shelf holds and which slot each one came from
@@ -204,19 +204,15 @@ SHOP_MESSAGE_DURATION = 90  # Frames a shop purchase message stays visible
 # Game._tick_autosave): the game otherwise only saves when the player presses P
 # or quits, so a long session could lose everything since the last one.
 AUTOSAVE_INTERVAL = 30.0
-# The shop's shelf: SHOP_ITEM_SLOTS "any item" offers — one random component,
-# block, card or action each (see Shop._random_offer) — plus SHOP_PACK_SLOTS
-# item packs, plus the fixed Board Unit offer. All of them share the offer row
-# (SHOP_ITEM_ROW), the packs to the right of the items and the Board Unit right
-# of the packs. The offers lie on the BOARD now (the panel is gone, user
-# request), so these cells only decide which slot a shelf's offer came from and
-# where a restored save's offers are re-seated; the price is shown on hover.
+# The offer row's old slot layout: SHOP_ITEM_SLOTS structures plus
+# SHOP_PACK_SLOTS item packs. The shelf deals NOTHING now (structures are part of
+# the level and the per-run packs are gone -- see Shop.refresh), so these only
+# say where a save written before that change re-seats the offers it still holds.
 SHOP_ITEM_SLOTS = 5
 SHOP_PACK_SLOTS = 3
 SHOP_ITEM_ROW = 1
-# The packs share the offer row, to the RIGHT of the item offers: the top bar
-# has room for one row of tiles, and the fixed Board Unit tile sits right of the
-# packs (see BOARD_UNIT_COL). The row under it carries every price.
+# The packs share the offer row, to the RIGHT of the item offers: the shelf has
+# room for one row of tiles.
 SHOP_PACK_ROW = SHOP_ITEM_ROW
 SHOP_PACK_COL = SHOP_ITEM_SLOTS + 1
 # The row Picky's extra offers start on, below the offers' price row (they fill
@@ -227,14 +223,6 @@ SHOP_BONUS_ROW = 3
 # duplicate: enough to keep a full shelf varied, few enough that a pool which
 # cannot fill every slot (a player who owns most of the cards) still fills them.
 OFFER_DUPLICATE_TRIES = 8
-# The kinds a shelf slot (and a Picky bonus slot) may offer, as components.Pack
-# types: the goods an "any item" slot deals. Resource points are NOT here — a
-# shelf slot sells items, and points are only ever dealt inside a pack (see
-# Shop._offer_of). Each kind's odds live with the pack data (see
-# components.Pack.SHELF_WEIGHTS: 23% card, 15% action, 8% shape, 12% effect,
-# 22% scorer, 20% block), and are read per kind, so they follow this list.
-SHELF_OFFER_TYPES = (Pack.SHAPE, Pack.EFFECT, Pack.SCORER, Pack.BLOCK,
-                     Pack.CARD, Pack.ACTION)
 # The player's DECK: every item they own. The board shows a HAND of
 # DECK_DRAW_SIZE items drawn from it (see Game._cycle_deck), and the rest wait in
 # the deck until the next run draws them again. The Start and Finish blocks are
@@ -265,8 +253,8 @@ ACTION_V2_CHANCE = 0.01
 SHOP_REFRESH_COST = 20  # Cash cost to reroll the shop
 # What the four later actions move (see their handlers in Game._action_*).
 EXPANSION_SQUARES = 4            # locked squares Expansion (v1) unlocks
-BRAINSTORM_REROLLS = 2           # free rerolls Brainstorm (v1) banks
-BRAINSTORM_REROLL_FACTOR = 0.5   # Brainstorm's v2 reroll price factor
+BRAINSTORM_REROLLS = 2           # Reroll cards Brainstorm (v1) creates
+BRAINSTORM_REROLLS_V2 = 4        # ...and its upgrade
 MASS_PRODUCTION_RUN_FACTOR = 3.0      # Mass production's v1 resource factor
 MASS_PRODUCTION_FOREVER_FACTOR = 2.0  # ...and the permanent one its v2 sets
 GRACE_RUN_XMULT = 1.0            # xMult Grace (v1) adds to the run
@@ -330,10 +318,25 @@ BAR_TEXT_WIDTH = 380
 DECK_BUTTON_RECT = pygame.Rect(440, 120, 140, 34)
 DECK_OVERLAY_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 60,
                                       180, 36)
+# The BOARD UNIT button, under the DECK button: buying one adds a Board Unit to
+# the player's hand, which a click on a locked square spends to open it (see
+# Game._buy_board_unit / ui.draw_board_unit_button). It is a bar button rather
+# than a shop offer (user request: "make board slots a button in the top bar
+# instead of a shop item"), so it is always buyable and never clutters the shelf.
+BOARD_UNIT_BUTTON_RECT = pygame.Rect(440, 158, 140, 32)
 # The trial display above the cards. Its LEFT half buys a different random
 # trial and its RIGHT half buys no trial for the run (see
 # _click_trial_display); hovering it shows both prices.
 TRIAL_BOX_RECT = pygame.Rect(TRIAL_BOX_COORDS)
+# Energy: the run's budget for the four TOOLS (user request). Using the
+# shovel, flashlight, screwdriver or hammer spends one (see Game._apply_tool),
+# and it is back to MAX_ENERGY when a run starts (see Game.reset_run), so
+# opening structures is a per-run decision. The readout is a bar of MAX_ENERGY
+# pips in the top bar, under the cash captions and the message line, where the
+# player already looks for the game's own numbers (see ui.draw_energy_bar).
+MAX_ENERGY = 3
+ENERGY_BAR_RECT = pygame.Rect(BAR_TEXT_X, 120, 150, 24)
+ENERGY_COLOR = (110, 205, 255)  # a charged pip; an empty one is dark
 GAME_OVER_MENU_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 320, 560, 200, 48)
 GAME_OVER_NEW_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 100, 560, 200, 48)
 GAME_OVER_CONTINUE_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 + 120, 560, 200, 48)
@@ -443,8 +446,6 @@ DOPPELGANGER_START_VX = 1.0
 # it is sold (see Game._card_sold_message / _grant_permanent_tokens).
 ESSENCE_RUN_CASH = MAGNITUDES.ESSENCE_RUN_CASH
 ESSENCE_TOKENS = 2
-BOARD_UNIT_ROW = SHOP_PACK_ROW  # the offer row
-BOARD_UNIT_COL = SHOP_PACK_COL + SHOP_PACK_SLOTS  # right of the three pack slots
 FPS = 60
 DT = 1.0 / FPS
 # The Procrastination whole card sends a finished run back in time: when every

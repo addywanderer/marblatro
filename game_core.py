@@ -41,7 +41,10 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Passive,
     Rarity,
+    Structure,
+    Tool,
     Scorer,
     Shape,
     Trial,
@@ -77,6 +80,8 @@ from items import (
     ItemPack,
     ResourceOption,
     ScorerToken,
+    StructureItem,
+    ToolItem,
     CashBreakdown,
     _s,
     make_card_item,
@@ -95,6 +100,13 @@ class CoreMixin:
     board's locked squares and the player's menus."""
 
     def __init__(self):
+        # The score state (see the score_chips / score_mult properties below):
+        # the marble a payoff is currently being paid to, and the run's base
+        # chips x mult that every released marble is seeded from.
+        self._score_marble = None
+        self._base_chips = RUN_BASE_CHIPS
+        self._base_mult = RUN_BASE_MULT
+
         # The window, and the off-screen surface every frame is drawn into.
         # Drawing off-screen and presenting the finished frame in one blit (see
         # _present) is what keeps the CRT filter from flickering: the filter
@@ -181,15 +193,84 @@ class CoreMixin:
         self.profile_delete_error = False
         self.profile_name_text = ""
 
+    # --- the score: one chips/mult pair PER MARBLE ---------------------------
+    # Every marble carries its own chips and mult (Marble.chips / Marble.mult),
+    # so a block's scorer only moves the score of the marble that collided with
+    # it and two marbles on the board can be worth very different amounts.
+    #
+    # These properties keep every other reader and writer — cards, Spirit
+    # tokens, the HUD, saves, the score total — working unchanged: they resolve
+    # to "the score being paid", which is the marble the contact loop is
+    # currently handling (``_score_marble``, set in _apply_block_score_effect
+    # and around each marble's contacts), else the first marble still in play,
+    # and finally the run's BASE pair when the board holds no marble at all (a
+    # card that pays at the start of a run, before anything is released).
+    # Writing before the marbles exist therefore moves the base, and every
+    # released marble is seeded from it (see _release_start_marble).
+    @property
+    def score_marble(self):
+        if self._score_marble is not None:
+            return self._score_marble
+        for marble in self.marbles:
+            if not getattr(marble, "finished", False):
+                return marble
+        return self.marbles[-1] if self.marbles else None
+
+    @property
+    def score_chips(self):
+        marble = self.score_marble
+        return self._base_chips if marble is None else marble.chips
+
+    @score_chips.setter
+    def score_chips(self, value):
+        marble = self.score_marble
+        if marble is None:
+            self._base_chips = value
+        else:
+            marble.chips = value
+
+    @property
+    def score_mult(self):
+        marble = self.score_marble
+        return self._base_mult if marble is None else marble.mult
+
+    @score_mult.setter
+    def score_mult(self, value):
+        marble = self.score_marble
+        if marble is None:
+            self._base_mult = value
+        else:
+            marble.mult = value
+
     def reset_game(self):
         """Start a brand-new game: clear the board and reset all progress."""
         self.marbles = []
         self.grid = {}
-        self.score_chips = RUN_BASE_CHIPS
-        self.score_mult = RUN_BASE_MULT
+        self._score_marble = None
+        self._base_chips = RUN_BASE_CHIPS
+        self._base_mult = RUN_BASE_MULT
         self.run_active = False
         self.run_complete = False
         self.run_cleared = False
+        # LEVELS: a run IS a level now (see components.LEVELS). The number is
+        # what the top bar shows and how many enemies the run's level has left
+        # is worked out from the board (see live_enemies); enemies_defeated
+        # counts the kills this level.
+        self.level_number = 1
+        self.enemies_defeated = 0
+        # The level's structures this VISIT has already spent, as
+        # (value, x, y): a structure the player opens is gone until the level is
+        # laid out anew (a new level, a new game, a load), so no board edit, no
+        # R and no T can bring it back (user report: "if the player unlocks a
+        # structure using a tool, and then moves the tool, the structure will
+        # revert itself back into a locked state").
+        self.spent_structures = set()
+        # The level's structures this visit has REROLLED, as plan_index -> the
+        # value it became (see Game._action_reroll). The level lays its plan out
+        # afresh on every board edit, so what a reroll turned a structure into
+        # has to be remembered where the plan is written down — otherwise an R
+        # would quietly undo the reroll.
+        self.structure_rerolls = {}
         self.awaiting_after_run = False  # True after a run while the player picks RETRY/CONTINUE
         self.score_total = 0
         # Round / run progression: 8 rounds of 3 runs each (24 runs total).
@@ -255,11 +336,17 @@ class CoreMixin:
         # a do-over of the finished run, so those come back off the bank (the
         # rerolls from earlier runs stay); reset with every fresh run.
         self.free_rerolls_run_gain = 0
+        # The Reroll cards this run's own reroll mechanics dealt onto the board
+        # (see _spawn_reroll_cards). A retry or a restart takes them back with
+        # the run that dealt them, the way it takes back free_rerolls_run_gain;
+        # a card already used is gone and is simply not un-spent. A CONTINUED
+        # run keeps them (see _continue_run).
+        self.reroll_cards_run_gain = []
         self.option_points = 0
         # Bonus shop slots banked by Picky points (every 2 points). Each slot
-        # adds one extra random offer to every shop refresh, drawn at the same
-        # kind odds a shelf slot's is (see components.Pack.SHELF_WEIGHTS); the
-        # slots are permanent once banked.
+        # adds one extra random offer to every shop refresh, drawn exactly as a
+        # shelf slot's is (see Shop._random_offer); the slots are permanent
+        # once banked.
         self.bonus_slots = 0
         # Resource points earned THIS RUN. Like the wrecking ball's per-run
         # gain, they only move into the permanent bank — and convert into
@@ -275,8 +362,10 @@ class CoreMixin:
         #     the run's points are committed (see _commit_resource_points).
         #   resource_gain_bonus — Mass production v2: the same factor, but
         #     permanent for the game (saved).
-        #   reroll_discount — Brainstorm v2: the factor every shop reroll costs
-        #     from then on (0.5 halves it; saved).
+        #   reroll_discount — the factor a shelf refresh costs (a legacy of the
+        #     days when rerolls were shop rerolls; nothing sets it below 1 any
+        #     more, and the reroll itself is the Reroll card — see
+        #     _spawn_reroll_cards). Kept because saves carry it.
         #   run_xmult_bonus — Grace v1: xMult added to the bank of the run the
         #     action was used for. Read whenever a run starts (see reset_run),
         #     so a restart or a board edit keeps it, and spent when that run
@@ -320,6 +409,7 @@ class CoreMixin:
         # before its own touch. Bombs and Sharp blocks destroy themselves AFTER
         # a run, so they never count toward it. Reset every run.
         self.run_blocks_destroyed = 0
+        self.discarded_items_run = 0
         # True once a Debt block has triggered THIS RUN: the run then pays no
         # interest (see _award_cash). Reset at the start of every run.
         self.debt_run_triggered = False
@@ -443,6 +533,13 @@ class CoreMixin:
             (x, y) for x in range(GRID_WIDTH) for y in range(GRID_HEIGHT)}
         # Board Units currently in hand (each buys one unlocked square).
         self.board_units = 0
+        # ENERGY: the run's budget for the four TOOLS (user request: "using any
+        # of flashlight, screwdriver, shovel, or hammer consumes 1 energy"). It
+        # is back to MAX_ENERGY at the start of every run (see Game.reset_run),
+        # so it is a per-run resource rather than a permanent licence to open
+        # every structure on the board (see Game._apply_tool).
+        self.max_energy = MAX_ENERGY
+        self.energy = MAX_ENERGY
         # Cached solid-wall blocks covering the locked squares (see
         # _board_wall_blocks); rebuilt only when the locked set changes.
         self._board_walls = []
@@ -467,6 +564,10 @@ class CoreMixin:
         self.actions = []
         self.selected_action = None
         self.selected_action_subject = None
+        # The TOOL armed to open a structure, or None (see _select_tool /
+        # _apply_tool): tools work exactly like actions — select the tool, select
+        # the structure, press S — but they are never spent.
+        self.selected_tool = None
         # The pack the player is currently choosing from, or None (see
         # _open_pack / _click_pack): buying a pack opens it, and its overlay
         # holds the screen until the player has kept everything the size
@@ -577,6 +678,14 @@ class CoreMixin:
         self.toolbox.add(BlockItem(0, 1, Shape.RECT, Effect.NONE, Scorer.FINISH, 0,
                                    block_price_for(Shape.RECT, [], Scorer.FINISH),
                                    "Finish Block", effects=[]))
+        # The player also starts with the four TOOLS (user request: "make the
+        # player start with these 4 items"): a shovel digs, a flashlight
+        # reveals, a screwdriver fixes and a hammer breaks, and using one on a
+        # structure opens it (see Structure / Game._apply_tool). They are never
+        # spent and never dealt — they stay on the board like the role blocks —
+        # so a structure can be opened whenever it turns up.
+        for row, tool in enumerate(Tool.STARTERS):
+            self.toolbox.add(ToolItem(tool, 0, row))
         # The Start and Finish run-role scorers need no entry in the player's
         # collection: every game hands the player those two toolbox blocks, so
         # collection.is_component_discovered reports them as known by itself
@@ -601,6 +710,16 @@ class CoreMixin:
         # The deck overlay (see Game.toggle_deck / ui.draw_deck_overlay) is
         # showing while this is True.
         self.deck_shown = False
+        # The items the current run's draw dealt from the deck — at most
+        # DECK_DRAW_SIZE of them (see Game.draw_deck_hand). The board also shows
+        # the role blocks, the tools and whatever the player gained this run, so
+        # this is what the DECK button reports as "drawn".
+        self.deck_drawn = []
+        # An Eyeball pick in progress: the action whose cards are being chosen
+        # and how many picks it has left (see Game.arm_deck_pick). While one is
+        # armed, the deck overlay is a picker rather than a look.
+        self.deck_pick_action = None
+        self.deck_pick_left = 0
         # The pan gesture: a press on board space with no item under it starts
         # one (see InputMixin.handle_events), and a drag from there scrolls the
         # board (see Game.pan_board).
@@ -649,12 +768,34 @@ class CoreMixin:
             for dx in range(BOARD_START_WIDTH)
             for dy in range(BOARD_START_HEIGHT)}
         self.board_units = 0
+        # The level the first run plays is laid out NOW, before the first frame
+        # and long before the player presses T (user request: "load the level
+        # beforehand ... so that the level does not appear to change randomly"):
+        # its own squares are opened, its props, structures and enemies stand on
+        # their squares, and the items below are laid out around them. A
+        # brand-new game therefore opens on the level it is about to play, not on
+        # a bare start region that turns into a level when the run begins.
+        self._begin_level()
         # A square that is locked again cannot hold an item, so the layout is
         # re-made: anything the new region does not cover moves inside it.
         for item in self.owned_items():
             if getattr(item, "placed_cell", None) is None:
                 self.set_item_cell(item, None)
+        # Everything but the role blocks goes into the deck FIRST, so the opening
+        # hand is a real draw: a brand-new game used to keep the four tools on the
+        # squares they were built on, which left the deck empty and dealt a hand
+        # of nothing (see _return_hand_to_deck).
+        self._return_hand_to_deck()
         self.ensure_board_cells()
+        # A brand-new game deals its opening hand through the same draw a run
+        # does: every item the player starts with (the four TOOLS) is in the deck
+        # now (user request: "shovel, flashlight, screwdriver, hammer all count as
+        # items, meaning they are part of the condition that only 4 items can be
+        # drawn"), so the board holds DECK_DRAW_SIZE of them plus the START and
+        # FINISH blocks, and the DECK button's count is honest from the first
+        # frame.
+        self.deck_drawn = []
+        self.draw_deck_hand()
         self._board_walls = []
         self._board_walls_dirty = True
         self.reset_camera()
@@ -852,10 +993,10 @@ class CoreMixin:
         self._set_shop_message(
             f"Board expanded {total} square{plural}{detail}")
 
-    # The Board Unit tile used to live in the shop panel. There is no panel any
-    # more: the tile is a shelf OFFER lying on the board (see
-    # items.BoardUnitOffer), bought by right-clicking it like every other offer
-    # (see Game._buy_board_unit).
+    # The Board Unit used to be a tile in the shop panel, then an offer lying on
+    # the board; it is a BUTTON in the top bar now (user request: "make board
+    # slots a button in the top bar instead of a shop item"), drawn and clicked
+    # as ui.BOARD_UNIT_BUTTON_RECT / InputMixin.handle_events.
 
     def _board_wall_blocks(self):
         """The solid wall Blocks covering the locked squares (cached).
@@ -970,14 +1111,28 @@ class CoreMixin:
         self.actions.append(item)
         self._on_item_gained(item)
 
+    def _adopt_pack(self, pack):
+        """Take ownership of a PACK: it is a portable item like any other.
+
+        Packs are items now (user request: "make packs a type of item that open
+        when the player selects one and presses 's'"): buying one hands over the
+        pack itself, and it sits on the board until the player opens it. Nothing
+        is opened here — see Game._open_owned_pack.
+        """
+        if self.owns_item(pack):
+            return
+        self.toolbox.add(pack)
+
     def owns_item(self, item):
         """True when this EXACT object is one of the player's items.
 
-        Identity, not value: two copies of a card are different items, and a
-        shelf offer is not the player's until it is bought (see items.owned_copy).
-        One object is never owned twice — a double click on a shop offer is one
-        purchase, not two, and no item can wear two board squares or two
-        switches (user report: glitches with several copies of the same item).
+        Identity, not value: two copies of a card are different items, and a shelf
+        offer is not the player's until it is bought — at which point the offer
+        ITSELF becomes the player's item, unlocked where it lay (see
+        Game._unlock_offer). One object is never owned twice — a double click on a
+        shop offer is one purchase, not two, and no item can wear two board squares
+        or two switches (user report: glitches with several copies of the same
+        item).
         """
         if item is None:
             return False
@@ -1019,6 +1174,45 @@ class CoreMixin:
         else:
             item.board_cell = None if x is None else (x, y)
 
+    def _first_free_cell(self, blocked=()):
+        """The first unlocked square nothing stands on, or None.
+
+        ``blocked`` adds squares to avoid (the one an item is about to take, and
+        any a caller is about to fill). Every item the player owns and every offer
+        on the shelf counts as a claim, so an item re-seated here never lands on
+        top of another one — which is how a structure moved onto a tool leaves the
+        tool on the board instead of dropping it into the deck (user report).
+        """
+        claimed = set(self.grid) | set(blocked)
+        for item in self.owned_items():
+            cell = self.item_cell(item)
+            if cell is not None:
+                claimed.add(cell)
+        for offer in getattr(self.shop, "items", ()):
+            cell = self.item_cell(offer)
+            if cell is not None:
+                claimed.add(cell)
+        return self._free_board_cell(claimed)
+
+    def _seat_aside(self, item, cell):
+        """Move an item off ``cell``, keeping it ON the board, or say why not.
+
+        Two items never take each other's square away by being moved: the one
+        standing there is given ``cell`` when it is free (a swap) and the first
+        free square otherwise, and only when the board has no room at all is the
+        move refused — a tool that vanished into the deck was a bug (user
+        report), not a layout.
+        """
+        target = self.item_cell(item)
+        if target is not None and target != cell and self.item_at_cell(target) is None:
+            self.set_item_cell(item, target)
+            return True
+        free = self._first_free_cell(blocked={cell})
+        if free is None:
+            return False
+        self.set_item_cell(item, free)
+        return True
+
     def _free_board_cell(self, claimed):
         """The first UNLOCKED square nothing stands on, in reading order.
 
@@ -1048,9 +1242,9 @@ class CoreMixin:
         square to everything the player owns: an item lying on the board keeps the
         square it claims unless a BLOCK has taken it or the square is (or has
         become) LOCKED, and an item that has no square is simply IN THE DECK (see
-        Game.deck_items) until a draw deals it one. Only two kinds are always
+        Game.deck_items) until a draw deals it one. Only a few kinds are always
         placed: the START and FINISH role blocks (so a run can always begin) and
-        the shop's offers.
+        the shop's offers (the free structures among them).
 
         It is idempotent and cheap (a few dozen items over the unlocked squares),
         so the board reads it whenever it draws or hit-tests rather than every
@@ -1080,16 +1274,22 @@ class CoreMixin:
             else:
                 claimed.add(cell)
         # A role block is never in the deck: the START and FINISH blocks stay on
-        # the board so the player can always build a run (see _cycle_deck).
+        # the board so the player can always build a run (see _cycle_deck). The
+        # TOOLS are dealt with the rest of the deck now (user request: "shovel,
+        # flashlight, screwdriver, hammer all count as items"), so an item with no
+        # square is in the deck, tools included.
         for item in items:
-            if (self.item_cell(item) is None
-                    and getattr(item, "scorer", None) in (Scorer.START,
-                                                          Scorer.FINISH)):
-                cell = self._free_board_cell(claimed)
-                if cell is None:
-                    continue
-                self.set_item_cell(item, cell)
-                claimed.add(cell)
+            if self.item_cell(item) is not None:
+                continue
+            keeps_its_place = getattr(item, "scorer", None) in (Scorer.START,
+                                                               Scorer.FINISH)
+            if not keeps_its_place:
+                continue
+            cell = self._free_board_cell(claimed)
+            if cell is None:
+                continue
+            self.set_item_cell(item, cell)
+            claimed.add(cell)
         # The player's own items come before the shelf's: something that was
         # waiting for a square (see _on_item_gained) takes a newly opened one
         # before an offer is dealt it.
@@ -1169,6 +1369,17 @@ class CoreMixin:
         """
         return self.shop.is_offer(item)
 
+    def is_free_structure(self, item):
+        """True when ``item`` is a structure, which is always the player's to use.
+
+        Structures are free now (user request: "make all structures free (no need
+        to buy them for them to be used)"): the shelf hands them over as scenery
+        and a tool opens one where it lies (see _apply_tool), so a structure wears
+        no padlock, costs nothing, and is never "not yours yet" — even though it
+        still stands in the shop's list until it is spent (see _consume_structure).
+        """
+        return getattr(item, "kind", None) == "structure"
+
     def board_blocks(self):
         """The BLOCKS standing on the board — the only board items the marble meets.
 
@@ -1202,8 +1413,9 @@ class CoreMixin:
     def _buy_board_unit(self):
         """Buy one Board Unit (see _board_unit_price): an expansion for any locked square.
 
-        Always available (the shop's fixed Board Unit tile), buyable as many
-        times as the player's cash allows. Units in hand are saved/restored
+        The top bar's BOARD UNIT button calls this (see ui.draw_board_unit_button
+        / InputMixin.handle_events). It is always available, buyable as many
+        times as the player's cash allows, and units in hand are saved/restored
         with the game (see save_system) and only reset when a NEW game starts.
         """
         price = self._board_unit_price()
@@ -1218,10 +1430,9 @@ class CoreMixin:
     def _board_unit_price(self):
         """The Board Unit price: BOARD_UNIT_PRICE, or the Mineshaft price.
 
-        The Mineshaft whole card makes expanding the board cheaper. The shop's
-        Board Unit tile, its price label and every "unlock this square"
-        message read this method, so the displayed and charged prices always
-        agree.
+        The Mineshaft whole card makes expanding the board cheaper. The bar's
+        BOARD UNIT button and every "unlock this square" message read this
+        method, so the displayed and charged prices always agree.
         """
         if self._has_card(Card.MINESHAFT):
             return MINESHAFT_BOARD_UNIT_PRICE
@@ -1329,6 +1540,12 @@ class CoreMixin:
             collection.discover_component(Component.SCORER, value)
         for value in Pack.ORDER:
             collection.discover_pack(value)
+        for value in Tool.ORDER:
+            collection.discover_tool(value)
+        for value in Passive.ORDER:
+            collection.discover_passive(value)
+        for value in Structure.ORDER:
+            collection.discover_structure(value)
         for value in Trial.ORDER:
             collection.discover_trial(value)
 

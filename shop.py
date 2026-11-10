@@ -16,20 +16,26 @@ from components import (
     Component,
     Effect,
     Pack,
+    Passive,
     Scorer,
     Shape,
+    Structure,
+    Tool,
     block_price_for,
     magnitude_precision,
     pack_price,
     resource_points_for,
+    tool_pack_options,
 )
 from config import *
 from items import (
     ActionItem,
     BlockItem,
-    BoardUnitOffer,
     ItemPack,
+    PassiveItem,
     ResourceOption,
+    StructureItem,
+    ToolItem,
     make_card_item,
     offer_key,
 )
@@ -37,14 +43,17 @@ from rolling import *
 
 
 class Shop:
-    """The shelf: the offers the player may buy, each an item lying on the board.
+    """The board's offers: what stands on it, and where.
 
-    There is no shop PANEL any more (user request: "completely remove the shop's
-    box"): the offers stand on unlocked board squares, are bought by
-    right-clicking them and are drawn with the rest of the board's items. What
-    is left here is the shelf's LOGICAL grid — how many offers a refresh deals,
-    which slot each one came from and where a restored save's offers are
-    seated (see refresh / reseat / slot_key).
+    There is no shop PANEL, and since the level took the structures over and the
+    per-run packs were removed (user request: "add structures as part of the
+    level. remove the remaining shop items (packs generated each run)") there is
+    no shelf dealing anything either: a refresh empties the shelf and the level
+    being played lays its own structures out (see Shop.refresh and
+    Game._place_level_structures). What is left here is the offer bookkeeping the
+    rest of the game still reads -- where an offer stands, whether a cell holds
+    one -- plus the buying and hoarding paths a save from before the change can
+    still use.
     """
     def __init__(self, rect, game=None):
         # The logical grid only: no panel is drawn at these coordinates.
@@ -105,111 +114,21 @@ class Shop:
         return {action.value for action in game.actions}
 
     def refresh(self):
-        """Reroll the shelf: SHOP_ITEM_SLOTS random offers and SHOP_PACK_SLOTS packs.
+        """Clear the shelf: nothing is sold any more.
 
-        The five item slots each hold ONE offer of a drawn kind — a
-        shape/effect/scorer component, a ready-made block, a card or an action
-        (see _random_offer) — so the shelf shows a mix rather than a fixed
-        layout, and no two slots show the same thing. The kinds are drawn at
-        their own odds rather than equally (see components.Pack.SHELF_WEIGHTS:
-        a shelf offer is a card 23% of the time, an action 15%, a scorer 22%, a
-        block 20%, an effect 12% and a shape 8%). The three pack slots hold
-        ITEM PACKS (see components.Pack), each of a randomly drawn type AND
-        size, which the player buys and then keeps part of (see _roll_pack).
-
-        The offers the Hoard whole card is holding are put back afterwards, so a
-        held cell is the one part of the shelf a reroll does not touch.
+        Structures are part of the LEVEL now (components.Level places them, see
+        Game._place_level_structures) and the packs that used to be generated
+        every run are gone (user request: "add structures as part of the level.
+        remove the remaining shop items (packs generated each run)"). So a
+        refresh -- which happens once per run -- empties the shelf, and the level
+        that run plays lays its own structures out afterwards (see _begin_level).
         """
-        # Hoard's held offers, remembered by CELL: refresh rebuilds the whole
-        # row, so the cell is the only thing that can carry an offer across one
-        # (see slot_key). The held cells are clipped to what the player may hold
-        # right now, so a Hoard that has been sold or cut by the Card cutter
-        # releases what it was holding (see Game.shop_lock_cap). Only the HELD
-        # cells are remembered: every other cell is about to be rerolled, and
-        # carrying those over too would make the reroll a no-op.
-        self.locked = self.locked[:self._lock_cap()]
-        held_offers = {self.slot_key(item): item for item in self.items
-                       if self.slot_key(item) in self.locked}
-        # The Board Unit offer rides with the shelf: it is always on offer (see
-        # items.BoardUnitOffer), so a refresh answers the same board-expansion
-        # question the first shelf did. The offer the player already has is KEPT
-        # rather than replaced, so the square it was moved to is the square it
-        # stays on (it is put back at the end of this method).
-        units = [item for item in self.items
-                 if getattr(item, "kind", None) == "unit"]
-        unit = units[0] if units else BoardUnitOffer(BOARD_UNIT_PRICE)
-        self.items = []
-        # SHOP_ITEM_SLOTS "any item" offers along the shelf's top row: each is
-        # one component, block, card or action, drawn uniformly and kept apart
-        # from the other slots (see _random_offer).
-        used = set()
-        for index in range(SHOP_ITEM_SLOTS):
-            self.items.append(self._random_offer(col=1 + index, row=SHOP_ITEM_ROW,
-                                                 used=used))
-        # SHOP_PACK_SLOTS item packs beside the item offers, on the same row and
-        # to their right (see SHOP_PACK_COL), with the fixed Board Unit tile
-        # right of them: a pack is a randomly drawn TYPE at a randomly drawn
-        # SIZE, and holding one opens it to choose from its options (see
-        # _roll_pack).
-        for index in range(SHOP_PACK_SLOTS):
-            self.items.append(self._roll_pack(random.choice(Pack.ORDER),
-                                              random.choice(Pack.SIZE_ORDER),
-                                              col=SHOP_PACK_COL + index,
-                                              row=SHOP_PACK_ROW))
-        # COMMENTED OUT with the conditions: the two condition-component slots
-        # and the two-scorers-plus-four-cards layout they sat in. The shelf is
-        # now SHOP_ITEM_SLOTS mixed offers rather than a fixed grid of kinds, so
-        # those slots are gone; the condition code stays here as history.
-        #
-        # shape_pool = [s for s in Shape.ORDER if s != Shape.RECT]
-        # effect_pool = [e for e in Effect.ORDER if e != Effect.NONE]
-        # scorer_pool = [s for s in Scorer.SHOP_ORDER if s != Scorer.NONE]
-        # shape_weights = [component_weight(Component.SHAPE, s) for s in shape_pool]
-        # effect_weights = [component_weight(Component.EFFECT, e) for e in effect_pool]
-        # scorer_weights = [component_weight(Component.SCORER, s) for s in scorer_pool]
-        # for shape in weighted_sample_without_replacement(shape_pool, shape_weights, 2):
-        #     self.items.append(Component.shape_component(shape, col=col, row=1))
-        # for effect in weighted_sample_without_replacement(effect_pool, effect_weights, 2):
-        #     self.items.append(Component.effect_component(
-        #         effect, magnitude=self._quake_effect(effect), col=col, row=1))
-        # for scorer in weighted_sample_without_replacement(scorer_pool, scorer_weights, 3):
-        #     self.items.append(self._scorer_offer(scorer, col, 1))
-        # card_col = 1
-        # for card in random_card_option_values(4, self.owned_cards()):
-        #     self.items.append(make_card_item(card, col=card_col, row=3))
-        # cond_weights = [component_weight(Component.CONDITION, c) for c in CONDITION_ORDER]
-        # for condition in weighted_sample_without_replacement(CONDITION_ORDER,
-        #                                                      cond_weights, 2):
-        #     self.items.append(Component.condition_component(condition, col=cond_col, row=3))
-        # action_pool = [a for a in Action.ORDER if a not in self.owned_actions()]
-        # for action in random.sample(action_pool, SHOP_ACTION_SLOTS):
-        #     self.items.append(ActionItem(action, Action.PRICES.get(action, 60),
-        #                                  version=random_action_version(),
-        #                                  col=action_col, row=3))
-        # for _ in range(2):
-        #     self.items.append(self._random_block_offer(block_col, 3))
-        # Picky bonus slots: each banked slot adds one extra random offer to
-        # the shop, of a kind drawn at the same odds a shelf slot's is (see
-        # components.Pack.SHELF_WEIGHTS). The offers take the cells the panel
-        # has room for below the standard rows (see _bonus_cells) and reappear
-        # every time the shop refreshes; a slot past the panel's last cell
-        # simply deals nothing, rather than an offer drawn outside the panel it
-        # belongs to.
-        for index, (col, row) in enumerate(self._bonus_cells()):
-            if index >= self.bonus_slots:
-                break
-            self.items.append(self._random_offer(col=col, row=row))
-        # Hoard: the held cells take their offers back, unchanged — the same
-        # item at the same price, in the cell the player pinned it to. Every
-        # other cell keeps what this reroll rolled for it.
-        for index, item in enumerate(self.items):
-            kept = held_offers.get(self.slot_key(item))
-            if kept is not None:
-                self.items[index] = kept
-        # ...and last, the Board Unit offer captured at the top, in the last slot
-        # the layout has.
-        unit.col, unit.row = BOARD_UNIT_COL, BOARD_UNIT_ROW
-        self.items.append(unit)
+        # The LEVEL's structures are not the shelf's to clear: they are scenery
+        # it laid out on its own squares (see Game._place_level_structures), and
+        # a reroll that wiped them took the run's structures off the board.
+        self.items = [item for item in self.items
+                      if getattr(item, "is_level_structure", False)]
+        self.locked = []
 
     def _bonus_cells(self):
         """The cells an offer may take past the two standard rows, in order.
@@ -229,13 +148,12 @@ class Shop:
         change under a save's feet: offers restored verbatim can land in cells
         this layout does not have — over the cash header, or off the panel's
         right edge. The offer's kind and its place in the row are what decide its
-        cell (the same rule refresh deals by): the packs take the pack row beside
-        the fixed Board Unit tile, every other offer the "any item" row, and
-        anything past those two rows is a Picky bonus slot, which fills the rows
-        below both. An offer the panel has no cell left for is DROPPED: a save
-        written under an older shelf can hold more offers than this layout has
-        places to put them, and one that cannot be seen or clicked is not worth
-        keeping in the shelf.
+        cell (the same rule refresh deals by): the packs take the pack row, every
+        other offer (a structure) the offer row, and anything past those two rows
+        is a Picky bonus slot, which fills the rows below both. An offer the panel
+        has no cell left for is DROPPED: a save written under an older shelf can
+        hold more offers than this layout has places to put them, and one that
+        cannot be seen or clicked is not worth keeping in the shelf.
 
         Returns {(old col, old row): (new col, new row)}, so a caller restoring
         more than the offers — the Hoard card's held cells — can move those along
@@ -247,16 +165,11 @@ class Shop:
         item_col = 1
         pack_col = SHOP_PACK_COL
         for item in self.items:
-            kind = getattr(item, "kind", None)
-            if kind == "unit":
-                # The Board Unit offer's cell is FIXED (see Shop.refresh), so it
-                # goes back to the slot right of the packs and takes no other
-                # cell — a save can never push it into a bonus cell.
-                cell = (BOARD_UNIT_COL, BOARD_UNIT_ROW)
-            elif kind == "pack" and pack_col < SHOP_PACK_COL + SHOP_PACK_SLOTS:
+            is_pack = getattr(item, "kind", None) == "pack"
+            if is_pack and pack_col < SHOP_PACK_COL + SHOP_PACK_SLOTS:
                 cell = (pack_col, SHOP_PACK_ROW)
                 pack_col += 1
-            elif kind != "pack" and item_col <= SHOP_ITEM_SLOTS:
+            elif not is_pack and item_col <= SHOP_ITEM_SLOTS:
                 cell = (item_col, SHOP_ITEM_ROW)
                 item_col += 1
             else:
@@ -386,38 +299,48 @@ class Shop:
                          effect_amounts=self._quake_effect_amounts(effects))
 
     def _random_offer(self, col, row, used=None):
-        """One shop offer, of a kind drawn at that kind's own odds.
+        """One shelf offer: a STRUCTURE, at the odds Structure.OFFER_WEIGHTS sets.
 
-        ``used`` is the set of offers already on this shelf (or, for a random
-        pack, already in that pack), as (kind, value) keys: an offer that is
-        already there is re-rolled so two slots never sell the same thing. A
-        pool too small to fill every slot with something new (a player who owns
-        most of the cards) simply repeats after OFFER_DUPLICATE_TRIES, so a
-        slot is never left empty.
+        Structures are what the shelf shows now (user request: "replace shop
+        items with structures"), and they are FREE (user request: "make all
+        structures free"): one lies on the board, wearing no padlock, until a
+        tool opens it where it is (see Structure / Game._apply_tool). Pits are the
+        plainest and most common, mirrors the rarest — the odds live with the
+        structure data so there is one place to tune them.
+
+        ``used`` is the set of structure values already on this shelf: they are
+        left out of the draw, so a shelf of five slots shows all three kinds
+        before it repeats one (and repeats only because there is nothing left to
+        deal).
         """
-        for _ in range(OFFER_DUPLICATE_TRIES if used is not None else 1):
-            offer = self._roll_random_offer(col, row)
-            key = offer_key(offer)
-            if used is None or key not in used:
-                if used is not None:
-                    used.add(key)
-                return offer
-        return offer
+        # A level deals its OWN structures (see components.Level), so each level
+        # offers a different set to open; a game with no level (a bare test game)
+        # may deal any of them.
+        allowed = self._level_structures()
+        pool = [value for value in Structure.ORDER
+                if allowed is None or value in allowed]
+        pool = [value for value in pool if used is None or value not in used]
+        if not pool:
+            pool = list(Structure.ORDER)
+        weights = [Structure.weight(value) for value in pool]
+        value = random.choices(pool, weights=weights, k=1)[0]
+        if used is not None:
+            used.add(value)
+        return StructureItem(value, Structure.PRICES[value], col=col, row=row)
 
-    def _roll_random_offer(self, col, row):
-        """One random offer, of a kind drawn at that kind's own odds.
+    def _level_structures(self):
+        """The structures the level being played may deal (None = any of them).
 
-        The kinds do not come up equally often: a shelf slot is a CARD offer
-        23% of the time and a shape offer only 8% of the time (see
-        components.Pack.SHELF_WEIGHTS, the one place the odds are set), so the
-        shop keeps the mix it has rather than whatever six equally likely kinds
-        would give. The weights are read per kind, so they follow the kind list:
-        a shelf restricted to a subset of kinds still draws only from it, at
-        those kinds' odds relative to each other.
+        A level AUTHORED these (see components.Level.authored_structures), not
+        just the four its run plans out: a bonus slot is a spare, and it may deal
+        any kind the level knows — which is what makes the last level's shelf hold
+        every structure in the game.
         """
-        weights = [Pack.shelf_weight(t) for t in SHELF_OFFER_TYPES]
-        return self._offer_of(random.choices(SHELF_OFFER_TYPES, weights=weights,
-                                             k=1)[0], col, row)
+        game = self.game
+        level = game.current_level() if game is not None else None
+        if level is None or not level.authored_structures:
+            return None
+        return set(level.authored_structures)
 
     def _offer_of(self, source, col, row, parts_only=False):
         """An offer of one PACK TYPE's goods, at this shop's rolls and prices.
@@ -471,6 +394,25 @@ class Shop:
         value = random.choice(pool)
         return ActionItem(value, Action.PRICES.get(value, 60),
                           version=rolling.random_action_version(), col=col, row=row)
+
+    def _roll_tool_option(self, used=None):
+        """One option of a TOOL pack: a one-shot tool or a passive item.
+
+        User request: "add an item, 'concrete' ... add an item, 'brick' ... add an
+        item, 'match'". These are the items a TOOL pack deals (see
+        components.tool_pack_options), so the level's structures can hand over
+        something to use up: a brick to open a structure for free, a match to
+        reveal one and draw for it, or a passive that simply pays. ``used`` keeps
+        an option off the ones already dealt, exactly as every other pack does.
+        """
+        pool = [entry for entry in tool_pack_options()
+                if entry not in (used or ())]
+        if not pool:
+            pool = list(tool_pack_options())
+        kind, value = random.choice(pool)
+        if kind == "passive":
+            return PassiveItem(value, Passive.PRICES.get(value, 16))
+        return ToolItem(value, Tool.PRICES.get(value, 12))
 
     def _roll_resource_option(self, used=None):
         """One resource pack option: points of a random resource scorer.
@@ -540,6 +482,8 @@ class Shop:
             parts_only = False
         if source == Pack.RESOURCE:
             return self._roll_resource_option(used)
+        if source == Pack.TOOL:
+            return self._roll_tool_option(used)
         for _ in range(OFFER_DUPLICATE_TRIES):
             option = self._offer_of(source, 0, 0, parts_only=parts_only)
             key = offer_key(option)

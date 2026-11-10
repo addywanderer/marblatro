@@ -71,6 +71,7 @@ from config import *
 from blocks import Block
 from items import (
     CASH_BREAKDOWN,
+    ENERGY_READOUT,
     ActionItem,
     BlockItem,
     CardItem,
@@ -118,12 +119,20 @@ class EconomyMixin:
         # shows where the last run's dollars came from.
         if ui.last_run_cash_rect(self).collidepoint(pos):
             return CASH_BREAKDOWN, "cash"
+        # The energy bar is not an item either: hovering it says what the run's
+        # energy is spent on and when it comes back (see ui.draw_energy_bar).
+        if ui.energy_bar_rect(self).collidepoint(pos):
+            return ENERGY_READOUT, "energy"
         item = self.shop.item_at(pos)
         if item is not None:
             return item, "shop"
         # Every owned item stands on the board (see Game.ensure_board_cells), so
         # one lookup finds a block, a component, a card or an action alike.
         board_item = self.board_item_at(pos)
+        if getattr(board_item, "is_enemy", False):
+            # Hovering an enemy reads out the enemy (see _describe_item), not an
+            # item the player owns -- it is not one.
+            return board_item, "enemy"
         if board_item is not None:
             return board_item, "board"
         token = self.token_at(pos)
@@ -137,13 +146,19 @@ class EconomyMixin:
         Every action the shop offers is rolled for its version (see
         random_action_version), so roughly one in a hundred actions arrives
         already upgraded — a straight saving of ACTION_UPGRADE_COST, and easy to
-        miss among the shop's other tiles. The shelf tile itself is gold-framed
-        and tagged (see ui.draw_action), and this appends the name to the reroll
-        message so a player who does not read the shelves is still told.
+        miss among the shop's other tiles. The shelf sells structures, so the
+        actions come inside the action packs on it: a pack's own options are
+        read too, and the tile itself is gold-framed and tagged (see
+        ui.draw_action). This appends the name to the reroll message so a player
+        who does not read the shelves is still told.
         """
-        upgraded = [i for i in self.shop.items
-                    if getattr(i, "kind", None) == "action"
-                    and getattr(i, "version", 1) >= 2]
+        upgraded = []
+        for item in self.shop.items:
+            options = getattr(item, "options", None)
+            for option in options if options is not None else [item]:
+                if (getattr(option, "kind", None) == "action"
+                        and getattr(option, "version", 1) >= 2):
+                    upgraded.append(option)
         if not upgraded:
             return ""
         names = ", ".join(self._item_name(i) for i in upgraded)
@@ -198,8 +213,67 @@ class EconomyMixin:
         sounds.play_mech()
         return True
 
+    def _spawn_reroll_cards(self, count=1, run_granted=False):
+        """Put Reroll cards on the board: what every reroll mechanic hands over.
+
+        User request: "make all reroll mechanics spawn this card on the board
+        when triggered." There is no shop refresh to bank a free reroll for any
+        more (the shelf is the level's own structures and the REFRESH button is
+        gone), so a mechanic that used to grant a reroll grants the card that
+        IS one: it takes a free square like any other action, so the player can
+        aim it at a structure straight away.
+
+        ``run_granted`` marks a card the RUN earned (a Fresh trigger): those are
+        remembered so that retrying or restarting the run deals them back with
+        it (see _take_back_run_rerolls). A card bought with cash (Brainstorm)
+        is the player's whatever happens to the run.
+        """
+        made = []
+        for _ in range(max(0, int(count))):
+            card = ActionItem(Action.REROLL, Action.PRICES[Action.REROLL])
+            self._adopt_action(card)
+            self._discover_action(Action.REROLL)
+            made.append(card)
+        if not made:
+            return made
+        if run_granted:
+            self.reroll_cards_run_gain.extend(made)
+        plural = "" if len(made) == 1 else "s"
+        self._set_shop_message(
+            f"{len(made)} Reroll card{plural} — select one and a structure, "
+            "then press S")
+        sounds.play_coin()
+        return made
+
+    def _take_back_run_rerolls(self):
+        """Undo the Reroll cards a discarded run dealt (see _spawn_reroll_cards).
+
+        A retry or a restart throws the run away, so what its Fresh hits handed
+        over must not outlive it — the same rule the free rerolls it used to
+        bank followed. A card the player has already USED is gone from the
+        board, so only the ones still owned are taken back: spending is never
+        un-spent. A run that was CONTINUE'd clears the ledger without coming
+        here (see _continue_run), so a committed run keeps its cards.
+        """
+        for item in getattr(self, "reroll_cards_run_gain", ()):
+            if not self.owns_item(item):
+                continue
+            if item in self.actions:
+                self.actions.remove(item)
+            self.assigned_toolbox_indexes.pop(item, None)
+            self._forget_item(item)
+        self.reroll_cards_run_gain = []
+
     def _refresh_shop(self):
-        """Reroll the shop — free while a Fresh reroll is banked, else for cash."""
+        """Reroll the shelf — the PARKED shop refresh (see draw_shop's note).
+
+        Nothing in the interface calls this any more: a reroll is the REROLL
+        CARD now (see _action_reroll), which Fresh and Brainstorm deal onto the
+        board, and the shelf only ever holds a level's own free structures
+        anyway. It is kept because a save still carries the free_rerolls and
+        reroll_discount it spends, and because a shop REFRESH is still how a
+        test stocks a shelf.
+        """
         if self.free_rerolls > 0:
             self.free_rerolls -= 1
             self.shop.refresh()
@@ -220,12 +294,13 @@ class EconomyMixin:
                                f"{self._v2_shelf_note()}")
 
     def refresh_cost(self):
-        """The cash a shop reroll costs right now.
+        """The cash a shelf refresh costs right now.
 
-        The inflation trial inflates it (see _inflated) and Brainstorm's v2
-        halves it (see reroll_discount), rounded to the nearer dollar and never
-        below $1. The shop's REFRESH button reads this too, so the price on the
-        button and the price charged can never drift apart.
+        The inflation trial inflates it (see _inflated) and a legacy discount
+        (see reroll_discount) scales it, rounded to the nearer dollar and never
+        below $1. Nothing calls this from the interface any more — a reroll is
+        the Reroll card, not a refresh — but a save carries the discount, so
+        the price stays computable.
         """
         cost = self._inflated(SHOP_REFRESH_COST) * self.reroll_discount
         return max(1, int(cost + 0.5))
@@ -233,10 +308,19 @@ class EconomyMixin:
     def _tesseract_reroll_note(self):
         """Grow the Tesseract bonus for this reroll; a note for the message.
 
-        Called on every shop reroll (paid or free): while the Tesseract whole
+        Called on every shop refresh (paid or free): while the Tesseract whole
         card is owned, its permanent xMult bonus grows by
         TESSERACT_REROLL_XMULT and the reroll message reports the new total so
         the growth is visible while the player rerolls.
+        """
+        return self._grow_tesseract()
+
+    def _grow_tesseract(self):
+        """One reroll has happened: Tesseract's permanent xMult grows.
+
+        A reroll is the Reroll card now (see _action_reroll), so using one is
+        what a Tesseract counts — the note is appended to the card's message so
+        the growth is visible as it happens. Nothing happens without the card.
         """
         if not self._has_card(Card.TESSERACT):
             return ""
@@ -245,6 +329,10 @@ class EconomyMixin:
 
     def _trim_shop_for_trial(self):
         """Slim pickings: remove two random shop options for this run.
+
+        The shelf deals nothing any more (the level owns the structures and the
+        per-run packs are gone), so there is normally nothing to trim; the rule
+        is kept for a save that still holds offers.
 
         Called wherever a shop and the run's trial meet: after every shop
         refresh (so each rerolled shop is two options lighter), when a run
@@ -261,8 +349,11 @@ class EconomyMixin:
         # A held offer is left alone: Hoard's whole promise is that the offer it
         # holds stays put, and this trim runs right after every reroll — the
         # exact moment a held offer would otherwise vanish.
+        # A structure the LEVEL put out is not a shelf option: trimming it took
+        # the run's own structures off the board.
         free = [item for item in self.shop.items
-                if self.shop.slot_key(item) not in self.shop.locked]
+                if self.shop.slot_key(item) not in self.shop.locked
+                and not getattr(item, "is_level_structure", False)]
         if len(free) > 2:
             for item in random.sample(free, 2):
                 self.shop.items.remove(item)
@@ -630,6 +721,55 @@ class EconomyMixin:
         self._set_shop_message(f"Disassembled {name} (${cost})")
         sounds.play_mech()
 
+    def _discard_item(self, item):
+        """Throw an item away for good: it leaves the player's ownership (Wasteful).
+
+        The same doors selling uses, without the money (see _sell_selected_item):
+        a placed block comes off the board and takes the inventory item it was
+        built from with it, a card leaves the card area, an action the action
+        area and everything else the toolbox — and a Portal or Key/Lock block
+        takes its partner with it, because neither half can exist alone.
+
+        Returns True when the item is gone.
+        """
+        if item is None:
+            return False
+        if isinstance(item, Block):
+            block = self.grid.pop((item.x, item.y), item)
+            self._forget_item(block)
+            self._release_block_item(block)
+            self._count_discard()
+            return True
+        kind = getattr(item, "kind", None)
+        if kind == "card" and item in self.cards:
+            self.cards.remove(item)
+        elif kind == "action" and item in self.actions:
+            self.actions.remove(item)
+        elif self.toolbox.contains(item):
+            self.toolbox.remove(item)
+            if kind == "block":
+                # A pairing block cannot exist without its partner.
+                self._delete_pairing_partners(item)
+        elif item in self.shop.items:
+            # A free structure the shelf is showing: nothing was paid for it.
+            self.shop.items.remove(item)
+        else:
+            return False
+        self.assigned_toolbox_indexes.pop(item, None)
+        self._forget_item(item)
+        self._count_discard()
+        return True
+
+    def _count_discard(self):
+        """Note one item thrown away this run.
+
+        Every discard goes through _discard_item, so this is the one place the
+        run's count moves: Wasteful throwing its pair, a Lantern burning itself
+        out (see Game._action_lantern), a golem folding one item into another.
+        The Trash Can whole card pays for what this counts.
+        """
+        self.discarded_items_run = getattr(self, "discarded_items_run", 0) + 1
+
     def _delete_pairing_partners(self, item):
         """Delete the blocks that pair with a removed block.
 
@@ -670,6 +810,8 @@ class EconomyMixin:
                 # could still act on (see _forget_item).
                 self._forget_item(item)
         for key, block in list(self.grid.items()):
+            if getattr(block, "is_level_prop", False):
+                continue
             if getattr(block, "key_number", 0) == number:
                 self.grid.pop(key, None)
                 if block.scorer == Scorer.START:
@@ -698,6 +840,8 @@ class EconomyMixin:
                 # Its partner is gone, so the item's switch goes off with it.
                 self._forget_item(item)
         for key, block in list(self.grid.items()):
+            if getattr(block, "is_level_prop", False):
+                continue
             if getattr(block, "portal_number", 0) == number:
                 self.grid.pop(key, None)
                 if block.scorer == Scorer.START:

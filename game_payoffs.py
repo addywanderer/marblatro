@@ -39,6 +39,7 @@ from components import (
     Component,
     Difficulty,
     Effect,
+    Passive,
     MarbleType,
     Pack,
     Rarity,
@@ -93,6 +94,31 @@ class PayoffsMixin:
     """Paying a run's score: xMult, the random outputs an item rolled,
     Procrastination, Deal breaker, Watch and the block payoffs."""
 
+
+    def _apply_passive_items(self):
+        """Pay every UNPLAYABLE item the player owns, at the start of the run.
+
+        User request: "add an item, 'concrete', that gives +30 chips at the start
+        of the run, and is passive." A passive is read exactly where a card's
+        start effect fires (see cards.apply_cards): its payoff is one scorer and
+        one magnitude (components.Passive.PAYOFFS), so chips add to the run's
+        chips, mult to its mult, and an xMult factor multiplies the multiplier.
+
+        The magnitude paid is the ITEM's own amount, not the table's: every item
+        carries one, so a Concrete the golem folded together with another really
+        adds 60 (see Game._item_magnitudes).
+        """
+        for item in self.owned_items():
+            if getattr(item, "kind", None) != "passive":
+                continue
+            scorer, table_amount = Passive.payoff(item.value)
+            amount = item.amount if item.amount else table_amount
+            if scorer == Scorer.CHIPS_ADD:
+                self.score_chips += amount
+            elif scorer == Scorer.MULT_ADD:
+                self.score_mult += amount
+            elif scorer == Scorer.MULT_MUL:
+                self._apply_xmult(amount)
 
     def _apply_xmult(self, factor):
         """Bank a run-END xMult reward: the multiplier is multiplied by it later.
@@ -393,6 +419,10 @@ class PayoffsMixin:
         """
         if block.scorer == Scorer.NONE and not block.has_effect(Effect.PORTAL):
             return True
+        # Every payoff below moves THE SCORING MARBLE's chips and mult, never
+        # another marble's: this is what makes the pair on the marble that just
+        # touched the block the only one this scorer can reach.
+        self._score_marble = marble
         # Deal breaker: while the board is gagged nothing scores (see
         # _deal_breaker_gags). The trigger is still spent, so the block still
         # shows its used-up red state.
@@ -504,11 +534,12 @@ class PayoffsMixin:
             self._spawn_block_particle(block, "Component", ORANGE)
             return True
         if block.scorer == Scorer.FRESH:
-            # Fresh grants one free shop reroll immediately (no point system).
-            # The run-gain counter remembers it, so a retry can take it back
-            # without touching rerolls banked by earlier runs.
-            self.free_rerolls += 1
-            self.free_rerolls_run_gain += 1
+            # Fresh deals Reroll cards onto the board (user request: "make all
+            # reroll mechanics spawn this card on the board when triggered")
+            # instead of banking a free shop reroll, which nothing spends any
+            # more. What it dealt is remembered, so a retry deals it back with
+            # the run (see Game._take_back_run_rerolls).
+            self._spawn_reroll_cards(block.scorer_amount, run_granted=True)
             self._spawn_block_particle(block, "Reroll", ORANGE)
             return True
         if block.scorer == Scorer.VOYAGER:

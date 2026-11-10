@@ -40,8 +40,10 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Quality,
     Rarity,
     Scorer,
+    Structure,
     Shape,
     Trial,
     block_price_for,
@@ -139,6 +141,14 @@ class BuildMixin:
             return self._move_item_to(item, gx, gy)
         moving_placed = isinstance(item, Block)
         old = self.grid.get((gx, gy))
+        # The level's own furniture and its enemies own their squares: a block
+        # can never be built over them (and an enemy can never be swapped out
+        # for a block that way).
+        if (getattr(old, "is_level_prop", False)
+                or getattr(old, "is_enemy", False)):
+            self._set_shop_message(
+                "That square belongs to the level -- build somewhere else")
+            return False
         # A block that stood in this cell leaves the board first — through the
         # same door erasing uses, so a block placed from the inventory goes back
         # to its own spot rather than being refunded as a second copy (see
@@ -146,10 +156,12 @@ class BuildMixin:
         if old is not None and not (moving_placed and old is item):
             self._unplace_block(old)
         # Anything else lying on the square (a component, a card, an action) is
-        # laid out somewhere else: it is scenery, the block has the square.
+        # seated somewhere else on the board: it stays in the hand rather than
+        # dropping into the deck, so building a block over a tool cannot make
+        # the tool vanish (user report).
         for other in self.owned_items():
             if other is not item and self.item_cell(other) == (gx, gy):
-                self.set_item_cell(other, None)
+                self._seat_aside(other, (gx, gy))
         # The build tool's own values, with the same free defaults an assembly
         # uses (see _assemble_block): a block is never stamped with a None shape,
         # which would leave a block nothing can draw, price or save.
@@ -172,6 +184,9 @@ class BuildMixin:
             trigger_paid=getattr(item, "trigger_paid", 0),
             effects=getattr(item, "effects", None),
             effect_amounts=self.selected_effect_amounts,
+            # A block a golem has combined is built golden (see Quality), so
+            # the tier rides from the item onto the board.
+            quality=getattr(item, "quality", Quality.NORMAL),
         )
         # The placed block keeps its resale value, so erasing/refunding it later
         # returns the same price (a free, assembled-from-nothing wall is worth
@@ -285,7 +300,19 @@ class BuildMixin:
             return False
         occupant = self.item_at_cell((gx, gy))
         if occupant is not None and occupant is not item:
-            self.set_item_cell(occupant, None)
+            # Two items never take each other's square away: the one standing
+            # there is SWAPPED to the square the mover came from (or given the
+            # first free one). Moving a structure onto a tool used to drop the
+            # tool out of the hand entirely (user report: "tools can sometimes
+            # disappear if the player places a structure on a tool").
+            own_cell = self.item_cell(item)
+            if own_cell is not None:
+                self.set_item_cell(occupant, own_cell)
+            elif not self._seat_aside(occupant, (gx, gy)):
+                self._set_shop_message(
+                    f"No room to move {self._item_name(item)} — "
+                    f"{self._item_name(occupant)} is standing there")
+                return False
         self.set_item_cell(item, (gx, gy))
         self.ensure_board_cells()
         cell = self.item_cell(item)
@@ -390,14 +417,15 @@ class BuildMixin:
         pending = self.pending_pack_action
         if pending is not None:
             self.selected_action = pending
-            targets = [t for t in self.selection if self.is_action_target(t)]
+            targets = [t for t in self.selection
+                       if self.is_action_target(t, pending)]
             self.selected_action_subject = targets[0] if targets else None
             return
         actor = self.actor()
         if getattr(actor, "kind", None) == "action":
             self.selected_action = actor
             targets = [t for t in self.selected_targets()
-                       if self.is_action_target(t)]
+                       if self.is_action_target(t, actor)]
             self.selected_action_subject = targets[0] if targets else None
         else:
             self.selected_action = None
@@ -450,11 +478,14 @@ class BuildMixin:
         and the next click always agree. It never switches anything else OFF.
         """
         kind = getattr(item, "kind", None)
-        if not self.owns_item(item) and not isinstance(item, Block):
+        if (not self.owns_item(item) and not isinstance(item, Block)
+                and not self.is_free_structure(item)):
             # A shop offer: the player does not own it yet, so selecting it does
             # nothing but pick it up — it can be moved around the board like any
             # other item (user request), and bought by right-clicking it (see
-            # InputMixin.handle_events).
+            # InputMixin.handle_events). A STRUCTURE is not one of these: it is
+            # free to use wherever it lies (see _apply_tool), so it falls through
+            # to the structure branch below.
             self._clear_active_selection()
             self.selected_toolbox_item = item
             self.selected_toolbox_index = None
@@ -470,6 +501,23 @@ class BuildMixin:
             self._select_toolbox_component(item, self._shown_index_of(item))
         elif kind == "action":
             self._select_action(item)
+        elif kind == "tool":
+            self._select_tool(item)
+        elif kind == "structure":
+            # A structure is scenery: held as itself so it can be moved, and
+            # opened by using a tool on it (see _apply_tool).
+            self._clear_active_selection()
+            self.selected_toolbox_item = item
+            self.selected_toolbox_index = self._shown_index_of(item)
+            self._set_shop_message(
+                f"{Structure.name(item.value)} — {Structure.description(item.value)}")
+        elif kind == "pack":
+            # A pack is held as itself until S opens it (see _open_owned_pack).
+            self._clear_active_selection()
+            self.selected_toolbox_item = item
+            self.selected_toolbox_index = self._shown_index_of(item)
+            self._set_shop_message(
+                f"{item.name} — press S to open it")
         else:
             # A card (or a token): held as itself, so a click on a square moves
             # it there (see _move_item_to) and B sells it.
@@ -733,6 +781,9 @@ class BuildMixin:
         self.selected_scorer = None
         self.selected_scorer_amount = None
         self.selected_effect_amounts = {}
+        # An armed TOOL is part of "in hand": nothing is aimed at a structure any
+        # more once the hand is empty (see _select_tool / _apply_tool).
+        self.selected_tool = None
 
     def _clear_toolbox_selection(self):
         """Deselect EVERYTHING: the selected items, the one in hand, the action."""
@@ -744,6 +795,9 @@ class BuildMixin:
             # so dropping the selection drops it too. An action a PACK armed is
             # not on the board and stays armed until it is spent.
             self._clear_action_selection(announce=False)
+        # An armed TOOL is one of the selected items too, so it goes with them.
+        if getattr(self, "selected_tool", None) is not None:
+            self._clear_tool_selection(announce=False)
         # A deselection also drops any pending card build (see the commented-out
         # `_build_card` below); the builder's state is commented out with the
         # conditions.
@@ -1081,7 +1135,10 @@ class BuildMixin:
                          trigger_paid=getattr(block, "trigger_paid", 0),
                          effects=block.effects,
                          effect_amounts=getattr(block, "effect_amounts", None),
-                         angle=getattr(block, "angle", 0))
+                         angle=getattr(block, "angle", 0),
+                         # The tier the block was at, so a golden block taken
+                         # off the board is a golden item (see Quality).
+                         quality=getattr(block, "quality", Quality.NORMAL))
         # The block becomes a portable item again, lying on the square it stood
         # on (the board is the inventory: there is nowhere else for it to go).
         self.set_item_cell(item, (block.x, block.y))
@@ -1174,6 +1231,11 @@ class BuildMixin:
         (see _release_block_item) — is refunded to nobody: giving it back would
         hand out a second copy of something the player no longer owns.
         """
+        if (getattr(block, "is_level_prop", False)
+                or getattr(block, "is_enemy", False)):
+            # Level furniture and enemies belong to the LEVEL: they are never
+            # handed to the player, whatever path asked (see _cycle_deck).
+            return
         source = getattr(block, "source_item", None)
         if source is not None and self.toolbox.contains(source):
             self._restore_item_from_block(block, source)
@@ -1217,6 +1279,16 @@ class BuildMixin:
         it, so erasing one leaves it where it is.
         """
         standing = self.item_at_cell((grid_x, grid_y))
+        if getattr(standing, "is_enemy", False):
+            # An enemy is the level's, not the player's: it cannot be taken up.
+            self._set_shop_message(f"{standing.name} cannot be taken up")
+            return False
+        if getattr(standing, "is_level_prop", False):
+            # The level's own furniture (a wall, a bouncer, an accelerator...)
+            # is part of the level: it cannot be taken up, sold or upgraded.
+            self._set_shop_message(
+                "That block is part of the level -- it stays where it is")
+            return False
         if standing is not None and not isinstance(standing, Block):
             self._set_shop_message(
                 f"{self._item_name(standing)} stays where it is — only blocks "

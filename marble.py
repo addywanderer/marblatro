@@ -109,6 +109,15 @@ class Marble:
         # surface the marble actually hit.
         self.contact_normals = {}
         self.contact_incoming = {}
+        # This marble's own SCORE, which it carries as it flies (user request:
+        # "Make each individual marble have a chips and mult associated with
+        # it"): a block's scorer only ever moves the chips and mult of the
+        # marble that collided with it, so two marbles on the board can be worth
+        # very different amounts. Both are seeded from the run's base when the
+        # marble is released (see Game._release_start_marble) and RESET TO ZERO
+        # when it hits an enemy (see Game._damage_enemy).
+        self.chips = 0
+        self.mult = 0
         # Accumulated roll angle (radians) for the 3D rotating marble drawing;
         # advanced by the physics engine from the marble's angular velocity.
         self.spin_angle = 0.0

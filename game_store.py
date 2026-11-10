@@ -40,9 +40,12 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Passive,
     Rarity,
     Scorer,
     Shape,
+    Structure,
+    Tool,
     Trial,
     block_price_for,
     card_description,
@@ -80,7 +83,6 @@ from items import (
     _s,
     make_card_item,
     offer_key,
-    owned_copy,
     resource_point_label,
 )
 from marble import Marble, _configure_marble_type
@@ -142,11 +144,6 @@ class StoreMixin:
         inflation trial raises the final price 50% on top. The price is only
         ever SHOWN on hover (see ui.info_layout), but it is always this number.
         """
-        if getattr(item, "kind", None) == "unit":
-            # Board Units are not shop options: Coupon does not discount them
-            # (see _shop_discount), and the Mineshaft card is what makes them
-            # cheap (see _board_unit_price).
-            return self._board_unit_price()
         if getattr(item, "kind", None) in ("block", "card", "action", "pack"):
             return self._inflated(self._shop_discount(item.price))
         bought = self.component_purchases.get((item.kind, item.value), 0)
@@ -157,9 +154,8 @@ class StoreMixin:
         """A shop price after the Coupon card's discount.
 
         Coupon takes 25% off every shop OPTION — the components, blocks, cards
-        and actions on offer. Board Units are their own offer (see
-        _buy_board_unit) and are not discounted. The inflation trial then
-        applies on top (see _inflated).
+        and actions on offer. The inflation trial then applies on top (see
+        _inflated).
         """
         if not self._has_card(Card.COUPON):
             return amount
@@ -168,16 +164,15 @@ class StoreMixin:
     def _consume_shop_offer(self, item, keep_cell=False):
         """Take a bought offer off the shelf — it was never the player's stock.
 
-        A one-shot offer (a card, an action, a matched pair, a pack) leaves the
-        shelf when it is bought: the shelf's slot stands empty until the next
-        refresh. Repeatable offers (components, plain blocks, the Board Unit
-        tile) are NOT removed: they are bought over and over at a rising price
-        (see _buy_price), so their tile stays on the board, still locked.
+        Every purchase removes its offer (user request: "buying anything in the
+        shop unlocks it and deletes the locked shop item"): the shelf's slot
+        stands empty until the next refresh, and no locked copy of what the player
+        just bought is left lying on the board.
 
-        ``keep_cell`` is for the offers that are handed over AS THEMSELVES — a
-        bought card or action keeps the square it was lying on, so the padlock
-        comes off exactly where the player was looking instead of the purchase
-        appearing somewhere else.
+        ``keep_cell`` hands the offer over AS ITSELF — the bought card, action,
+        component or block keeps the square it was lying on, so the padlock comes
+        off exactly where the player was looking instead of the purchase appearing
+        somewhere else (see _unlock_offer).
         """
         if item in self.shop.items:
             self.shop.items.remove(item)
@@ -196,23 +191,28 @@ class StoreMixin:
             # click already bought it. One object is never owned twice (see
             # Game.owns_item), so the second click is not a purchase.
             return
-        # A BOARD UNIT is not an item at all: it is a counter the player spends
-        # by clicking a locked square, so its tile stays on the board to be
-        # bought again (see items.BoardUnitOffer).
-        if getattr(item, "kind", None) == "unit":
-            self._buy_board_unit()
-            return
         price = self._buy_price(item)
         if self.cash < price:
             self._set_shop_message(f"Need ${price} for {item.name}")
             return
-        # A PACK is bought to be opened: the cash buys the options, and the
-        # player then keeps the ones the size allows (see _open_pack). Buying
-        # one also reveals its TYPE in the collection (its size is not part of
-        # the codex entry).
+        # A STRUCTURE is not for sale (user request: "make all structures free"):
+        # the shelf hands it over as scenery and a tool opens it where it lies
+        # (see _apply_tool), so a right-click has nothing to do.
+        if getattr(item, "kind", None) == "structure":
+            self._set_shop_message(
+                f"{self._item_name(item)} is free — arm a tool on it and press S")
+            return
+        # A PACK is an ITEM now (user request: "make packs a type of item that
+        # open when the player selects one and presses 's'"): the purchase hands
+        # over the pack itself, unlocked where it lies, and the player opens it
+        # when they are ready (see _open_owned_pack). Buying one also reveals its
+        # TYPE in the collection (its size is not part of the codex entry).
         if getattr(item, "kind", None) == "pack":
             self._discover_pack(item.pack_type)
-            self._open_pack(item, price)
+            self._unlock_offer(item)
+            self.cash -= price
+            self._set_shop_message(f"Bought {item.name} — press S to open it")
+            sounds.play_coin()
             return
         # The ERR 404 card is a joke: it never joins the card area itself —
         # buying it grants a random card instead.
@@ -231,10 +231,16 @@ class StoreMixin:
             if self._owns_card(value) and not self._has_card(Card.SHOWMAN):
                 self._set_shop_message("Already own this card")
                 return
-            self._adopt_card(make_card_item(value))
+            # ERR 404 grants a different card, so it cannot be unlocked in place
+            # itself; the card it pays out takes the tile's square instead.
+            home = self.item_cell(item)
+            granted = make_card_item(value)
+            self._consume_shop_offer(item)
+            self._adopt_card(granted)
+            if home is not None and self.item_at_cell(home) is None:
+                self.set_item_cell(granted, home)
             self.cash -= price
             self._discover_owned_card(value)
-            self._consume_shop_offer(item)
             self._set_shop_message(f"Bought card: {Card.name(value)}")
             sounds.play_coin()
             return
@@ -253,8 +259,7 @@ class StoreMixin:
             # the player's stock) and takes the square the locked offer was lying
             # on, so the player can use it during this run (user request: "when
             # an item in the shop is bought, unlock that item on the spot").
-            self._consume_shop_offer(item, keep_cell=True)
-            self._adopt_card(item)
+            self._unlock_offer(item)
             self.cash -= price
             self._discover_owned_card(item.value)
             self._set_shop_message(f"Bought card: {item.name}")
@@ -268,23 +273,20 @@ class StoreMixin:
                 self._set_shop_message(
                     f"You can only hold {self.max_actions} actions")
                 return
-            # It is unlocked where it lies, like a card.
-            self._consume_shop_offer(item, keep_cell=True)
-            self._adopt_action(item)
+            self._unlock_offer(item)
             self.cash -= price
             self._discover_action(item.value)
             self._set_shop_message(f"Bought action: {self._item_name(item)}")
             sounds.play_coin()
             return
         # A portal block is bought as a pair: two identical blocks that share a
-        # fresh pairing number (they teleport marbles between each other).
+        # fresh pairing number (they teleport marbles between each other). The
+        # offer itself is the first half, unlocked where it lies; the second is
+        # made beside it.
         if getattr(item, "kind", None) == "block" and item.has_effect(Effect.PORTAL):
             number = next_portal_number()
-            self._unlock_purchase(BlockItem(
-                0, 0, item.shape, Effect.NONE, item.scorer,
-                item.scorer_amount, item.price, item.name, portal_number=number,
-                effects=item.effects,
-                effect_amounts=getattr(item, "effect_amounts", None)))
+            self._unlock_offer(item)
+            item.portal_number = number
             self._unlock_purchase(BlockItem(
                 0, 0, item.shape, Effect.NONE, item.scorer,
                 item.scorer_amount, item.price, item.name, portal_number=number,
@@ -297,17 +299,15 @@ class StoreMixin:
                 f"Bought {item.name} (portal pair #{number})")
             sounds.play_coin()
             return
-        # A Key/Lock block is bought as a matched pair too: the bought half keeps
-        # its shape and its partner half is the other shape, sharing a fresh key
-        # number. Both halves keep the offer's effects and scorer.
+        # A Key/Lock block is bought as a matched pair too: the offer is the
+        # bought half (it keeps its shape) and the second half is the other
+        # shape, sharing a fresh key number. Both halves keep the offer's effects
+        # and scorer.
         pair_shape = paired_shape(getattr(item, "shape", None))
         if getattr(item, "kind", None) == "block" and pair_shape is not None:
             number = next_key_number()
-            self._unlock_purchase(BlockItem(
-                0, 0, item.shape, Effect.NONE, item.scorer,
-                item.scorer_amount, item.price, item.name,
-                key_number=number, effects=item.effects,
-                effect_amounts=getattr(item, "effect_amounts", None)))
+            self._unlock_offer(item)
+            item.key_number = number
             self._unlock_purchase(BlockItem(
                 0, 0, pair_shape, Effect.NONE, item.scorer,
                 item.scorer_amount, item.price,
@@ -322,11 +322,8 @@ class StoreMixin:
                 f"Bought {item.name} (key/lock pair #{number})")
             sounds.play_coin()
             return
-        # The player gets a COPY of the offer: the shelf keeps selling the same
-        # slot, and two purchases must be two items, not one item listed twice
-        # (see items.owned_copy). The copy joins the DECK, so the offer stays on
-        # the shelf (still locked) and can be bought again.
-        self._unlock_purchase(owned_copy(item))
+        # A component or a plain block: the offer IS the purchase.
+        self._unlock_offer(item)
         self._record_component_purchases(item)
         if getattr(item, "kind", None) == "block":
             self._discover_block(item)
@@ -336,29 +333,88 @@ class StoreMixin:
         self._set_shop_message(f"Bought {item.name}")
         sounds.play_coin()
 
-    def _unlock_purchase(self, item):
-        """Hand a bought item over and unlock it on the board: it is usable now.
+    def _unlock_offer(self, item):
+        """Turn the shelf's own offer into the player's item, where it lies.
 
-        The purchase joins the player's deck AND is laid out at once (user
-        request: "when an item in the shop is bought, unlock that item on the
-        spot so that the player can use it during that run"), so buying feels
-        like Balatro's: the thing you paid for is on the board for the run you are
-        building. The shelf keeps its own offer — the copy the player bought is a
-        different object (see items.owned_copy) — so the same slot can be bought
-        again and again, and the next deck cycle takes the copy back into the deck
-        with everything else (see Game._cycle_deck).
+        Buying unlocks the tile the player clicked: the offer leaves the shelf —
+        no locked copy of it is left anywhere — and keeps the board square it was
+        lying on, so the thing that was padlocked is now the thing the player owns
+        (user request: "buying anything in the shop unlocks it and deletes the
+        locked shop item ... it should become unlocked, stay in the same place on
+        the board as where it was bought, and no locked ... shop item should exist
+        anymore").
+
+        Which container it joins depends on what it is: a card and an action have
+        a list of their own, everything else is a portable item. An offer that
+        was never on the shelf (one a test hands over directly) simply gets its
+        own square instead.
+        """
+        self._consume_shop_offer(item, keep_cell=True)
+        kind = getattr(item, "kind", None)
+        if kind == "card":
+            self._adopt_card(item)
+        elif kind == "action":
+            self._adopt_action(item)
+        elif self.item_cell(item) is None:
+            self.toolbox.add(item)
+        else:
+            # It already stands on the square the player bought it on, so it only
+            # has to join the inventory.
+            self.toolbox.items.append(item)
+        return item
+
+    def _unlock_purchase(self, item):
+        """Seat an item a purchase MADE (a pair's second half) on the board.
+
+        A portal or Key/Lock purchase makes a partner beside the offer the player
+        clicked; the partner is a brand-new item, so it takes the first free
+        square the way anything else the player gains does (see
+        Game._on_item_gained).
         """
         self.toolbox.add(item)
         return item
 
+    def _open_owned_pack(self, pack):
+        """Open a pack the player OWNS (the S key).
+
+        Packs are items now: buying one hands over the pack, and opening it is a
+        separate, deliberate act (user request: "make packs a type of item that
+        open when the player selects one and presses 's'"). The pack leaves the
+        board as it opens — its options are what the player is choosing from —
+        and the overlay holds the screen until the picks are made (see
+        _click_pack / _keep_pack_option).
+        """
+        if pack is None or getattr(pack, "kind", None) != "pack":
+            self._set_shop_message("Select a pack first")
+            return False
+        if not self.owns_item(pack):
+            self._set_shop_message("You do not own that pack")
+            return False
+        if self.open_pack is not None:
+            self._set_shop_message("Finish the open pack first")
+            return False
+        # The pack is spent as it opens: it is not scenery any more, its options
+        # are. It is taken out of the inventory first so the layout cannot deal
+        # it a square while the overlay is up.
+        self._forget_item(pack)
+        self.set_item_cell(pack, None)
+        if self.toolbox.contains(pack):
+            self.toolbox.remove(pack)
+        self.open_pack = pack
+        sounds.play_mech()
+        self._set_shop_message(
+            f"{pack.name} — keep {pack.remaining} of {len(pack.options)}"
+            f"  •  click SKIP to leave the rest")
+        return True
+
     def _open_pack(self, pack, price):
-        """Buy a pack and open it for the player to choose from.
+        """Open a pack that is being BOUGHT (kept for the old call sites).
 
         The cash buys the pack, not the items inside it: the player then keeps
         what its size allows (see _click_pack / _keep_pack_option), and may skip
-        the rest. The offer leaves the shelf like a bought card or action — a
-        pack is a one-off, and the options it dealt are already decided — and
-        the overlay holds the screen until the picks are made.
+        the rest. Purchases hand the pack over as an item now (see
+        _buy_shop_item), so this only charges and opens an offer handed in
+        directly.
         """
         self.cash -= price
         self._consume_shop_offer(pack)
@@ -485,6 +541,13 @@ class StoreMixin:
             self.toolbox.add(option)
             self._discover_block(option)
             return True, f"Kept {option.name}"
+        if kind in ("tool", "passive"):
+            # A one-shot tool or a passive item (see the TOOL pack): both are
+            # ordinary items, so they join the inventory where the player can
+            # pick them up -- and both are collection entries of their own.
+            self.toolbox.add(option)
+            self._discover_tool_or_passive(option)
+            return True, f"Kept {option.name}"
         # A component part (shape, effect or scorer): into the inventory.
         self.toolbox.add(option)
         self._record_component_purchases(option)
@@ -511,6 +574,32 @@ class StoreMixin:
         if self._apply_action():
             return True, f"Used action: {self._item_name(action)}"
         return True, (f"Kept action: {self._item_name(action)} — press S to use")
+
+    def _discover_tool_or_passive(self, item):
+        """Discover a kept tool or passive item; pop it up if it is new.
+
+        The starters are already known (see collection.ALWAYS_DISCOVERED_TOOLS),
+        so the only news here is a one-shot tool or a passive from a Tool Pack.
+        """
+        kind = getattr(item, "kind", None)
+        if kind == "tool":
+            if collection.discover_tool(item.value):
+                self._push_popup("New tool", Tool.name(item.value),
+                                 (116, 208, 196))
+        elif kind == "passive":
+            if collection.discover_passive(item.value):
+                self._push_popup("New item", Passive.name(item.value),
+                                 (152, 152, 152))
+
+    def _discover_structure(self, value):
+        """Discover a structure the player has just opened; pop it up if new.
+
+        A structure is discovered by OPENING one: the codex entry is what the
+        opening hands over, so it is news the first time a tool goes into one.
+        """
+        if collection.discover_structure(value):
+            self._push_popup("New structure", Structure.name(value),
+                             (170, 148, 126))
 
     def _discover_component(self, kind, value):
         """Discover a component in the collection; pop it up if it's new."""

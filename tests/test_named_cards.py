@@ -48,7 +48,7 @@ class NamedCardCatalogueTests(GameTestCase):
                           "Ripped Card", "Cozy", "Painting", "Synthesizer",
                           "Island", "Fountain", "Intangible",
                           "Swashbuckler", "Stencil", "Claustrophobia",
-                          "Matrix"])
+                          "Matrix", "Trash Can"])
         for value in components.NAMED_CARD_ORDER:
             with self.subTest(card=main.Card.name(value)):
                 # A whole card: in the catalogue (so the shop offers it and the
@@ -73,7 +73,8 @@ class NamedCardCatalogueTests(GameTestCase):
                                   "Synthesizer", "Swashbuckler", "Stencil",
                                   "Claustrophobia"})
         self.assertEqual(ends, {"Explorer", "Astronaut", "Plane", "Skater",
-                                "Fountain", "Island", "Intangible", "Matrix"})
+                                "Fountain", "Island", "Intangible", "Matrix",
+                                "Trash Can"})
         self.assertEqual([name for name, phase in phases.items()
                           if phase == "fragile"], ["Wrecking Ball"])
         # A card that is not named has no start/end/fragile phase at all: the
@@ -116,6 +117,11 @@ class NamedCardCatalogueTests(GameTestCase):
                                "plain_rects"),
             "Matrix": ("end", main.Scorer.CHIPS_ADD, 1.5,
                        "inside_locked_no_phase"),
+            # Trash Can's ratio is its chip magnitude over the standard +30
+            # chip unit (see MAGNITUDES.TRASH_CAN_CHIPS).
+            "Trash Can": ("end", main.Scorer.CHIPS_ADD,
+                          main.MAGNITUDES.TRASH_CAN_CHIPS
+                          / main.MAGNITUDES.CHIPS_PER_UNIT, "items_discarded"),
         }
         for value in components.NAMED_CARD_ORDER:
             meta = components.named_card_meta(value)
@@ -144,11 +150,11 @@ class NamedCardCatalogueTests(GameTestCase):
             else:
                 self.assertEqual(tier, components.Rarity.LEGENDARY,
                                  main.Card.name(value))
-        # Twelve cheap measured cards and the five dear ones: every one of the
-        # cheap cards is a Common or an Unusual. The measured cards' first dear
+        # Thirteen cheap measured cards and the five dear ones: every one of
+        # the cheap cards is a Common or an Unusual. The measured cards' first dear
         # tiers arrive later: Swashbuckler ($42) is Rare, Stencil ($46) is Epic
         # and Claustrophobia ($40) is the second Rare.
-        self.assertEqual(tiers[components.Rarity.COMMON], 12)
+        self.assertEqual(tiers[components.Rarity.COMMON], 13)
         self.assertEqual(tiers[components.Rarity.UNUSUAL], 5)
         self.assertEqual(tiers[components.Rarity.RARE], 2)
         self.assertEqual({main.Card.rarity(v) for v in
@@ -168,7 +174,70 @@ class NamedCardCatalogueTests(GameTestCase):
             self.assertGreater(art.get_bounding_rect().width, 0,
                                main.Card.name(value))
             drawings.add(pygame.image.tobytes(art, "RGBA"))
-        self.assertEqual(len(drawings), 20)
+        self.assertEqual(len(drawings), 21)
+
+class TrashCanTests(GameTestCase):
+    """The Trash Can: +20 chips at the end of the run per item discarded this run.
+
+    User request: "add a card, 'trash can': +20 chips for each item discarded
+    this run", and "make sure ALL numbers are encoded as magnitudes": the card's
+    chips a unit live in MAGNITUDES.TRASH_CAN_CHIPS, and the run's count is the
+    one Game._discard_item keeps.
+    """
+
+    def _finish(self, *values):
+        self.game.cards = _own(*values)
+        self.game._apply_cards_on_finish()
+        self.game._flush_run_xmult()
+
+    def test_the_card_pays_its_magnitude_per_item_discarded(self):
+        per_item = int(main.MAGNITUDES.CHIPS_PER_UNIT
+                       * main.MAGNITUDES.CARD_RATIOS[main.Card.TRASH_CAN] + 0.5)
+        self.assertEqual(per_item, main.MAGNITUDES.TRASH_CAN_CHIPS)
+        self.game.score_chips = 10
+        self.game.discarded_items_run = 3
+
+        self._finish(main.Card.TRASH_CAN)
+
+        self.assertEqual(self.game.score_chips, 10 + 3 * per_item)
+
+    def test_an_empty_bin_pays_nothing(self):
+        self.game.score_chips = 10
+        self.game.discarded_items_run = 0
+
+        self._finish(main.Card.TRASH_CAN)
+
+        self.assertEqual(self.game.score_chips, 10)
+
+    def test_the_bin_counts_what_the_run_threw_away(self):
+        # Every discard goes through _discard_item, so a Wasteful pair is two
+        # items and a Lantern burning itself out is one more.
+        lantern = main.ActionItem(main.Action.LANTERN,
+                                  main.Action.PRICES[main.Action.LANTERN])
+        self.game._adopt_action(lantern)
+        first = main.Component.effect_component(main.Effect.BOUNCY)
+        second = main.Component.shape_component(main.Shape.SLOPE)
+        for item in (first, second):
+            self.game.toolbox.add(item)
+        self.assertEqual(self.game.discarded_items_run, 0)
+
+        self.assertTrue(self.game._discard_item(first))
+        self.assertTrue(self.game._discard_item(lantern))
+
+        self.assertEqual(self.game.discarded_items_run, 2)
+
+    def test_a_fresh_run_starts_with_an_empty_bin(self):
+        self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
+        self.game.discarded_items_run = 5
+
+        self.assertTrue(self.game.reset_run(False))
+
+        self.assertEqual(self.game.discarded_items_run, 0)
+
+    def test_the_description_states_the_magnitude(self):
+        text = main.Card.description(main.Card.TRASH_CAN)
+        self.assertIn(str(main.MAGNITUDES.TRASH_CAN_CHIPS), text)
+        self.assertIn("discarded", text)
 
     def test_the_shop_pool_holds_the_named_cards(self):
         pool = main.card_offer_entries()
@@ -899,7 +968,7 @@ class NamedCardFragileTests(GameTestCase):
         self.game.cards = _own(main.Card.WRECKING_BALL)
         self.game.run_active = True
         self.game._on_fragile_broken(main.Block(0, 0, effect=main.Effect.FRAGILE))
-        self._complete_run(10000, required=100)
+        self._complete_run(10000)
         self.game._retry_run()
         self.assertEqual(self.game.wrecking_bonus[main.Scorer.MULT_ADD], 0)
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 0)

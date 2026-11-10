@@ -1325,11 +1325,14 @@ class ScorersTests(GameTestCase):
         self.game.run_active = True
 
         def fire(block):
-            self.game.marbles = []
-            marble = self._add_marble()
+            marble = self.game.marbles[0]
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
 
+        # One marble takes every hit in the sequence: the score lives on the
+        # marble (see Game.score_chips), so the +4 mult lands in among the
+        # factors on that one marble.
+        self._add_marble()
         fire(sharp)
         self.assertAlmostEqual(self.game.score_mult, factor)
         fire(main.Block(0, 0, scorer=main.Scorer.MULT_ADD, scorer_amount=4))
@@ -1340,13 +1343,11 @@ class ScorersTests(GameTestCase):
 
 
     def test_a_naturally_v2_action_is_already_maxed(self):
-        # The shelf's kinds are drawn at their own odds (an action only 15% of
-        # the time — see Pack.SHELF_WEIGHTS), so the shelf is pinned to actions
-        # to be sure one is on it after the refresh.
-        with mock.patch("shop.SHELF_OFFER_TYPES", (main.Pack.ACTION,)):
-            with mock.patch("rolling.random_action_version", return_value=2):
-                self.game.shop.refresh()
-        action = next(i for i in self.game.shop.items if i.kind == "action")
+        # A naturally rolled v2 needs no upgrade and costs nothing: the action
+        # arrives that way from the roller every offer goes through (see
+        # Shop._offer_of), so a v2 is what the buy price already paid for.
+        with mock.patch("rolling.random_action_version", return_value=2):
+            action = self.game.shop._offer_of(main.Pack.ACTION, 0, 0)
         self.game.actions.append(action)
         self.game.selected_action = action
         self.game.cash = 1000
@@ -1355,7 +1356,6 @@ class ScorersTests(GameTestCase):
 
         self.assertEqual(action.version, 2)
         self.assertEqual(self.game.cash, 1000)  # nothing to pay: already v2
-
 
     def test_state_dependent_scorers_say_what_they_pay_right_now(self):
         # A scorer that pays for the state of the game states its RATE in its
@@ -1370,18 +1370,18 @@ class ScorersTests(GameTestCase):
         self.game.unlocked_cells |= {(0, y) for y in range(1, 4)}
         units = len(self.game.unlocked_cells)
         self.assertEqual(units, main.GRID_WIDTH + 3)
-        rows = self.game._describe_item(roomy)
+        # (The group row comes last now ? see components.Group ? so the live row
+        # is looked up rather than indexed from the end.)
         self.assertEqual(
-            rows[-1],
-            ("Now", f"Gives +{2 * units} chips (2 x {units} unlocked units)"))
+            dict(self.game._describe_item(roomy))["Now"],
+            f"Gives +{2 * units} chips (2 x {units} unlocked units)")
         # ...and the row follows the board: unlock one more unit and the number
         # moves with it.
         self.game.unlocked_cells.add((5, 5))
         units += 1
-        rows = self.game._describe_item(roomy)
         self.assertEqual(
-            rows[-1],
-            ("Now", f"Gives +{2 * units} chips (2 x {units} unlocked units)"))
+            dict(self.game._describe_item(roomy))["Now"],
+            f"Gives +{2 * units} chips (2 x {units} unlocked units)")
         # A fixed scorer needs no such row: the description already says +30.
         flat = main.Component.scorer_component(main.Scorer.CHIPS_ADD, amount=30,
                                                col=1, row=1)
@@ -1490,9 +1490,8 @@ class ScorersTests(GameTestCase):
     def test_a_bought_block_keeps_its_own_effects_and_scorer(self):
         # A shop block's components carry their own rolled magnitudes, and the
         # block keeps them when it is bought, placed, erased and returned.
-        # The shelf's kinds are drawn at their own odds (a block only 20% of the
-        # time — see Pack.SHELF_WEIGHTS), so one is placed on it rather than
-        # hunted for. A portal block is bought as a PAIR of fresh blocks and so is
+        # The shelf sells structures now (see Shop._random_offer), so a block is
+        # placed on it rather than hunted for. A portal block is bought as a PAIR of fresh blocks and so is
         # a Key/Lock half, so the offer itself would never reach the inventory:
         # take a plain block.
         block = self._place_shop_offer(
@@ -1507,7 +1506,7 @@ class ScorersTests(GameTestCase):
         self.game._buy_shop_item(block)
         bought = next(i for i in self.game.toolbox.items
                       if getattr(i, "kind", None) == "block")
-        self.assertIsNot(bought, block)   # the purchase is a copy (owned_copy)
+        self.assertIs(bought, block)      # the purchase is the offer itself
         self.game._equip_block(bought)
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN

@@ -30,63 +30,106 @@ class DeckTests(GameTestCase):
         return next(item for item in self.game.owned_items()
                     if getattr(item, "scorer", None) == main.Scorer.START)
 
+    def test_a_new_game_draws_a_full_hand(self):
+        # User request: "make sure the player always draws 4 items, besides the
+        # start and finish." A brand-new game used to keep the four tools on the
+        # squares they were built on, which left the deck empty and dealt a hand
+        # of nothing: the tools go into the deck first now, and the opening hand
+        # is a real draw.
+        main.save_system.start_new_game_in_slot(self.game, 5)
+
+        drawn = self.game.drawn_items()
+        self.assertEqual(len(drawn), main.DECK_DRAW_SIZE)
+        self.assertEqual(len([item for item in drawn
+                              if self.game.item_cell(item) is not None]),
+                         main.DECK_DRAW_SIZE)
+        # The START and FINISH blocks are on the board AND not part of the draw.
+        roles = [item for item in self.game.hand_items()
+                 if getattr(item, "scorer", None) in (main.Scorer.START,
+                                                     main.Scorer.FINISH)]
+        self.assertEqual(len(roles), 2)
+        self.assertFalse([item for item in drawn
+                          if getattr(item, "scorer", None) in (main.Scorer.START,
+                                                               main.Scorer.FINISH)])
+
+    def test_every_run_opens_with_a_full_hand(self):
+        # The end-of-run cycle hands everything back and deals a fresh hand of
+        # DECK_DRAW_SIZE: what the player owns is split into exactly that many
+        # items on the board and the rest waiting in the deck.
+        self._own(12)
+        playable = [item for item in self.game.owned_items()
+                    if not self.game._stays_out_of_the_deck(item)]
+
+        self.game._cycle_deck()
+
+        self.assertEqual(len(self.game.drawn_items()), main.DECK_DRAW_SIZE)
+        self.assertEqual(len(self.game.deck_items()),
+                         len(playable) - main.DECK_DRAW_SIZE)
+
     def test_a_new_game_has_the_two_role_blocks_on_the_board_and_an_empty_deck(self):
         # The Start and Finish blocks are what a run is built around, so they are
         # never dealt: they live on the board, outside the deck (user request).
         self.game.ensure_board_cells()
-        scorers = sorted(getattr(item, "scorer", None)
-                         for item in self.game.hand_items())
+        scorers = sorted(
+            item.scorer for item in self.game.hand_items()
+            if getattr(item, "kind", None) == "block"
+            and item.scorer in (main.Scorer.START, main.Scorer.FINISH))
         self.assertEqual(scorers, sorted([main.Scorer.START, main.Scorer.FINISH]))
         self.assertEqual(self.game.deck_items(), [])
 
-    def test_buying_a_shop_item_unlocks_it_on_the_spot_and_keeps_the_offer(self):
-        # "When an item in the shop is bought, unlock that item on the spot so
-        # that the player can use it during that run" (user request) — and the
-        # shelf keeps selling its own offer, so several copies can be bought.
+    def test_buying_a_shop_item_unlocks_it_in_place_and_deletes_the_offer(self):
+        self._stock_shelf(2, 1)  # a pack is on sale
+        # "Buying anything in the shop unlocks it and deletes the locked shop
+        # item ... it should become unlocked, stay in the same place on the board
+        # as where it was bought, and no locked ... shop item should exist
+        # anymore" (user request). A structure needs no buying (it is free), so
+        # the thing on sale here is a PACK.
         self.game.cash = 100000
+        self.game.ensure_board_cells()   # the offers are laid out on the board
         offer = next(o for o in self.game.shop.items
-                     if getattr(o, "kind", None) in ("block", "shape",
-                                                     "effect", "scorer"))
-        before = {id(item) for item in self.game.owned_items()}
-        bought_before = len(self.game.owned_items())
+                     if getattr(o, "kind", None) == "pack")
+        home = self.game.item_cell(offer)
+        self.assertIsNotNone(home)
 
         self.game._buy_shop_item(offer)
 
-        self.assertEqual(len(self.game.owned_items()), bought_before + 1)
-        self.assertIn(offer, self.game.shop.items)          # still for sale
-        copy = [item for item in self.game.owned_items()
-                if id(item) not in before][0]
-        self.assertIsNotNone(self.game.item_cell(copy))     # on the board, usable
-        self.assertIn(copy, self.game.hand_items())
-        self.assertIsNot(copy, offer)
-        self.assertNotEqual(self.game.item_cell(copy), self.game.item_cell(offer))
+        # The very tile the player clicked is now theirs: same square, unlocked.
+        self.assertTrue(self.game.owns_item(offer))
+        self.assertEqual(self.game.item_cell(offer), home)
+        self.assertIn(offer, self.game.hand_items())
+        # ...and no locked copy of it is left anywhere.
+        self.assertNotIn(offer, self.game.shop.items)
+        self.assertIsNone(self.game.shop.offer_at_cell(home))
 
-        # A second purchase is a SECOND copy, each with its own square.
-        self.game._buy_shop_item(offer)
-        self.assertEqual(len(self.game.owned_items()), bought_before + 2)
-        copies = [item for item in self.game.owned_items() if id(item) not in before]
-        self.assertEqual(len(copies), 2)
-        self.assertEqual(len({self.game.item_cell(item) for item in copies}), 2)
+        # A second, separate offer of the same kind is a second item, with a
+        # square of its own.
+        second = self.game.shop._roll_pack(offer.pack_type, main.Pack.SIZE_ORDER[0])
+        self.game.shop.items = [second]
+        self.game._buy_shop_item(second)
+        self.assertTrue(self.game.owns_item(second))
+        self.assertIsNot(second, offer)
+        self.assertNotEqual(self.game.item_cell(second), home)
 
     def test_the_start_and_finish_blocks_stay_out_of_the_deck(self):
         # Even when everything else is in the deck, the role blocks are on the
-        # board: a run can always begin. (The deck deal itself leaves them alone —
-        # see _cycle_deck — so this empties the hand by hand.)
+        # board: a run can always begin. The TOOLS are items like any other (user
+        # request: "shovel, flashlight, screwdriver, hammer all count as items"),
+        # so they go into the deck with everything else.
         self._own(6)
         for item in list(self.game.owned_items()):
-            if getattr(item, "scorer", None) in (main.Scorer.START,
-                                                 main.Scorer.FINISH):
+            if self.game._stays_out_of_the_deck(item):
                 continue
             self.game._to_deck(item)
 
-        roles = sorted(getattr(item, "scorer", None)
-                       for item in self.game.hand_items())
-        self.assertEqual(roles, sorted([main.Scorer.START, main.Scorer.FINISH]))
-        self.assertEqual(len(self.game.deck_items()), 6)
+        stuck = [item for item in self.game.hand_items()
+                 if self.game._stays_out_of_the_deck(item)]
+        self.assertEqual(len(stuck), 2)   # the 2 role blocks
+        self.assertEqual(len(self.game.deck_items()), 10)   # 6 owned + 4 tools
 
     def test_the_end_of_a_run_returns_everything_and_draws_four(self):
         # "When the run ends, all items owned by the player (except the start and
-        # finish) are returned to the deck and 4 new random items are drawn."
+        # finish) are returned to the deck and 4 new random items are drawn." The
+        # four TOOLS go back in too, and the draw may deal one of them.
         items = self._own(8)
         self.game.cash = 100000
         owned = len(self.game.owned_items())
@@ -95,18 +138,23 @@ class DeckTests(GameTestCase):
 
         self.assertEqual(len(self.game.owned_items()), owned)   # nothing lost
         hand = self.game.hand_items()
-        self.assertEqual(len(hand), main.DECK_DRAW_SIZE + 2)    # + role blocks
+        # + the two role blocks, which never leave the board.
+        self.assertEqual(len(hand), main.DECK_DRAW_SIZE + 2)
         roles = [item for item in hand
                  if getattr(item, "scorer", None) in (main.Scorer.START,
                                                       main.Scorer.FINISH)]
         self.assertEqual(len(roles), 2)
         drawn = [item for item in hand if item not in roles]
         self.assertEqual(len(drawn), main.DECK_DRAW_SIZE)
+        self.assertEqual(sorted(self.game.drawn_items(), key=id),
+                         sorted(drawn, key=id))
         # Every drawn item had a board square dealt to it, and the rest waited.
         for item in drawn:
-            self.assertIn(item, items)
+            self.assertIn(item, items + [i for i in self.game.owned_items()
+                                         if getattr(i, "kind", None) == "tool"])
             self.assertIsNotNone(self.game.item_cell(item))
-        self.assertEqual(len(self.game.deck_items()), owned - 2 - main.DECK_DRAW_SIZE)
+        self.assertEqual(len(self.game.deck_items()),
+                         owned - 2 - main.DECK_DRAW_SIZE)
         # No two items share a square.
         cells = [self.game.item_cell(item) for item in hand]
         self.assertEqual(len(cells), len(set(cells)))
@@ -198,7 +246,71 @@ class DeckTests(GameTestCase):
         self._own(5)
         label = main.ui.deck_button_label(self.game)
         self.assertIn(str(len(self.game.owned_items())), label)
-        self.assertIn(f"{len(self.game.hand_items())} drawn", label)
+        self.assertIn(f"{len(self.game.drawn_items())} drawn", label)
+
+    def test_only_four_items_are_drawn_from_the_deck_each_run(self):
+        # "make sure that only 4 items are drawn from the player's deck each run"
+        # (user request). The board also holds the two role blocks, the four
+        # tools and whatever the run gained, so the DRAW is what the button
+        # reports (see Game.drawn_items / ui.deck_button_label).
+        self._own(10)
+        for run in range(3):
+            self.game._cycle_deck()
+            drawn = self.game.drawn_items()
+            self.assertEqual(len(drawn), main.DECK_DRAW_SIZE, run)
+            # Everything else on the board is an item that never leaves it.
+            for item in self.game.hand_items():
+                if item not in drawn:
+                    self.assertTrue(self.game._stays_out_of_the_deck(item), item)
+            # No item is in two places at once: what was not drawn waits.
+            self.assertEqual(
+                len(drawn) + len(self.game.deck_items()),
+                len([item for item in self.game.owned_items()
+                     if not self.game._stays_out_of_the_deck(item)]))
+        self.assertIn(f"{main.DECK_DRAW_SIZE} drawn",
+                      main.ui.deck_button_label(self.game))
+
+    def test_a_new_game_draws_four_of_its_starting_items(self):
+        # The four TOOLS are items like any other (user request: "shovel,
+        # flashlight, screwdriver, hammer all count as items, meaning they are
+        # part of the condition that only 4 items can be drawn"), so a brand-new
+        # game deals them through the same DECK_DRAW_SIZE draw a run uses.
+        save_system.start_new_game_in_slot(self.game, 1)
+
+        drawn = self.game.drawn_items()
+        self.assertEqual(len(drawn), main.DECK_DRAW_SIZE)
+        self.assertEqual(sorted(item.kind for item in drawn), ["tool"] * 4)
+        # Only the two role blocks stand on the board without being drawn.
+        leftovers = [item for item in self.game.hand_items()
+                     if item not in drawn]
+        self.assertEqual(sorted(item.scorer for item in leftovers),
+                         sorted([main.Scorer.START, main.Scorer.FINISH]))
+
+    def test_a_tool_goes_back_in_the_deck_at_the_end_of_a_run(self):
+        # Tools are not always on the board any more: the run's draw is what
+        # deals them, and the ones it does not deal wait in the deck.
+        self._own(8)
+        for _ in range(12):
+            self.game._cycle_deck()
+            self.assertLessEqual(len(self.game.drawn_items()), main.DECK_DRAW_SIZE)
+            self.assertEqual(
+                len(self.game.deck_items()),
+                len(self.game.owned_items()) - 2 - len(self.game.drawn_items()))
+
+    def test_a_short_deck_draws_only_what_it_has(self):
+        # A deck with fewer items than the draw deals hands over fewer. (The
+        # tools are in the deck now, so they are cleared out for this one.)
+        for tool in [item for item in self.game.owned_items()
+                     if getattr(item, "kind", None) == "tool"]:
+            self.game.toolbox.remove(tool)
+        self._own(2)
+        for item in list(self.game.owned_items()):
+            if not self.game._stays_out_of_the_deck(item):
+                self.game._to_deck(item)
+        self.assertEqual(len(self.game.deck_items()), 2)
+        drawn = self.game.draw_deck_hand()
+        self.assertEqual(len(drawn), 2)
+        self.assertEqual(len(self.game.drawn_items()), 2)
 
     def test_the_overlay_lists_every_item_once(self):
         items = self._own(5)

@@ -34,7 +34,7 @@ class ActionsTests(GameTestCase):
                 self.assertAlmostEqual(components.resource_points_for(scorer, 3),
                                        rate * 3)
         # Parts and Fresh are not point scorers: Parts banks whole components
-        # (see parts_run_gain) and Fresh grants its reroll right away.
+        # (see parts_run_gain) and Fresh deals its Reroll card right away.
         self.assertEqual(components.resource_points_for(main.Scorer.PARTS, 3), 0)
         self.assertEqual(components.resource_points_for(main.Scorer.FRESH, 3), 0)
 
@@ -95,7 +95,10 @@ class ActionsTests(GameTestCase):
                           main.Action.CLEANSWEEP, main.Action.EXPANSION,
                           main.Action.BRAINSTORM, main.Action.MASS_PRODUCTION,
                           main.Action.GRACE, main.Action.INACTION,
-                          main.Action.FORESIGHT])
+                          main.Action.FORESIGHT, main.Action.CLEANSING,
+                          main.Action.LANTERN, main.Action.EYEBALL,
+                          main.Action.DEEP_POCKETS, main.Action.NASTY_COCKTAIL,
+                          main.Action.REROLL])
         # Deja Vu's two versions add triggers: +1, then +100.
         self.assertIn("+1 trigger", main.Action.description(main.Action.DEJA_VU, 1))
         self.assertIn("+100 triggers", main.Action.description(main.Action.DEJA_VU, 2))
@@ -107,9 +110,9 @@ class ActionsTests(GameTestCase):
                       main.Action.description(main.Action.EXPANSION, 1))
         self.assertIn("every locked board square",
                       main.Action.description(main.Action.EXPANSION, 2))
-        self.assertIn("2 free shop rerolls",
+        self.assertIn("2 Reroll cards",
                       main.Action.description(main.Action.BRAINSTORM, 1))
-        self.assertIn("Halves the price of every shop reroll",
+        self.assertIn("4 Reroll cards",
                       main.Action.description(main.Action.BRAINSTORM, 2))
         self.assertIn("Triples the resource points",
                       main.Action.description(main.Action.MASS_PRODUCTION, 1))
@@ -207,7 +210,8 @@ class ActionsTests(GameTestCase):
         self.assertTrue(self.game._apply_action())
         # The original stays and a paid copy joins the toolbox.
         self.assertIn(block, self.game.toolbox.items)
-        copies = [i for i in self.game.toolbox.items if i is not block
+        copies = [i for i in self.game.toolbox.items
+                  if i is not block and getattr(i, "kind", None) == "block"
                   and i.shape == block.shape and i.scorer == block.scorer]
         self.assertEqual(len(copies), 1)
         self.assertEqual(self.game.cash, 100 - 50)
@@ -234,8 +238,8 @@ class ActionsTests(GameTestCase):
         self.assertIn("without spending your cash",
                       main.Action.description(main.Action.CLEANSWEEP, 2))
         # It acts on the player, not on a piece, so it needs no target — and so
-        # do the four later actions, which act on the board, the shop, the
-        # resource banks and the run itself.
+        # do the later actions, which act on the board, the shop, the resource
+        # banks, the run itself, the deck and the level's structures.
         for action in main.Action.NO_TARGET:
             self.assertFalse(main.Action.needs_target(action),
                              main.Action.name(action))
@@ -243,7 +247,9 @@ class ActionsTests(GameTestCase):
                          {main.Action.CLEANSWEEP, main.Action.EXPANSION,
                           main.Action.BRAINSTORM, main.Action.MASS_PRODUCTION,
                           main.Action.GRACE, main.Action.INACTION,
-                          main.Action.FORESIGHT})
+                          main.Action.FORESIGHT, main.Action.LANTERN,
+                          main.Action.EYEBALL, main.Action.DEEP_POCKETS,
+                          main.Action.NASTY_COCKTAIL})
         for action in main.Action.ORDER:
             if action not in main.Action.NO_TARGET:
                 self.assertTrue(main.Action.needs_target(action),
@@ -329,6 +335,11 @@ class ActionsTests(GameTestCase):
         self.game.selected_action = item
         return self.game._apply_action(), item
 
+    def _reroll_cards(self):
+        """The Reroll cards the player is holding (see _spawn_reroll_cards)."""
+        return [item for item in self.game.actions
+                if getattr(item, "value", None) == main.Action.REROLL]
+
     def test_expansion_unlocks_four_squares(self):
         # A brand-new game's board is its centered start region; the four
         # squares come off the frontier next to it (see _grant_locked_units).
@@ -360,37 +371,29 @@ class ActionsTests(GameTestCase):
         self.assertIn(item, self.game.actions)
         self.assertIn("already fully unlocked", self.game.shop_message)
 
-    def test_brainstorm_banks_free_rerolls(self):
-        self.assertEqual(self.game.free_rerolls, 0)
+    def test_brainstorm_deals_reroll_cards(self):
+        # User request: "make all reroll mechanics spawn this card on the board
+        # when triggered." Brainstorm used to bank free shop rerolls, which the
+        # shelf's rework left nothing to spend; what it does now is deal the
+        # card that IS a reroll (see Game._spawn_reroll_cards).
+        self.assertEqual(self._reroll_cards(), [])
         applied, _item = self._use_action(main.Action.BRAINSTORM)
         self.assertTrue(applied)
-        self.assertEqual(self.game.free_rerolls, main.BRAINSTORM_REROLLS)
-        # They are BOUGHT, not earned by the run, so they are not in the counter
-        # a retry claws back (see free_rerolls_run_gain).
-        self.assertEqual(self.game.free_rerolls_run_gain, 0)
-        # A refresh spends a banked reroll instead of cash.
-        self.game.cash = 100
-        self.game._refresh_shop()
-        self.assertEqual(self.game.free_rerolls, main.BRAINSTORM_REROLLS - 1)
-        self.assertEqual(self.game.cash, 100)
-        self.assertIn("Free reroll", self.game.shop_message)
+        cards = self._reroll_cards()
+        self.assertEqual(len(cards), main.BRAINSTORM_REROLLS)
+        for card in cards:
+            self.assertIsNotNone(self.game.item_cell(card),
+                                 "a dealt card did not land on the board")
+            self.assertEqual(card.value, main.Action.REROLL)
+        # They are BOUGHT, not earned by the run, so they are not in the ledger
+        # a retry takes back (see reroll_cards_run_gain).
+        self.assertEqual(self.game.reroll_cards_run_gain, [])
 
-    def test_v2_brainstorm_halves_the_reroll_price(self):
-        self.assertEqual(self.game.refresh_cost(), main.SHOP_REFRESH_COST)
+    def test_v2_brainstorm_deals_four_reroll_cards(self):
         applied, _item = self._use_action(main.Action.BRAINSTORM, version=2)
         self.assertTrue(applied)
-        self.assertEqual(self.game.reroll_discount,
-                         main.BRAINSTORM_REROLL_FACTOR)
-        self.assertEqual(self.game.refresh_cost(), main.SHOP_REFRESH_COST // 2)
-        self.game.cash = 100
-        self.game._refresh_shop()
-        self.assertEqual(self.game.cash, 100 - main.SHOP_REFRESH_COST // 2)
-        # The inflation trial still inflates the halved price: the charge in
-        # _refresh_shop and the shop's REFRESH button both read refresh_cost.
-        self.game.trials_enabled = True
-        self.game.current_trial = main.Trial.INFLATION
-        self.assertEqual(self.game.refresh_cost(),
-                         self.game._inflated(main.SHOP_REFRESH_COST) // 2)
+        self.assertEqual(len(self._reroll_cards()),
+                         main.BRAINSTORM_REROLLS_V2)
 
     def test_mass_production_triples_this_runs_resource_points(self):
         applied, _item = self._use_action(main.Action.MASS_PRODUCTION)
@@ -443,7 +446,7 @@ class ActionsTests(GameTestCase):
         self.game._flush_run_xmult()
         self.assertEqual(self.game.score_mult, 10 * 3.0 * 2.0)
         # The bonus belonged to that run: the next one starts without it.
-        self._complete_run(1000000, required=1)
+        self._complete_run(1000000)
         self.game._continue_run()
         self.assertEqual(self.game.run_xmult_bonus, 0.0)
         self.game.reset_run(False)
@@ -457,7 +460,7 @@ class ActionsTests(GameTestCase):
         # A run that scores nothing at all is still cleared (score >= 0), so
         # the run is free but counts as met.
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
-        self._complete_run(0, required=0)
+        self._complete_run(0)
         self.assertTrue(self.game.run_cleared)
         self.assertTrue(self.game.run_results[-1])
 
@@ -504,7 +507,8 @@ class ActionsTests(GameTestCase):
             scalable += [e for e in block.effects if e in main.Effect.MAGNITUDE]
 
         self.assertTrue(scalable)
-        for block in self.game.toolbox.items:
+        for block in [i for i in self.game.toolbox.items
+                      if getattr(i, "effects", None) is not None]:
             for e in block.effects:
                 if e not in main.Effect.MAGNITUDE:
                     self.assertNotIn(e, block.effect_amounts)
@@ -678,6 +682,106 @@ class ActionsTests(GameTestCase):
         self.assertFalse(self.game._action_strength(
             action, main.CardItem(main.Card.GARDEN, 36)))
         self.assertEqual(start.scorer_amount, 0)
+
+
+class LanternTests(GameTestCase):
+    """The Lantern: draw its own magnitude in items, then discard itself.
+
+    User request: "add an item, 'lantern': 0 targets, draw 2 items and discard
+    this card", and "make sure ALL numbers are encoded as magnitudes: using a
+    golem on 2 lanterns should create a new lantern that draws 4 items". So the
+    draw count is the item's own amount (MAGNITUDES.ACTIONS), never a constant
+    in the handler.
+    """
+
+    def _deck(self, count=6):
+        """Put ``count`` loose components in the deck (items off the board)."""
+        for _ in range(count):
+            shape = main.Component.shape_component(main.Shape.SLOPE)
+            self.game.toolbox.add(shape)
+            self.game._to_deck(shape)
+        return len(self.game.deck_items())
+
+    def _lantern(self, amount=None):
+        lantern = main.ActionItem(main.Action.LANTERN,
+                                  main.Action.PRICES[main.Action.LANTERN],
+                                  amount=amount)
+        self.game._adopt_action(lantern)
+        self.game.selected_action = lantern
+        return lantern
+
+    def _use(self, lantern):
+        self.game.selected_action = lantern
+        return self.game._apply_action()
+
+    def test_the_lantern_carries_its_draw_count_as_a_magnitude(self):
+        self.assertEqual(main.Action.MAGNITUDE[main.Action.LANTERN],
+                         main.MAGNITUDES.LANTERN_DRAWS)
+        # A fresh Lantern is created already holding that magnitude...
+        self.assertEqual(self._lantern().amount,
+                         main.MAGNITUDES.LANTERN_DRAWS)
+        # ...and states it, so the sidebar cannot drift from what it does.
+        self.assertIn(f"{main.MAGNITUDES.LANTERN_DRAWS:g} items",
+                      main.Action.description(main.Action.LANTERN))
+
+    def test_the_lantern_draws_its_magnitude_and_discards_itself(self):
+        deck = self._deck()
+        lantern = self._lantern()
+
+        self.assertTrue(self._use(lantern))
+
+        self.assertEqual(len(self.game.deck_items()),
+                         deck - main.MAGNITUDES.LANTERN_DRAWS)
+        self.assertFalse(self.game.owns_item(lantern))
+        self.assertEqual(self.game.discarded_items_run, 1)
+        self.assertIn("drew", self.game.shop_message)
+
+    def test_a_merged_lantern_draws_four_items(self):
+        # The golem's answer (see tests/test_structures.py): the magnitude IS
+        # the draw count, so 4 draws 4.
+        deck = self._deck(10)
+        lantern = self._lantern(amount=main.MAGNITUDES.LANTERN_DRAWS * 2)
+
+        self.assertTrue(self._use(lantern))
+
+        self.assertEqual(len(self.game.deck_items()), deck - 4)
+
+    def test_the_lantern_needs_something_to_draw(self):
+        self.assertEqual(self.game.deck_items(), [])
+        lantern = self._lantern()
+
+        self.assertFalse(self._use(lantern))
+
+        self.assertTrue(self.game.owns_item(lantern))
+        self.assertEqual(self.game.discarded_items_run, 0)
+        self.assertIn("deck", self.game.shop_message)
+
+    def test_the_lantern_draws_onto_its_own_square(self):
+        self._deck()
+        lantern = self._lantern()
+        home = self.game.item_cell(lantern)
+        self.assertIsNotNone(home)
+
+        self.assertTrue(self._use(lantern))
+
+        # The first item drawn takes the square the Lantern burned out on, so
+        # the draw appears where the light was.
+        drawn = self.game.item_at_cell(home)
+        self.assertIsNotNone(drawn)
+        self.assertIn(drawn, self.game.owned_items())
+
+    def test_an_upgraded_lantern_draws_twice_as_many(self):
+        deck = self._deck(10)
+        lantern = self._lantern()
+        self.game.cash = 1000
+        self.game.selected_action = lantern
+        self.game._upgrade_action()
+
+        self.assertEqual(lantern.version, 2)
+        self.assertEqual(lantern.amount, main.MAGNITUDES.LANTERN_DRAWS * 2)
+
+        self.assertTrue(self._use(lantern))
+        self.assertEqual(len(self.game.deck_items()), deck - lantern.amount)
 
 
 class InactionTests(GameTestCase):

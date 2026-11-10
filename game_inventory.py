@@ -21,6 +21,7 @@ import sounds
 import ui
 from ui import Popup, ScoreParticle, TrailParticle
 from components import (
+    Modifier,
     CARD_SCORERS,
     COMPONENT_PRICES,
     DEFAULT_DIFFICULTY,
@@ -311,6 +312,30 @@ class InventoryMixin:
             kept.append(token)
         self.tokens = kept
 
+    def _age_modifiers(self):
+        """One run has gone by: age every modifier that counts down.
+
+        Called when a finished run is COMMITTED (see _continue_run), so a retry
+        changes nothing. Two modifiers live on a clock (user request):
+
+        * FORGOTTEN loses one stack per run -- "remove 1 stack of forgotten each
+          run" -- and an item carrying it cannot be drawn until they are gone
+          (see drawable_deck_items).
+        * TEMPORARY is destroyed here: "the keyword 'temporary' means it will be
+          destroyed next round", which is the run it was made for having ended.
+        """
+        for item in list(self.owned_items()):
+            if Modifier.stacks(item, Modifier.TEMPORARY):
+                self._discard_item(item)
+                continue
+            stacks = Modifier.stacks(item, Modifier.FORGOTTEN)
+            if stacks:
+                Modifier.set_stacks(item, Modifier.FORGOTTEN, stacks - 1)
+        for token in list(self.tokens):
+            block = getattr(token, "block", None)
+            if block is not None and Modifier.stacks(block, Modifier.TEMPORARY):
+                self.tokens.remove(token)
+
     def _upgrade_action(self):
         """Upgrade the selected action to v2 for ACTION_UPGRADE_COST."""
         action = self.selected_action
@@ -326,6 +351,12 @@ class InventoryMixin:
             return
         self.cash -= cost
         action.version = 2
+        # An action that carries a MAGNITUDE gets stronger in that number, which
+        # is what "v2 is much stronger" means for it: the Lantern's magnitude is
+        # the items it draws, so its v2 draws twice as many (see
+        # MAGNITUDES.ACTIONS).
+        if getattr(action, "amount", 0):
+            action.amount = action.amount * 2
         self._set_shop_message(f"{action.name} upgraded to v2 (${cost})")
 
     def _sell_fraction(self):

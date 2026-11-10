@@ -156,6 +156,7 @@ class Effect:
     PHASE = 16  # touching it makes the marble pass through everything for 1 second
     SPLITTER = 17  # splits the marble in two; the copy leaves the opposite way
     GONDOLA = 18  # slides up/down or left/right along its arrow, turning back at walls
+    WASTEFUL = 19  # usable in the build phase: throw this block and one other item away, draw one
 
     NAMES: ClassVar[dict[int, str]] = {NONE: "None", BOUNCY: "Bouncy", ACCELERATOR: "Accelerator", \
                                        PISTON: "Piston", GRAVITY: "Gravity", BLACK_HOLE: "Black Hole", \
@@ -163,14 +164,15 @@ class Effect:
                                        FRAGILE: "Fragile", GROWING: "Growing", SHRINKING: "Shrinking", \
                                        STICKY: "Sticky", REPULSOR: "Repulsor", CONVEYOR: "Conveyor", \
                                        ZIPPER: "Zipper", PHASE: "Phase", SPLITTER: "Splitter", \
-                                       GONDOLA: "Gondola"}
+                                       GONDOLA: "Gondola", WASTEFUL: "Wasteful"}
     ORDER: ClassVar[list[int]] = [NONE, BOUNCY, ACCELERATOR, PISTON, GRAVITY, BLACK_HOLE, PORTAL, ROTATE,
                                   SLIPPERY, FRAGILE, GROWING, SHRINKING, STICKY, REPULSOR, CONVEYOR,
-                                  ZIPPER, PHASE, SPLITTER, GONDOLA]
+                                  ZIPPER, PHASE, SPLITTER, GONDOLA, WASTEFUL]
     # The real, non-NONE effects a block can actually have.
     REAL_ORDER: ClassVar[list[int]] = [BOUNCY, ACCELERATOR, PISTON, GRAVITY, BLACK_HOLE, PORTAL, ROTATE,
                                        SLIPPERY, FRAGILE, GROWING, SHRINKING, STICKY, REPULSOR,
-                                       CONVEYOR, ZIPPER, PHASE, SPLITTER, GONDOLA]
+                                       CONVEYOR, ZIPPER, PHASE, SPLITTER, GONDOLA,
+                                       WASTEFUL]
     # The effects whose strength is a NUMBER: each block rolls its own value
     # around the average in MAGNITUDES.EFFECTS (see the MAGNITUDES section
     # below; that table is bound back onto this class as MAGNITUDE, so every
@@ -224,7 +226,7 @@ class Scorer:
     IDEAS = 12
     RANDOM = 13  # random payoff: +35 chips, +5 mult, or +0.3 xMult
     EFFECTIVE = 14  # +1 xMult when the block has 2+ effects
-    FRESH = 15  # 1 free shop reroll when touched
+    FRESH = 15  # 1 Reroll card on the board when touched
     PICKY = 16  # 1 unit: banks half an option point a trigger; 1 point = a shop slot
     VOYAGER = 17  # +0.01 mult per px the marble traveled before the touch (rolled)
     SATANIC = 18  # x6.66 mult; a block dies once a marble leaves, a card after a run
@@ -358,7 +360,7 @@ class Scorer:
     # point converts into that scorer's reward (see RESOURCE_THRESHOLD), and the
     # rate says how many points a trigger banks per unit of its magnitude:
     # Shreds, Rubble and Ideas bank a point a unit, Picky half a point. Parts
-    # banks whole components rather than points and Fresh grants its reroll
+    # banks whole components rather than points and Fresh deals its Reroll card
     # immediately; neither appears here.
     RESOURCE_RATE: ClassVar[dict[int, float]] = {
         SHREDS: 1,
@@ -559,8 +561,7 @@ class Trial(TileArt):
         SPEEDRUN: "Time exponent is penalized after half the normal time.",
         REPEATS_ONLY: "Only block types touched twice count toward the "
                       "uniqueness score.",
-        INFLATION: "Everything costs 50% more: shop prices, rerolls, "
-                   "upgrades, and disassembly.",
+        INFLATION: "Everything costs 50% more: upgrades and disassembly.",
         EMPTY_POCKETS: "The end-of-run cash award skips its score-based bonus "
                        "(the flat $20, interest, and Cash-card payouts stay).",
         DEAL_BREAKER: "Blocks never score until you sell a card — one sale is "
@@ -936,7 +937,7 @@ class Card:
     # The newest whole cards. Their ids continue the shared band upward;
     # Painting (92), Synthesizer (93) and Island (99) belong to the named cards,
     # so the free ids left in the band are 12..77.
-    TESSERACT = 94  # permanently +0.1 xMult for every shop reroll
+    TESSERACT = 94  # permanently +0.1 xMult for every Reroll card used
     THOUSAND_HANDED = 95  # creates a random action after every run
     PROCRASTINATION = 96  # ends the run a second late: rewinds it once per copy and refills triggers
     ESSENCE = 97  # $10 a run, one card slot fewer, 2 permanent tokens when sold
@@ -972,6 +973,18 @@ class Card:
     # mechanic happens (Game._gate_key_and_lock).
     MATRIX = 23  # +45 chips an unphased second inside a locked board unit
     GATE = 24    # +30 chips each time a marble carries its key through the lock
+    # Trash Can is the newest measured card, and an end-phase one: it counts the
+    # items the run threw away (Wasteful throwing a pair, a Lantern spending
+    # itself — see Game._discard_item) and pays MAGNITUDES.TRASH_CAN_CHIPS a
+    # unit for them. It takes the next free id in the 12..77 band.
+    TRASH_CAN = 25  # +20 chips per item discarded this run
+    # Smelly Socks pays in TWO currencies at once (+15 chips and +2 mult at the
+    # start of a run), which no measured row can express — Card.NAMED pays one
+    # scorer — so it is a FIXED-payoff card read where its mechanic lives, like
+    # Gate's chips and Essence's cash (see cards._apply_smelly_socks). Its other
+    # half is a cost: a card drawn with it goes back into the deck. It takes the
+    # next free id in the 12..77 band.
+    SMELLY_SOCKS = 26
 
     NAMES: ClassVar[dict[int, str]] = {
         # The named cards (the classic cards).
@@ -1022,6 +1035,8 @@ class Card:
         ODYSSEY: "Odyssey",
         MATRIX: "Matrix",
         GATE: "Gate",
+        TRASH_CAN: "Trash Can",
+        SMELLY_SOCKS: "Smelly Socks",
     }
     # Short flavor lines, one per whole card. The named cards' lines are the
     # ones their named conditions carried, which are in turn the comments the
@@ -1074,6 +1089,8 @@ class Card:
         ODYSSEY: "A long way from home.",
         MATRIX: "Inside the grid.",
         GATE: "The way is open.",
+        TRASH_CAN: "One man's junk.",
+        SMELLY_SOCKS: "Something died in here.",
     }
     # What each whole card does. A named card's line states the payoff it pays
     # at its own magnitude (the card has no scorer half to roll, so the number
@@ -1110,7 +1127,7 @@ class Card:
         MINESHAFT: "Board units cost $5 instead of $8",
         MARKET: "Selling a card, block, or action refunds 75% of its price instead of 50%",
         WATCH: "The run's time score factor is always at its maximum, however long the run takes",
-        TESSERACT: "Every shop reroll permanently adds +0.1 xMult, applied at the start of each run",
+        TESSERACT: "Every Reroll card you use permanently adds +0.1 xMult, applied at the start of each run",
         THOUSAND_HANDED: "Creates a random action after every run",
         PROCRASTINATION: "Rewinds the run 1 second each time it finishes, refilling every trigger — one rewind per copy",
         ESSENCE: "Gives $10 at the end of every run, but takes a card slot away — selling it leaves 2 random permanent Spirit tokens",
@@ -1210,7 +1227,18 @@ class Card:
                                         # event card worth one standard chip
                                         # unit a pass, so it is priced with the
                                         # cheapest utility whole cards.
-                                        MATRIX: 30, GATE: 24}
+                                        MATRIX: 30, GATE: 24,
+                                        # Trash Can pays a measured end payout
+                                        # like Matrix's, but for something the
+                                        # player chooses to do (throw items
+                                        # away), so it sits beside the cheap
+                                        # utility cards.
+                                        TRASH_CAN: 26,
+                                        # Smelly Socks pays half a Joker and
+                                        # half a chips card at once, but hands
+                                        # a drawn card back to the deck to do
+                                        # it, so it costs a plain card.
+                                        SMELLY_SOCKS: 24}
     # Face colors and center glyphs for the mini-card look (one per card).
     COLORS: ClassVar[dict[int, tuple]] = {
         # The named cards: one identity colour each (the jester's violet, the
@@ -1264,6 +1292,8 @@ class Card:
         ODYSSEY: (40, 90, 130),       # open sea
         MATRIX: (60, 160, 95),        # terminal green
         GATE: (105, 115, 140),        # portcullis steel
+        TRASH_CAN: (95, 120, 90),     # bin green
+        SMELLY_SOCKS: (150, 128, 92), # woolly beige
     }
     # How far a card's face has to sit from its rarity border to be worth the
     # name, and the shades that move a face which is too close (smallest first,
@@ -1295,6 +1325,8 @@ class Card:
         CLAUSTROPHOBIA: "C", EARTHQUAKE: "E",
         CHALLENGER: "K", ODYSSEY: "O",
         MATRIX: "M", GATE: "G",
+        TRASH_CAN: "T",
+        SMELLY_SOCKS: "S",
     }
     # Every whole card, in id order, so the shop pool and the codex list the
     # named cards first and then the utility cards. The match-group cards are
@@ -1314,7 +1346,8 @@ class Card:
                                   HOARD, INFINITY,
                                   SWASHBUCKLER, STENCIL, BRAIN_LOOP,
                                   CLAUSTROPHOBIA, EARTHQUAKE, CHALLENGER,
-                                  ODYSSEY, MATRIX, GATE]
+                                  ODYSSEY, MATRIX, GATE, TRASH_CAN,
+                                  SMELLY_SOCKS]
     # How rare each whole card is. A whole card's tier follows its price, the
     # codebase's usual rarity rule (see component_weight): up to $28 Common,
     # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
@@ -1331,7 +1364,9 @@ class Card:
         # three cheap utility ones below. The two dearest measured cards ($32)
         # are Unusual along with Fountain ($34), while Intangible ($26) is one of
         # the cheap measured cards.
+        # Trash Can ($26) is a cheap measured card, so it joins this band.
         JOKER: Rarity.COMMON, PLANE: Rarity.COMMON, BANKER: Rarity.COMMON,
+        TRASH_CAN: Rarity.COMMON,
         PILLAR: Rarity.COMMON, ASTRONAUT: Rarity.COMMON,
         WRECKING_BALL: Rarity.COMMON, GLITCH: Rarity.COMMON,
         RIPPED_CARD: Rarity.COMMON, COZY: Rarity.COMMON,
@@ -1361,6 +1396,9 @@ class Card:
         # ($24) is a Common, like the cheap utility whole cards it is priced
         # with.
         MATRIX: Rarity.UNUSUAL, GATE: Rarity.COMMON,
+        # Smelly Socks is a cheap card ($24) with a real cost attached, so it
+        # sits in the Common band with the other cheap whole cards.
+        SMELLY_SOCKS: Rarity.COMMON,
         # Epic: the economy cards that compound over a whole game, and Stencil
         # ($46), whose x5 wants a deliberately empty card area.
         COUPON: Rarity.EPIC, DOPPELGANGER: Rarity.EPIC,
@@ -1489,7 +1527,7 @@ class MAGNITUDES:
         Scorer.IDEAS: 1,  # 1 unit; banks an idea point a trigger
         Scorer.RANDOM: 0,  # picks among fixed rewards; no single amount
         Scorer.EFFECTIVE: 2.5,  # multiplies the multiplier by 2.5 (+1.5 xMult)
-        Scorer.FRESH: 1,  # 1 free reroll per trigger
+        Scorer.FRESH: 1,  # 1 Reroll card per trigger
         Scorer.PICKY: 1,  # 1 unit; banks PICKY's half an option point a trigger
         Scorer.VOYAGER: 0.01,  # mult per PIXEL the marble traveled before the touch
         Scorer.SATANIC: 6.66,  # multiplies the multiplier by 6.66 when touched
@@ -1513,9 +1551,19 @@ class MAGNITUDES:
     }
 
     # --- Card magnitudes -----------------------------------------------------
+    # What one card unit is worth before a card's ratio scales it. Declared
+    # first because the ratios below are measured in these units (a card worth
+    # +20 chips a unit has a ratio of 20/30).
+    CHIPS_PER_UNIT = 30
+    MULT_PER_UNIT = 4
+    XMULT_PER_UNIT = 0.25
+    # The chipper whole cards' own payoff, in chips a unit: the ratio below is
+    # this over CHIPS_PER_UNIT, so the number is typed once.
+    TRASH_CAN_CHIPS = 20  # Trash Can: +20 chips per item discarded this run
+
     # The measured whole cards' per-unit ratio. Each card fires once per run (or
     # once per fragile break) and pays a fixed amount, built by
-    # components.magnitude_payoff(scorer, ratio, units): the standard bases below
+    # components.magnitude_payoff(scorer, ratio, units): the standard bases above
     # (+30 chips / +4 mult / +0.25 xMult per unit) scaled by the ratio, times the
     # per-run number ``measure`` names (see cards._named_card_units). A whole
     # card has no scorer half to roll, so ``units`` is all that varies: Joker's
@@ -1547,13 +1595,39 @@ class MAGNITUDES:
         Card.STENCIL: 4.0,
         Card.CLAUSTROPHOBIA: 0.75,
         Card.MATRIX: 1.5,
+        Card.TRASH_CAN: TRASH_CAN_CHIPS / CHIPS_PER_UNIT,
     }
 
-    # --- Shared card payoff bases --------------------------------------------
-    # What one card unit is worth before a card's ratio scales it.
-    CHIPS_PER_UNIT = 30
-    MULT_PER_UNIT = 4
-    XMULT_PER_UNIT = 0.25
+    # --- Passive item magnitudes ---------------------------------------------
+    # An UNPLAYABLE item's payoff, in the currency its scorer names: Concrete
+    # adds this many chips at the start of every run (see Passive.PAYOFFS).
+    CONCRETE_CHIPS = 30
+
+    # --- Tool magnitudes -----------------------------------------------------
+    # The stacks of FORGOTTEN one shot of vodka pours into a card (see
+    # Tool.MODIFIES and components.Modifier).
+    VODKA_FORGOTTEN = 3
+
+    # --- Action magnitudes ---------------------------------------------------
+    # The one number an ACTION can carry is its own strength. The Lantern's is
+    # the items it draws (see Game._action_lantern), so it is what an upgrade
+    # doubles and what a golem doubles again: two Lanterns combined draw twice
+    # as many items as one (see Structure.GOLEM).
+    LANTERN_DRAWS = 2
+    # The three energy-costing actions carry the same kind of number: the cards
+    # Eyeball draws out of the deck (the player picks which), and the packs Deep
+    # Pockets creates — which is also the structures it destroys — so a golem
+    # doubles what one use gives.
+    EYEBALL_DRAWS = 1
+    DEEP_POCKETS_PACKS = 1
+    # The Nasty Cocktail's energy an use, for each modifier on the card (see
+    # Game._action_nasty_cocktail).
+    COCKTAIL_ENERGY_PER_MODIFIER = 1
+    # The Reroll's: the cards it draws out of the deck after it has turned the
+    # selected structure into another one (see Game._action_reroll), so a golem
+    # doubles the draw with the rest of the card.
+    REROLL_DRAWS = 1
+
 
     # --- Fixed scorer rewards ------------------------------------------------
     # The scorers that pick among fixed payoffs rather than a rolled amount
@@ -1575,6 +1649,11 @@ class MAGNITUDES:
     TESSERACT_REROLL_XMULT = 0.1  # Tesseract: permanent xMult per shop reroll
     INFERNO_EXPONENT_BONUS = 0.07  # Inferno: added to the total-score exponent
     ODYSSEY_CASH_FRACTION = 0.5  # Odyssey: fraction of a banked item's sell price
+    # Smelly Socks pays BOTH of these at the start of every run (see
+    # cards._apply_smelly_socks), and charges for it by handing a card drawn
+    # with it back to the deck.
+    SMELLY_SOCKS_CHIPS = 15
+    SMELLY_SOCKS_MULT = 2
 
 
 # Bind the two average tables back onto the classes they describe, so every
@@ -1647,7 +1726,26 @@ Card.NAMED = {
     # seconds the marble was NOT phasing (see Game._count_locked_no_phase_time).
     Card.MATRIX: ("end", Scorer.CHIPS_ADD,
                   MAGNITUDES.CARD_RATIOS[Card.MATRIX], "inside_locked_no_phase"),
+    # Trash Can pays its own magnitude a unit for what the run threw away, read
+    # at the end because discards happen all run long (see Game._discard_item).
+    Card.TRASH_CAN: ("end", Scorer.CHIPS_ADD,
+                     MAGNITUDES.CARD_RATIOS[Card.TRASH_CAN], "items_discarded"),
 }
+
+# Trash Can's catalogue line is generated from its magnitude, exactly as the
+# Lantern's is from its own: the per-item chip count is typed once, in
+# MAGNITUDES.TRASH_CAN_CHIPS, and this reads it back (the same arithmetic
+# magnitude_payoff uses for a chips card).
+Card.DESCRIPTIONS[Card.TRASH_CAN] = (
+    f"Adds {int(MAGNITUDES.CHIPS_PER_UNIT * MAGNITUDES.CARD_RATIOS[Card.TRASH_CAN] + 0.5)} "
+    f"chips at the end of the run for each item you discarded this run")
+
+# Smelly Socks states both of its numbers from the one place they live too: the
+# chip bonus, the mult bonus, and what it charges for them.
+Card.DESCRIPTIONS[Card.SMELLY_SOCKS] = (
+    f"Adds {MAGNITUDES.SMELLY_SOCKS_CHIPS:g} chips and "
+    f"{MAGNITUDES.SMELLY_SOCKS_MULT:g} mult at the start of the run, but a "
+    f"random card drawn with it goes back into the deck (unplayable)")
 
 
 # The named cards, in catalogue order — the list the tests and the collection
@@ -1862,6 +1960,25 @@ class Action:
     # Foresight is the dear one: a permanent extra action slot.
     INACTION = 11
     FORESIGHT = 12
+    # Cleansing never reaches the shelf on its own: it comes out of a crystal
+    # pool (see Structure.RESULTS).
+    CLEANSING = 13
+    # The Lantern is the first action whose strength is a NUMBER (see
+    # MAGNITUDES.ACTIONS): it draws its own magnitude in items from the deck and
+    # then discards itself, so a golem combining two of them draws twice as
+    # many (see Structure.GOLEM).
+    LANTERN = 14
+    # The three newest actions. Each costs energy from the run's own budget
+    # (Action.ENERGY), which is what the four tools spend — an action that asks
+    # for energy is a card you pay to play rather than a free one-shot.
+    EYEBALL = 15       # 1 energy: draw the cards YOU pick out of your deck
+    DEEP_POCKETS = 16  # 1 energy: a random pack, for a random structure
+    NASTY_COCKTAIL = 17  # 0 energy: energy for each modifier it carries
+    # The Reroll is what a reroll IS now that the shop has no refresh button
+    # (see Fresh and Brainstorm, which deal this card instead of banking free
+    # rerolls): 0 energy to point at a structure and turn it into another one,
+    # then discard itself and draw a card (see Game._action_reroll).
+    REROLL = 18
 
     NAMES: ClassVar[dict[int, str]] = {
         DEATH: "Death",
@@ -1877,6 +1994,12 @@ class Action:
         GRACE: "Grace",
         INACTION: "Inaction",
         FORESIGHT: "Foresight",
+        CLEANSING: "Cleansing",
+        LANTERN: "Lantern",
+        EYEBALL: "Eyeball",
+        DEEP_POCKETS: "Deep Pockets",
+        NASTY_COCKTAIL: "Nasty Cocktail",
+        REROLL: "Reroll",
     }
     # What the v1 action does. The descriptions mention the v2 upgrade so the
     # shop and collection show both versions at a glance.
@@ -1890,12 +2013,15 @@ class Action:
         CLEANSWEEP: "Spends every dollar you hold (cash goes to $0) to fill each empty card slot with a "
                     "random card (v2: keeps your cash).",
         EXPANSION: "Unlocks 4 locked board squares next to the playable board (v2: the whole board).",
-        BRAINSTORM: "Gives 2 free shop rerolls (v2: halves the price of every reroll).",
+        BRAINSTORM: "Creates 2 Reroll cards (v2: creates 4).",
         MASS_PRODUCTION: "Triples the resource points this run earns (v2: doubles them for the "
                          "rest of the game).",
         GRACE: "Adds +1 xMult to this run (v2: this run's required score drops to 0).",
         INACTION: "...does nothing?",
         FORESIGHT: "Permanently adds 1 action slot (v2: no limit at all).",
+        CLEANSING: "Multiplies a chosen block, effect or scorer\u2019s magnitude by 1.5.",
+        # The Lantern states its own magnitude, so its line is built from it
+        # (see Action.MAGNITUDE_TEXT and Action.description).
     }
     # What the upgraded (v2) action does.
     V2_DESCRIPTIONS: ClassVar[dict[int, str]] = {
@@ -1907,11 +2033,12 @@ class Action:
         SPIRIT: "Destroys a chosen block and applies its scorer at the start of every run, permanently.",
         CLEANSWEEP: "Fills each empty card slot with a random card, without spending your cash.",
         EXPANSION: "Unlocks every locked board square.",
-        BRAINSTORM: "Halves the price of every shop reroll, for the rest of the game.",
+        BRAINSTORM: "Creates 4 Reroll cards.",
         MASS_PRODUCTION: "Doubles every resource point you earn, for the rest of the game.",
         GRACE: "This run's required score becomes 0: it is cleared whatever it scores.",
         INACTION: "...does nothing, and hands over a card slot.",
         FORESIGHT: "Removes the limit on owned actions: hold as many as you like.",
+        CLEANSING: "Multiplies a chosen block, effect or scorer\u2019s magnitude by 2.5.",
     }
     # Short flavor lines, one per action.
     COMMENTS: ClassVar[dict[int, str]] = {
@@ -1928,6 +2055,12 @@ class Action:
         GRACE: "This one's on the house.",
         INACTION: "Doing nothing, deliberately.",
         FORESIGHT: "See what is coming.",
+        CLEANSING: "Washed clean.",
+        LANTERN: "Light the way.",
+        EYEBALL: "I've got my eye on you.",
+        DEEP_POCKETS: "There's more where that came from.",
+        NASTY_COCKTAIL: "Shaken, not stirred.",
+        REROLL: "Roll the bones.",
     }
     # Actions are cheap one-use power-ups: their prices were halved (48 -> 24,
     # 56 -> 28), so a run can afford one almost any time. Deja Vu costs a little
@@ -1947,7 +2080,30 @@ class Action:
                                         # action in the catalogue by a mile: it
                                         # is the only one that widens the
                                         # action area itself, for good.
-                                        INACTION: 24, FORESIGHT: 90}
+                                        INACTION: 24, FORESIGHT: 90,
+                                        # Cleansing is not sold: a pool
+                                        # holds it. Its price is only what a
+                                        # structure holding one is worth.
+                                        CLEANSING: 30,
+                                        # The Lantern buys cards off the top of
+                                        # the deck, so it is priced with the
+                                        # cheap actions.
+                                        LANTERN: 26,
+                                        # Eyeball is the Lantern's better half:
+                                        # it lets the player PICK which card
+                                        # comes out of the deck, so it costs a
+                                        # little more. Deep Pockets hands over a
+                                        # whole random pack and charges a
+                                        # structure for it, which is worth more
+                                        # than any other action on the shelf,
+                                        # and the Nasty Cocktail does nothing at
+                                        # all until it has been modified.
+                                        EYEBALL: 28, DEEP_POCKETS: 40,
+                                        NASTY_COCKTAIL: 20,
+                                        # The Reroll is a level's furniture in
+                                        # another shape plus a card, so it sits
+                                        # with the cheap actions.
+                                        REROLL: 26}
     # Face colors and center glyphs for the mini-action look (one per action).
     COLORS: ClassVar[dict[int, tuple]] = {
         DEATH: (120, 45, 45),        # deathly red
@@ -1963,6 +2119,12 @@ class Action:
         GRACE: (150, 200, 225),      # halo sky
         INACTION: (135, 140, 150),   # empty grey
         FORESIGHT: (85, 75, 165),    # vision indigo
+        CLEANSING: (95, 175, 170),   # clear water
+        LANTERN: (210, 175, 80),     # lamplight
+        EYEBALL: (196, 168, 160),    # an eyeball's white
+        DEEP_POCKETS: (130, 96, 62), # a deep coat's brown
+        NASTY_COCKTAIL: (205, 90, 155),  # a bright, doubtful drink
+        REROLL: (90, 160, 110),      # a fresh green roll
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         DEATH: "D", RECOGNITION: "R", DEJA_VU: "V",
@@ -1970,25 +2132,77 @@ class Action:
         CLEANSWEEP: "C", EXPANSION: "E", BRAINSTORM: "B",
         MASS_PRODUCTION: "M", GRACE: "G",
         INACTION: "?", FORESIGHT: "F",
+        CLEANSING: "L",
+        LANTERN: "N",
+        EYEBALL: "Y", DEEP_POCKETS: "K", NASTY_COCKTAIL: "X",
+        REROLL: "\u21bb",
     }
     ORDER: ClassVar[list[int]] = [DEATH, RECOGNITION, DEJA_VU, ANOINTMENT,
                                   STRENGTH, SPIRIT, CLEANSWEEP, EXPANSION,
                                   BRAINSTORM, MASS_PRODUCTION, GRACE,
-                                  INACTION, FORESIGHT]
+                                  INACTION, FORESIGHT, CLEANSING, LANTERN,
+                                  EYEBALL, DEEP_POCKETS, NASTY_COCKTAIL,
+                                  REROLL]
     # Actions that act on the game itself rather than on a chosen block or card:
     # they need no subject, so selecting one and pressing S uses it straight
-    # away (see Game._apply_action).
+    # away (see Game._apply_action). Eyeball takes its subject from the DECK
+    # overlay (see Game._pick_deck_card), Deep Pockets and the Nasty Cocktail
+    # act on the game at once.
     NO_TARGET: ClassVar[tuple[int, ...]] = (CLEANSWEEP, EXPANSION, BRAINSTORM,
                                             MASS_PRODUCTION, GRACE, INACTION,
-                                            FORESIGHT)
+                                            FORESIGHT, LANTERN, EYEBALL,
+                                            DEEP_POCKETS, NASTY_COCKTAIL)
+    # The actions aimed at a STRUCTURE instead of at a block or a card (see
+    # Game.is_action_target): a reroll is pointed at the level's own furniture.
+    # Every other action still refuses a structure, which is why the target
+    # kind is a table rather than a widening of what an action may be aimed at.
+    STRUCTURE_TARGET: ClassVar[tuple[int, ...]] = (REROLL,)
+    # What using an action costs from the run's ENERGY budget (see
+    # Game._apply_action). Actions are one-shot items, so most cost nothing —
+    # an action that is still in the table asks for energy on top of itself,
+    # and that is the only place the number lives.
+    ENERGY: ClassVar[dict[int, int]] = {
+        EYEBALL: 1,
+        DEEP_POCKETS: 1,
+        NASTY_COCKTAIL: 0,   # costs nothing to pour, and gives energy back
+        REROLL: 0,           # user request: "(0 energy)"
+    }
+    # The actions whose text states their own MAGNITUDE, as a template for
+    # Action.description: the number comes from the item (a merged Lantern
+    # describes itself as drawing four), never from this table.
+    MAGNITUDE_TEXT: ClassVar[dict[int, str]] = {
+        LANTERN: "Draws {amount} item{s} from the deck, then discards this action.",
+        EYEBALL: ("Draws {amount} card{s} of your choice from the deck "
+                  "({energy} energy)."),
+        DEEP_POCKETS: ("Creates {amount} random pack{s} and destroys {amount} "
+                       "random structure{s} ({energy} energy)."),
+        NASTY_COCKTAIL: ("Gains {amount} energy for each modifier on this "
+                         "card ({energy} energy)."),
+        REROLL: ("Turns the selected structure into another random one, "
+                 "discards this card and draws {amount} card{s} "
+                 "({energy} energy)."),
+    }
 
     @classmethod
     def name(cls, action):
         return cls.NAMES.get(action, "Unknown")
 
     @classmethod
-    def description(cls, action, version=1):
-        """The action's effect text for the given version (v2 is stronger)."""
+    def description(cls, action, version=1, amount=None):
+        """The action's effect text for the given version (v2 is stronger).
+
+        ``amount`` is the action's own magnitude when it carries one (see
+        MAGNITUDES.ACTIONS): the Lantern reads the number IT will draw, so a
+        Lantern a golem doubled says four rather than the catalogue's two. An
+        action with no magnitude, or none given, describes its catalogue entry.
+        """
+        template = cls.MAGNITUDE_TEXT.get(action)
+        if template is not None:
+            if not amount:
+                amount = cls.MAGNITUDE.get(action, 0)
+            return template.format(amount=f"{amount:g}",
+                                   s="" if amount == 1 else "s",
+                                   energy=cls.energy(action))
         if version >= 2:
             return cls.V2_DESCRIPTIONS.get(action, "Unknown action.")
         return cls.DESCRIPTIONS.get(action, "Unknown action.")
@@ -2007,9 +2221,58 @@ class Action:
         return action not in cls.NO_TARGET
 
     @classmethod
+    def targets_structures(cls, action):
+        """True when the action is aimed at a structure (see STRUCTURE_TARGET).
+
+        Everything else is aimed at a block or a card: the target KIND is what
+        Game.is_action_target asks about, so an action can never be pointed at
+        something its handler would refuse.
+        """
+        return action in cls.STRUCTURE_TARGET
+
+    @classmethod
+    def energy(cls, action):
+        """What USING this action costs from the run's energy (0 for most).
+
+        Energy is the run's budget (see MAX_ENERGY): the four tools spend it to
+        open structures, and the three newest actions ask for it too (see
+        Game._apply_action). An action missing from the table costs nothing,
+        which is every action before them: once used, an action is gone.
+        """
+        return cls.ENERGY.get(action, 0)
+
+    @classmethod
     def cycle(cls, action):
         idx = cls.ORDER.index(action) if action in cls.ORDER else 0
         return cls.ORDER[(idx + 1) % len(cls.ORDER)]
+
+
+# Bind the action magnitudes back onto the class, exactly as the effect and
+# scorer tables are bound above: an action's number is the ONE place its
+# strength lives, so an upgrade or a golem changes the number and nothing else
+# has to know what it means. The Lantern's catalogue line is generated from it
+# too, so the number is typed once (MAGNITUDES.LANTERN_DRAWS). The three
+# energy-costing actions' lines are generated the same way, from the number of
+# cards/packs/energy they carry and from Action.ENERGY.
+Action.MAGNITUDE = {
+    Action.LANTERN: MAGNITUDES.LANTERN_DRAWS,
+    Action.EYEBALL: MAGNITUDES.EYEBALL_DRAWS,
+    Action.DEEP_POCKETS: MAGNITUDES.DEEP_POCKETS_PACKS,
+    Action.NASTY_COCKTAIL: MAGNITUDES.COCKTAIL_ENERGY_PER_MODIFIER,
+    Action.REROLL: MAGNITUDES.REROLL_DRAWS,
+}
+Action.DESCRIPTIONS[Action.LANTERN] = Action.description(Action.LANTERN)
+Action.DESCRIPTIONS[Action.EYEBALL] = Action.description(Action.EYEBALL)
+Action.DESCRIPTIONS[Action.DEEP_POCKETS] = Action.description(Action.DEEP_POCKETS)
+Action.DESCRIPTIONS[Action.NASTY_COCKTAIL] = Action.description(
+    Action.NASTY_COCKTAIL)
+Action.DESCRIPTIONS[Action.REROLL] = Action.description(Action.REROLL)
+# Tesseract's line states its own number too, so it is built from MAGNITUDES
+# instead of typing the same figure in two places.
+Card.DESCRIPTIONS[Card.TESSERACT] = (
+    f"Every Reroll card you use permanently adds "
+    f"+{MAGNITUDES.TESSERACT_REROLL_XMULT:g} xMult, applied at the start of "
+    "each run")
 
 
 # The rate a resource pack pays an option at: twice what a trigger of the
@@ -2049,6 +2312,10 @@ class Pack:
     ACTION = 6
     RESOURCE = 7
     RANDOM = 8
+    # The one-shot tools and the passive items (user request: the brick, the
+    # match and concrete): a pack is where they are found, so a level's
+    # structures can hand over something to use up.
+    TOOL = 9
 
     NAMES: ClassVar[dict[int, str]] = {
         SHAPE: "Shape Pack",
@@ -2060,6 +2327,7 @@ class Pack:
         ACTION: "Action Pack",
         RESOURCE: "Resource Pack",
         RANDOM: "Random Pack",
+        TOOL: "Tool Pack",
     }
     # What a pack of this type offers. Shown in the sidebar and in the codex.
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
@@ -2075,6 +2343,7 @@ class Pack:
                   f"{RESOURCE_PACK_FACTOR:g}x what a trigger of that scorer "
                   f"banks.",
         RANDOM: "A choice of anything another pack might hold, mixed.",
+        TOOL: "A choice of one-shot tools and passive items.",
     }
     # The five sizes, as (options dealt, options kept). A bigger pack deals out
     # more options, and mega and giga let the player keep a second one.
@@ -2114,37 +2383,21 @@ class Pack:
         ACTION: (70, 150, 160),   # action teal
         RESOURCE: (170, 170, 70),  # resource ochre
         RANDOM: (120, 120, 130),  # anything grey
+        TOOL: (140, 156, 172),    # a working tool's steel
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         SHAPE: "S", EFFECT: "E", SCORER: "C", PART: "P", BLOCK: "B",
-        CARD: "D", ACTION: "A", RESOURCE: "R", RANDOM: "?",
+        CARD: "D", ACTION: "A", RESOURCE: "R", RANDOM: "?", TOOL: "T",
     }
     ORDER: ClassVar[list[int]] = [SHAPE, EFFECT, SCORER, PART, BLOCK, CARD,
-                                  ACTION, RESOURCE, RANDOM]
+                                  ACTION, RESOURCE, RANDOM, TOOL]
     # The types a RANDOM pack draws from, and the ones a PART pack draws from.
     # A random pack offers anything another pack might, so it includes the
     # resource points; the two "meta" types (part and random) are never an
     # option's own type.
     RANDOM_SOURCES: ClassVar[tuple] = (SHAPE, EFFECT, SCORER, BLOCK, CARD,
-                                       ACTION, RESOURCE)
+                                       ACTION, RESOURCE, TOOL)
     PART_SOURCES: ClassVar[tuple] = (SHAPE, EFFECT, SCORER)
-
-    # How often a SHOP SHELF slot offers each kind of goods, as relative
-    # weights (they sum to 100, so each is also the percentage): a card offer
-    # 23% of the time, an action 15%, a shape 8%, an effect 12%, a scorer 22%
-    # and a ready-made block 20%. The slots are the shop's "any item" offers
-    # (see main.SHELF_OFFER_TYPES, which these weights are read through) and a
-    # Picky bonus slot draws the same way; what a pack HOLDS is not weighted by
-    # this (see RANDOM_SOURCES / PART_SOURCES). Resource points are not a shelf
-    # item — they are only ever dealt inside a pack — so they carry no weight.
-    SHELF_WEIGHTS: ClassVar[dict[int, float]] = {
-        CARD: 23,
-        ACTION: 15,
-        SHAPE: 8,
-        EFFECT: 12,
-        SCORER: 22,
-        BLOCK: 20,
-    }
 
     @classmethod
     def name(cls, pack_type):
@@ -2180,11 +2433,6 @@ class Pack:
     @classmethod
     def glyph(cls, pack_type):
         return cls.GLYPHS.get(pack_type, "?")
-
-    @classmethod
-    def shelf_weight(cls, pack_type):
-        """How often a shelf slot offers this kind of goods (SHELF_WEIGHTS)."""
-        return cls.SHELF_WEIGHTS.get(pack_type, 0.0)
 
 
 # --- Magnitudes -------------------------------------------------------------
@@ -2430,7 +2678,9 @@ def effect_description(effect, magnitude=None):
 
     A scalable effect (Piston, Accelerator, Black Hole, ...) also says its own
     magnitude and how far that sits from the average (see effect_magnitude_note);
-    the average itself is shown when no magnitude is given.
+    the average itself is shown when no magnitude is given. Wasteful is the one
+    effect that never touches the marble: it says how the PLAYER uses the block
+    instead (see Game._use_wasteful).
     """
     average = Effect.MAGNITUDE.get(effect, 0)
     if not magnitude:
@@ -2467,6 +2717,10 @@ def effect_description(effect, magnitude=None):
                          "the opposite way (reflected over the block's surface).",
         Effect.GONDOLA: f"Slides at {magnitude:g} px/s along its arrow (up/down or "
                         "left/right), turning back at anything solid.",
+        # Wasteful is the one effect that does nothing to the marble: it is an
+        # ability the PLAYER uses while building (see Game._use_wasteful).
+        Effect.WASTEFUL: "Select it and one other item, then press S to throw both "
+                         "away and draw a new item from the deck",
     }.get(effect, "Unknown effect.")
     return f"{text}." if text[-1] != "." else text
 
@@ -2516,7 +2770,7 @@ def scorer_description(scorer, amount=None):
                        f"+{MAGNITUDES.RANDOM_XMULT:g} xMult at random.",
         Scorer.EFFECTIVE: f"Gives +{amount - 1:g} xMult{dev} when touched if its block "
                           "has 2 or more effects",
-        Scorer.FRESH: f"Gives {amount:g} free reroll{_plural(amount)}{dev} when touched",
+        Scorer.FRESH: f"Gives {amount:g} Reroll card{_plural(amount)}{dev} when touched",
         Scorer.PICKY: f"Gives {points_text(resource_points_for(Scorer.PICKY, amount))} "
                       f"option point{_plural_points(resource_points_for(Scorer.PICKY, amount))}"
                       f"{pdev}. 1 point converts into a random shop slot",
@@ -2565,6 +2819,1267 @@ def card_description(card, amount=None):
     return f"{_match_group_description(group, scorer, amount)}."
 
 
+class Verb:
+    """What a TOOL does to a STRUCTURE (see Structure / Tool).
+
+    A verb is a small, reusable word: a tool CARRIES one (a shovel digs), and a
+    structure answers to the verbs it can be opened with. Nothing else in the
+    game knows the words — the structure table (see Structure.RESULTS) is the
+    one place a verb meets a result.
+    """
+    DIG = 0
+    REVEAL = 1
+    FIX = 2
+    BREAK = 3
+
+    NAMES: ClassVar[dict[int, str]] = {
+        DIG: "dig", REVEAL: "reveal", FIX: "fix", BREAK: "break",
+    }
+    # The past tense a structure's message reads with ("the pit is dug").
+    DONE: ClassVar[dict[int, str]] = {
+        DIG: "dug", REVEAL: "revealed", FIX: "fixed", BREAK: "broken",
+    }
+    ORDER: ClassVar[list[int]] = [DIG, REVEAL, FIX, BREAK]
+
+    @classmethod
+    def name(cls, verb):
+        return cls.NAMES.get(verb, "use")
+
+    @classmethod
+    def done(cls, verb):
+        return cls.DONE.get(verb, "opened")
+
+
+class Modifier:
+    """A MODIFIER: something that has been DONE to an item, and its stacks.
+
+    User request: "create a system of modifiers for items: 'golden', 'diamond'
+    and 'forgotten' are all modifiers. tokens are just blocks with the 'token'
+    modifier, where the number of stacks a block has is equal to the number of
+    runs more that a block acts as a token. blocks with extra triggers have a
+    certain number of the 'retriggerable' modifier equal to the number of times
+    they can be retriggered. v2 actions have the 'v2' modifier."
+
+    A modifier is not what an item DOES (that is Keyword) and not what it is made
+    of (that is the tables above): it is the state riding ON TOP of the item, and
+    every one of them is the same shape -- a kind and a number of stacks -- so one
+    table, one drawer, one sidebar row and one save field serve them all. The
+    state the game already kept in fields of its own lives here now (see
+    Modifiable): `quality` is the golden/diamond pair, an action's `version` is
+    V2, a block's `trigger_limit` is RETRIGGERABLE stacks + 1, a Spirit token's
+    `runs_left` is its TOKEN stacks, and the Shuffled trial's face-down card is
+    FLIPPED -- the "similar parts of the game" the request asked to fold in.
+    """
+    GOLDEN = 0        # a golem folded two items into it (see Quality)
+    DIAMOND = 1       # two goldens folded together
+    FORGOTTEN = 2     # cannot be drawn; loses a stack every run (vodka)
+    TEMPORARY = 3     # destroyed at the end of the run it was made for (a spark)
+    TOKEN = 4         # a kept block that fires every run, for its stacks
+    RETRIGGERABLE = 5  # extra triggers per run, one per stack
+    V2 = 6            # the upgraded version of an action
+    FLIPPED = 7       # face down for the run (the Shuffled trial)
+    DISABLED = 8      # silenced for the run (the Card cutter trial)
+
+    NAMES: ClassVar[dict[int, str]] = {
+        GOLDEN: "golden", DIAMOND: "diamond", FORGOTTEN: "forgotten",
+        TEMPORARY: "temporary", TOKEN: "token",
+        RETRIGGERABLE: "retriggerable", V2: "v2", FLIPPED: "flipped",
+        DISABLED: "disabled",
+    }
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        FORGOTTEN: "Cannot be drawn. It loses 1 stack every run, and can be "
+                   "drawn again once they are gone.",
+        TEMPORARY: "Destroyed at the end of the run it was made for.",
+        TOKEN: "It fires every run, for as many runs as it has stacks left.",
+        RETRIGGERABLE: "It can be triggered once more per stack, every run.",
+        V2: "The upgraded version of an action.",
+        FLIPPED: "Face down: its text and its payoffs are turned over for the run.",
+        DISABLED: "Silenced for the run: its score effect does nothing.",
+    }
+    # The colour a mark on the tile wears (see ui._draw_modifier_marks). A
+    # modifier that already has its own face in the UI (v2's gold frame, a
+    # token's chip) carries none.
+    COLORS: ClassVar[dict[int, tuple | None]] = {
+        GOLDEN: (232, 190, 74),
+        DIAMOND: (140, 222, 236),
+        FORGOTTEN: (158, 140, 196),
+        TEMPORARY: (206, 150, 112),
+        TOKEN: (186, 158, 238),
+        RETRIGGERABLE: (126, 200, 142),
+        V2: None,
+        FLIPPED: None,
+        DISABLED: (120, 120, 120),
+    }
+    # A modifier whose stacks are a COUNTDOWN: one is spent at the end of every
+    # run (see Game._age_modifiers).
+    AGES_PER_RUN: ClassVar[tuple] = (FORGOTTEN,)
+    # The stacks a TOKEN carries when it never expires (a v2 token).
+    PERMANENT: ClassVar[int] = -1
+    ORDER: ClassVar[list[int]] = [GOLDEN, DIAMOND, FORGOTTEN, TEMPORARY,
+                                  TOKEN, RETRIGGERABLE, V2, FLIPPED, DISABLED]
+
+    @classmethod
+    def name(cls, modifier):
+        return cls.NAMES.get(modifier, "")
+
+    @classmethod
+    def color(cls, modifier):
+        return cls.COLORS.get(modifier)
+
+    @classmethod
+    def description(cls, modifier):
+        """One line: what this modifier does to the item carrying it.
+
+        The two TIERS answer with the Quality text, because that is where the
+        ladder (and what it is worth) is explained; every other modifier answers
+        with its own row.
+        """
+        if modifier == cls.GOLDEN:
+            return Quality.description(Quality.GOLDEN)
+        if modifier == cls.DIAMOND:
+            return Quality.description(Quality.DIAMOND)
+        return cls.DESCRIPTIONS.get(modifier, "")
+
+    @classmethod
+    def stacks(cls, item, modifier):
+        """How many stacks of ``modifier`` the item carries (0 for none)."""
+        getter = getattr(item, "modifier_stacks", None)
+        if getter is None:
+            return 0
+        return getter(modifier)
+
+    @classmethod
+    def has(cls, item, modifier):
+        return cls.stacks(item, modifier) != 0
+
+    @classmethod
+    def set_stacks(cls, item, modifier, stacks):
+        """Give the item exactly this many stacks (0 removes the modifier)."""
+        setter = getattr(item, "set_modifier_stacks", None)
+        if setter is not None:
+            setter(modifier, stacks)
+        return item
+
+    @classmethod
+    def add(cls, item, modifier, stacks=1):
+        return cls.set_stacks(item, modifier, cls.stacks(item, modifier) + stacks)
+
+    @classmethod
+    def of(cls, item):
+        """Every modifier on the item, as (modifier, stacks) in table order."""
+        return [(modifier, cls.stacks(item, modifier)) for modifier in cls.ORDER
+                if cls.stacks(item, modifier)]
+
+    @classmethod
+    def line(cls, item):
+        """What the sidebar prints: "golden, forgotten x3" ("" for none)."""
+        words = []
+        for modifier, stacks in cls.of(item):
+            name = cls.name(modifier)
+            if modifier == cls.TOKEN:
+                words.append(f"{name} ({stacks if stacks >= 0 else 'permanent'})")
+            elif stacks != 1:
+                words.append(f"{name} x{stacks}")
+            else:
+                words.append(name)
+        return ", ".join(words)
+
+
+class Modifiable:
+    """The ITEM side of the modifier system: a {modifier: stacks} bag.
+
+    Mixed into every item class (and into a Block), so the state a modifier
+    describes is one dictionary on the item rather than a field per feature. The
+    properties the rest of the game already reads and writes -- an item's
+    ``quality``, an action's ``version``, a block's ``trigger_limit``, a card's
+    ``flipped`` -- are views over it, which is why the golem, the sidebar, the
+    save file and the trials all work unchanged while the truth lives here.
+    """
+    # Created on first use, so an item class needs no constructor changes and a
+    # hand-built item (a test's, a save's) still has a home for its modifiers.
+    _modifiers = None
+
+    def modifier_stacks(self, modifier):
+        """How many stacks of ``modifier`` this item carries (0 for none)."""
+        return (self._modifiers or {}).get(modifier, 0)
+
+    def set_modifier_stacks(self, modifier, stacks):
+        """Give this item exactly this many stacks (0 removes the modifier)."""
+        if self._modifiers is None:
+            self._modifiers = {}
+        stacks = int(stacks)
+        if stacks:
+            self._modifiers[modifier] = stacks
+        else:
+            self._modifiers.pop(modifier, None)
+        return self
+
+    def add_modifier(self, modifier, stacks=1):
+        """Add stacks to this item's modifier (see Modifier.add)."""
+        return self.set_modifier_stacks(
+            modifier, self.modifier_stacks(modifier) + stacks)
+
+    def modifiers(self):
+        """Every modifier on this item, as (modifier, stacks) in table order."""
+        return Modifier.of(self)
+
+    @property
+    def quality(self):
+        """The golem TIER of this item, read from its golden/diamond stacks."""
+        if self.modifier_stacks(Modifier.DIAMOND):
+            return Quality.DIAMOND
+        if self.modifier_stacks(Modifier.GOLDEN):
+            return Quality.GOLDEN
+        return Quality.NORMAL
+
+    @quality.setter
+    def quality(self, quality):
+        self.set_modifier_stacks(Modifier.GOLDEN,
+                                 1 if quality == Quality.GOLDEN else 0)
+        self.set_modifier_stacks(Modifier.DIAMOND,
+                                 1 if quality == Quality.DIAMOND else 0)
+
+    @property
+    def trigger_limit(self):
+        """Triggered times per run: 1 plus its RETRIGGERABLE stacks."""
+        return 1 + self.modifier_stacks(Modifier.RETRIGGERABLE)
+
+    @trigger_limit.setter
+    def trigger_limit(self, limit):
+        self.set_modifier_stacks(Modifier.RETRIGGERABLE, max(0, int(limit) - 1))
+
+    @property
+    def version(self):
+        """An action's version: 2 while it carries the V2 modifier."""
+        return 2 if self.modifier_stacks(Modifier.V2) else 1
+
+    @version.setter
+    def version(self, version):
+        self.set_modifier_stacks(Modifier.V2, 1 if int(version) >= 2 else 0)
+
+    @property
+    def flipped(self):
+        """True while the item is face down (the Shuffled trial's FLIPPED)."""
+        return bool(self.modifier_stacks(Modifier.FLIPPED))
+
+    @flipped.setter
+    def flipped(self, flipped):
+        self.set_modifier_stacks(Modifier.FLIPPED, 1 if flipped else 0)
+
+
+class Quality:
+    """What an item has BECOME: the tier a golem leaves it at (see Structure).
+
+    User request: "make items combined by the golem 'golden', and show that in
+    their name and appearance. make the player able to combine two golden items
+    into a diamond item, with 4x the magnitude of the original item." A golem
+    folds two of the same item into one, so the item it makes is GOLDEN, and two
+    golden items fold into a DIAMOND.
+
+    The tiers are one small table rather than a flag on each item, because every
+    word about them comes from the same row: the word a name is prefixed with,
+    the multiplier the tier is worth, the colour a tile wears, and what the tier
+    combines INTO. One golem always doubles, so GOLDEN is 2x the plain item and
+    DIAMOND (two goldens) 4x — and DIAMOND has no COMBINES_INTO entry, which is
+    what makes it the last tier.
+    """
+    NORMAL = 0
+    GOLDEN = 1
+    DIAMOND = 2
+
+    # The word an item's name is prefixed with ("" for an untouched item).
+    NAMES: ClassVar[dict[int, str]] = {
+        NORMAL: "", GOLDEN: "Golden", DIAMOND: "Diamond",
+    }
+    # What a tier is worth against the PLAIN item it was combined from.
+    MULTIPLIERS: ClassVar[dict[int, int]] = {
+        NORMAL: 1, GOLDEN: 2, DIAMOND: 4,
+    }
+    # The tier a golem makes of two items of this one; a missing entry is final,
+    # so a diamond is never combined again.
+    COMBINES_INTO: ClassVar[dict[int, int]] = {
+        NORMAL: GOLDEN, GOLDEN: DIAMOND,
+    }
+    # The colour a combined item wears, on its frame and its gem (None: plain).
+    COLORS: ClassVar[dict[int, tuple]] = {
+        NORMAL: None,
+        GOLDEN: (232, 190, 74),      # gold
+        DIAMOND: (140, 222, 236),    # pale diamond blue
+    }
+    ORDER: ClassVar[list[int]] = [NORMAL, GOLDEN, DIAMOND]
+
+    @classmethod
+    def name(cls, quality):
+        return cls.NAMES.get(quality, "")
+
+    @classmethod
+    def of(cls, item):
+        """An item's tier (NORMAL for anything a golem never touched)."""
+        return getattr(item, "quality", cls.NORMAL)
+
+    @classmethod
+    def title(cls, item):
+        """The word an item's name is prefixed with: "Golden Lantern", ..."""
+        name = cls.name(cls.of(item))
+        return f"{name} " if name else ""
+
+    @classmethod
+    def multiplier(cls, quality):
+        return cls.MULTIPLIERS.get(quality, 1)
+
+    @classmethod
+    def combines_into(cls, quality):
+        """The tier two items of this one make, or None when they make nothing."""
+        return cls.COMBINES_INTO.get(quality)
+
+    @classmethod
+    def color(cls, quality):
+        return cls.COLORS.get(quality)
+
+    @classmethod
+    def description(cls, quality):
+        """One line: what the tier is worth, and what it can still become."""
+        made = cls.combines_into(quality)
+        words = (f"A golem's work: {cls.multiplier(quality)}x what the plain "
+                 f"item was.")
+        if made is None:
+            return words + " Nothing combines it further."
+        return (words + f" Two {cls.name(quality).lower()} items make a "
+                        f"{cls.name(made).lower()} "
+                        f"({cls.multiplier(made)}x).")
+
+
+class Ability:
+    """What an ITEM can be used for: the one contract the S key dispatches.
+
+    An ability is the reusable half of an item's behaviour -- WHICH targets it
+    needs, WHAT it costs, and which Game method carries it out. The item's KIND
+    only decides how often it may fire and what pays for it (a tool is reusable
+    and spends energy, an action is spent when it fires, a block's own ability
+    fires from the block), so a new capability is one row here plus one handler,
+    and nothing else: no new key, no new refusal wording, no new sidebar branch
+    (see Game._use_ability and Game._describe_item).
+
+    The TARGET GRAMMAR is deliberately tiny, because the player only has to
+    learn it once: an ability needs nothing, one structure, one other item, or
+    whatever number of targets the item itself asks for (an action's own
+    required_targets). Every "Needs ..." line the sidebar shows, and every
+    refusal, is phrased from this table, so the words cannot drift apart.
+    """
+
+    OPEN = 0        # a tool's verb, applied to one structure
+    APPLY = 1       # an action, applied to the targets it asks for
+    OPEN_PACK = 2   # a pack: deal its options and keep part of them
+    DISCARD = 3     # throw this item away with one other item, then draw
+    MODIFY = 4      # a tool that pours MODIFIERS onto one card (a vodka)
+
+    NAMES: ClassVar[dict[int, str]] = {
+        OPEN: "Open", APPLY: "Apply", OPEN_PACK: "Open", DISCARD: "Discard",
+        MODIFY: "Modify",
+    }
+    # The target grammar: what an ability needs, and how many. "target" means
+    # the item itself decides (an action's own required_targets).
+    NEEDS: ClassVar[dict[int, tuple[str, int]]] = {
+        OPEN: ("structure", 1),
+        APPLY: ("target", 0),
+        OPEN_PACK: ("nothing", 0),
+        DISCARD: ("item", 1),
+        MODIFY: ("card", 1),
+    }
+    # What firing it spends, in the game's OWN currencies: energy (per run), the
+    # item itself, or the items it throws away. There is no fifth currency.
+    COSTS: ClassVar[dict[int, str]] = {
+        OPEN: "1 energy",
+        APPLY: "the action itself",
+        OPEN_PACK: "nothing",
+        DISCARD: "this item and the one with it",
+        MODIFY: "1 energy",
+    }
+    # The one Game method that carries each ability out, kept beside the row so
+    # an ability cannot exist without a handler (see Game._use_ability).
+    HANDLERS: ClassVar[dict[int, str]] = {
+        OPEN: "_apply_tool",
+        APPLY: "_apply_action",
+        OPEN_PACK: "_open_owned_pack",
+        DISCARD: "_use_wasteful",
+        MODIFY: "_apply_modifier_tool",
+    }
+    # The words the grammar prints with ("Needs 1 structure").
+    TARGET_WORDS: ClassVar[dict[str, tuple[str, str]]] = {
+        "structure": ("structure", "structures"),
+        "item": ("other item", "other items"),
+        "target": ("target", "targets"),
+        "card": ("card", "cards"),
+    }
+    ORDER: ClassVar[list[int]] = [OPEN, APPLY, OPEN_PACK, DISCARD, MODIFY]
+
+    @classmethod
+    def name(cls, ability):
+        return cls.NAMES.get(ability, "Use")
+
+    @classmethod
+    def of(cls, item):
+        """The ability ``item`` fires with S, or None when it has none.
+
+        The item's KIND decides, except for a block, whose abilities come from
+        its own effects: Wasteful is the first block ability, and every future
+        one is a single line here -- which is what keeps the S key from growing
+        another branch for each of them.
+        """
+        if item is None:
+            return None
+        kind = getattr(item, "kind", None)
+        if kind == "tool":
+            # A tool OPENS a structure -- unless its table says it pours a
+            # modifier onto a card instead (a vodka), or that it has no verbs at
+            # all (a lump of dirt, which cannot be used).
+            if Tool.modifies(item.value):
+                return cls.MODIFY
+            return cls.OPEN if Tool.opens_structures(item.value) else None
+        if kind == "action":
+            return cls.APPLY
+        if kind == "pack":
+            return cls.OPEN_PACK
+        if Effect.WASTEFUL in (getattr(item, "effects", None) or ()):
+            return cls.DISCARD
+        return None
+
+    @classmethod
+    def needs_text(cls, ability, count=None):
+        """How the ability's targets read ("1 structure"), or "" for none."""
+        what, number = cls.NEEDS.get(ability, ("nothing", 0))
+        if what == "nothing":
+            return ""
+        if what == "target" and count is not None:
+            number = count
+        singular, plural = cls.TARGET_WORDS[what]
+        return f"{number} {singular if number == 1 else plural}"
+
+    @classmethod
+    def cost_text(cls, ability, cost=None):
+        """What firing the ability spends.
+
+        ``cost`` states the ITEM's own price where the table's row is only the
+        default: the OPEN ability is 1 energy for the four tools the player
+        starts with, and a brick opens a structure for nothing (see Tool.ENERGY).
+        """
+        if cost:
+            return cost
+        return cls.COSTS.get(ability, "nothing")
+
+    @classmethod
+    def contract(cls, ability, count=None, cost=None):
+        """The whole contract in one line: needs (if any), then cost."""
+        needs = cls.needs_text(ability, count)
+        spent = cls.cost_text(ability, cost)
+        if not needs:
+            return f"Costs {spent}."
+        return f"Needs {needs}. Costs {spent}."
+
+    @classmethod
+    def handler(cls, ability):
+        """The Game method that carries the ability out (or None)."""
+        return cls.HANDLERS.get(ability)
+
+
+class Structure:
+    """A thing on the board the player OPENS with a tool to get something out.
+
+    Structures are what the shelf sells now (user request: "replace shop items
+    with 'structures'"): a bought structure is an item lying on the board, and
+    it stays one until the player uses the right tool on it — select the tool,
+    select the structure, press S. What comes out is either a finished ITEM
+    (an action) or a PACK (a bundle to choose from), and the structure is spent
+    when it opens.
+
+    The table is deliberately small and explicit: a structure answers to the
+    verbs it is built for and to nothing else, so a pit can be dug but not
+    broken, and a mirror can be fixed or broken but not dug.
+
+    ONE STRUCTURE PER PACK. Every item in the game is obtainable through a
+    structure (user request: "make all items in the game obtainable through
+    structures. For example, add a new 'tool pack' that gives tools. for each
+    pack, create a new structure."), so each pack type has a structure of its
+    own: QUARRY digs out shapes, SHRINE effects, VAULT scorers, WORKBENCH parts,
+    DEPOT ready-made blocks, LIBRARY cards, CABINET actions, MINT resource
+    points, RIFT anything at all, and SHED the one-shot tools and passive items.
+    The three first structures and the golem keep their own rewards, so there
+    are several ways to the same shelf of goods.
+    """
+    PIT = 0
+    CRYSTAL_POOL = 1
+    MIRROR = 2
+    # The golem is the one structure that asks something of the player instead
+    # of handing a fixed reward over: bring it two of the same item and it makes
+    # them one, with both their magnitudes (user request: "combine 2 of the same
+    # items to create 1 new item with double the magnitude"). It answers to any
+    # tool because it is a workbench rather than a lock.
+    GOLEM = 3
+    # --- One per PACK (see Pack): every kind of item has a way out. ----------
+    QUARRY = 4       # Pack.SHAPE    -- a cut face in the rock
+    SHRINE = 5       # Pack.EFFECT   -- something glimmers on the altar
+    VAULT = 6        # Pack.SCORER   -- a strongbox of scorers
+    WORKBENCH = 7    # Pack.PART     -- parts laid out to take
+    DEPOT = 8        # Pack.BLOCK    -- ready-made blocks stacked up
+    LIBRARY = 9      # Pack.CARD     -- shelves of cards
+    CABINET = 10     # Pack.ACTION   -- drawers of actions
+    MINT = 11        # Pack.RESOURCE -- stamped resource points
+    RIFT = 12        # Pack.RANDOM   -- anything at all
+    SHED = 13        # Pack.TOOL     -- tools and passive items
+
+    NAMES: ClassVar[dict[int, str]] = {
+        PIT: "Pit",
+        CRYSTAL_POOL: "Crystal Pool",
+        MIRROR: "Mirror",
+        GOLEM: "Golem",
+        QUARRY: "Quarry",
+        SHRINE: "Shrine",
+        VAULT: "Vault",
+        WORKBENCH: "Workbench",
+        DEPOT: "Depot",
+        LIBRARY: "Library",
+        CABINET: "Cabinet",
+        MINT: "Mint",
+        RIFT: "Rift",
+        SHED: "Shed",
+    }
+    # What each structure holds, keyed by the verb that opens it. The result is
+    # (kind, value): "pack" names a components.Pack TYPE, "action" a
+    # components.Action value. Reading it the other way round is Structure.result.
+    RESULTS: ClassVar[dict[int, dict[int, tuple[str, int]]]] = {
+        # A pit is a hole to dig in: dig it and what you get out is parts.
+        # Shine a light in first and you see what else fell in there: a TOOL
+        # pack, which is where the one-shot tools and the passive items come
+        # from (user request: the brick, the match and concrete).
+        PIT: {Verb.DIG: ("pack", Pack.PART),
+              Verb.REVEAL: ("pack", Pack.TOOL)},
+        # Still water shows you what is in it: revealing it or digging it out
+        # hands over the Cleansing action, which makes a piece 1.5x stronger.
+        CRYSTAL_POOL: {Verb.REVEAL: ("action", Action.CLEANSING),
+                       Verb.DIG: ("action", Action.CLEANSING)},
+        # A mirror shows you yourself: fix it and it Recognises, break it and
+        # it is Strength. The two verbs give the two very different halves.
+        MIRROR: {Verb.FIX: ("action", Action.RECOGNITION),
+                 Verb.BREAK: ("action", Action.STRENGTH)},
+        # A golem is a workbench: any tool wakes it, and what it makes is the
+        # two items the player brought. The "merge" row's value is how many of
+        # them an opening takes, so the number a golem asks for is data too.
+        GOLEM: {verb: ("merge", 2) for verb in Verb.ORDER},
+        # --- One structure per PACK: nothing in the game is out of reach. -----
+        # Each opens with a single verb, so a level's board asks for a
+        # particular tool; the rift is the exception, and any tool wakes it.
+        QUARRY: {Verb.DIG: ("pack", Pack.SHAPE)},
+        SHRINE: {Verb.FIX: ("pack", Pack.EFFECT)},
+        VAULT: {Verb.BREAK: ("pack", Pack.SCORER)},
+        WORKBENCH: {Verb.FIX: ("pack", Pack.PART)},
+        DEPOT: {Verb.BREAK: ("pack", Pack.BLOCK)},
+        LIBRARY: {Verb.REVEAL: ("pack", Pack.CARD)},
+        CABINET: {Verb.REVEAL: ("pack", Pack.ACTION)},
+        MINT: {Verb.DIG: ("pack", Pack.RESOURCE)},
+        RIFT: {verb: ("pack", Pack.RANDOM) for verb in Verb.ORDER},
+        SHED: {Verb.REVEAL: ("pack", Pack.TOOL)},
+    }
+    COMMENTS: ClassVar[dict[int, str]] = {
+        PIT: "Something is down there.",
+        CRYSTAL_POOL: "Look closer.",
+        MIRROR: "Who is that?",
+        GOLEM: "Two of a kind, made one.",
+        QUARRY: "Fresh-cut shapes.",
+        SHRINE: "Something glimmers.",
+        VAULT: "Locked for a reason.",
+        WORKBENCH: "Bits and pieces, laid out.",
+        DEPOT: "Stacked and ready.",
+        LIBRARY: "Every card wants a run.",
+        CABINET: "One use each.",
+        MINT: "Stamped and counted.",
+        RIFT: "Anything could come out.",
+        SHED: "Someone left their kit behind.",
+    }
+    # The SHORT line the collection prints for a structure whose sidebar
+    # description is too long for the codex's five-line box (see
+    # codex_description). One entry, because only the golem explains a ladder.
+    CODEX: ClassVar[dict[int, str]] = {
+        GOLEM: ("Use any tool with 2 of the same item: they become 1 golden "
+                "item, then a diamond."),
+    }
+    # How often a shelf slot deals each structure: pits are the plainest and
+    # most common, mirrors the rarest. The odds are relative, so they follow
+    # the list of structures the shelf offers.
+    OFFER_WEIGHTS: ClassVar[dict[int, int]] = {
+        PIT: 14, CRYSTAL_POOL: 10, MIRROR: 8, GOLEM: 8,
+        QUARRY: 6, SHRINE: 6, VAULT: 6, WORKBENCH: 6, DEPOT: 6,
+        LIBRARY: 6, CABINET: 6, MINT: 6, RIFT: 6, SHED: 6,
+    }
+    # Structures are FREE (user request: "make all structures free (no need to
+    # buy them for them to be used)"): a shelf slot hands one over as scenery the
+    # player's tools open, so there is nothing to pay and nothing to unlock. The
+    # table stays the one place a structure's price would live.
+    PRICES: ClassVar[dict[int, int]] = {structure: 0
+                                        for structure in range(SHED + 1)}
+    COLORS: ClassVar[dict[int, tuple]] = {
+        PIT: (60, 52, 44),             # dug earth
+        CRYSTAL_POOL: (40, 110, 130),  # still water
+        MIRROR: (150, 160, 178),       # silvered glass
+        GOLEM: (140, 128, 112),        # river clay
+        QUARRY: (118, 124, 132),       # cut stone
+        SHRINE: (150, 110, 190),       # a glimmer of violet
+        VAULT: (196, 150, 70),         # brass and amber
+        WORKBENCH: (108, 168, 118),    # the assembly green of a part pack
+        DEPOT: (150, 112, 88),         # stacked timber
+        LIBRARY: (182, 84, 120),       # card magenta
+        CABINET: (70, 150, 160),       # action teal
+        MINT: (176, 168, 74),          # resource ochre
+        RIFT: (128, 128, 138),         # anything grey
+        SHED: (140, 156, 172),         # steel
+    }
+    GLYPHS: ClassVar[dict[int, str]] = {
+        PIT: "\u25bc", CRYSTAL_POOL: "\u25c6",
+        MIRROR: "\u25a7", GOLEM: "\u25b2",
+        QUARRY: "\u25ae", SHRINE: "\u2726", VAULT: "\u25a3",
+        WORKBENCH: "\u2b22", DEPOT: "\u25a4", LIBRARY: "\u25a5",
+        CABINET: "\u25a6", MINT: "\u25c9", RIFT: "\u2737",
+        SHED: "\u2692",
+    }
+    ORDER: ClassVar[list[int]] = [
+        PIT, CRYSTAL_POOL, MIRROR, GOLEM,
+        QUARRY, SHRINE, VAULT, WORKBENCH, DEPOT, LIBRARY, CABINET, MINT,
+        RIFT, SHED,
+    ]
+
+    @classmethod
+    def name(cls, structure):
+        return cls.NAMES.get(structure, "Unknown structure")
+
+    @classmethod
+    def comment(cls, structure):
+        return cls.COMMENTS.get(structure, "")
+
+    @classmethod
+    def result(cls, structure, verb):
+        """What opening ``structure`` with ``verb`` gives, or None.
+
+        None means the structure does not answer to that verb at all: a pit
+        cannot be broken, so breaking one does nothing and spends nothing.
+        """
+        return cls.RESULTS.get(structure, {}).get(verb)
+
+    @classmethod
+    def verbs(cls, structure):
+        """The verbs this structure answers to, in Verb.ORDER."""
+        openers = cls.RESULTS.get(structure, {})
+        return [verb for verb in Verb.ORDER if verb in openers]
+
+    @classmethod
+    def merges(cls, structure):
+        """True when opening this structure COMBINES items instead of paying one out."""
+        for verb in cls.verbs(structure):
+            kind, _value = cls.result(structure, verb)
+            if kind == "merge":
+                return True
+        return False
+
+    @classmethod
+    def merge_count(cls, structure):
+        """How many of the player's items an opening takes (0 when it takes none)."""
+        for verb in cls.verbs(structure):
+            kind, value = cls.result(structure, verb)
+            if kind == "merge":
+                return value
+        return 0
+
+    @classmethod
+    def description(cls, structure):
+        """One line: what opens it, and what comes out."""
+        if cls.merges(structure):
+            count = cls.merge_count(structure)
+            golden = Quality.name(Quality.GOLDEN).lower()
+            diamond = Quality.name(Quality.DIAMOND).lower()
+            return (f"Use any tool on it with {count} of the same item selected: "
+                    f"they become 1 {golden} item, with both their magnitudes. "
+                    f"Two {golden} items make a {diamond} one.")
+        parts = []
+        for verb in cls.verbs(structure):
+            kind, value = cls.result(structure, verb)
+            made = (Pack.name(value) if kind == "pack" else Action.name(value))
+            parts.append(f"{Verb.name(verb)} \u2192 {made}")
+        if not parts:
+            return "Nothing opens it."
+        # A structure that answers to every verb with the SAME thing (the rift,
+        # which is a way to a Random Pack however it is opened) says so once
+        # instead of listing the same reward four times.
+        made_values = {cls.result(structure, verb) for verb in cls.verbs(structure)}
+        if len(cls.verbs(structure)) > 1 and len(made_values) == 1:
+            kind, value = made_values.pop()
+            made = Pack.name(value) if kind == "pack" else Action.name(value)
+            return f"Use any tool on it: {made}."
+        return f"Use a tool on it: {', '.join(parts)}."
+
+    @classmethod
+    def codex_description(cls, structure):
+        """What the collection prints for a structure: a line that FITS.
+
+        The codex box holds five short lines (see ui.COLLECTION_DESC_LINES), and
+        a structure's full description is written for the sidebar's wider column
+        -- the golem's, in particular, explains the whole tier ladder. This is
+        the same rule stated for that box, so no entry is ever cut off.
+        """
+        return cls.CODEX.get(structure) or cls.description(structure)
+
+    @classmethod
+    def weight(cls, structure):
+        return cls.OFFER_WEIGHTS.get(structure, 0)
+
+
+class Tool:
+    """A verb, carried by an item: what a structure is opened WITH (see Structure).
+
+    The four the player starts with (user request: "make the player start with
+    these 4 items") are never spent, so a structure bought later can still be
+    opened. Using one is exactly like using an action: select the tool, select
+    the structure, press S (see Game._apply_tool), and an OPENING spends the
+    tool's own ENERGY, which is 1 for the four and whatever the table says for
+    the rest.
+
+    A tool is an ITEM, though, so the one-shot tools are sold like anything else
+    and are CONSUMED when they are used: a brick breaks or digs for no energy,
+    and a match reveals a structure and then burns out for a fresh item. Their
+    whole text is the vocabulary in Keyword, so an item's keywords ARE its rules:
+
+        Brick   -- break, dig, consume (0 energy)
+        Match   -- reveal, consume, draw 1 (1 energy)
+
+    A tool that carries several verbs uses the first one its structure answers
+    to, so a brick digs a pit and breaks a mirror.
+    """
+    SHOVEL = 0
+    FLASHLIGHT = 1
+    SCREWDRIVER = 2
+    HAMMER = 3
+    BRICK = 4
+    MATCH = 5
+    GLOWSTICK = 6
+    PRY_BAR = 7
+    CHISEL = 8
+    GILDING_CLOTH = 9
+    WRECKING_BAR = 10
+    MULTI_TOOL = 11
+    DIRT = 12
+    DRILL = 13
+    PICKAXE = 14
+    SPARK = 15
+    VODKA = 16
+
+    NAMES: ClassVar[dict[int, str]] = {
+        SHOVEL: "Shovel", FLASHLIGHT: "Flashlight",
+        SCREWDRIVER: "Screwdriver", HAMMER: "Hammer",
+        BRICK: "Brick", MATCH: "Match",
+        GLOWSTICK: "Glowstick", PRY_BAR: "Pry Bar", CHISEL: "Chisel",
+        GILDING_CLOTH: "Gilding Cloth", WRECKING_BAR: "Wrecking Bar",
+        MULTI_TOOL: "Multi-Tool",
+        DIRT: "Dirt", DRILL: "Drill", PICKAXE: "Pickaxe", SPARK: "Spark",
+        VODKA: "Vodka",
+    }
+    # The verbs each tool applies, in the order it tries them. The four starters
+    # carry one each; a brick carries two and uses whichever its structure
+    # answers to (so it digs a pit and breaks a mirror).
+    VERBS: ClassVar[dict[int, tuple]] = {
+        SHOVEL: (Verb.DIG,), FLASHLIGHT: (Verb.REVEAL,),
+        SCREWDRIVER: (Verb.FIX,), HAMMER: (Verb.BREAK,),
+        BRICK: (Verb.BREAK, Verb.DIG), MATCH: (Verb.REVEAL,),
+        # A glowstick is the free way into the REVEAL half (the free one-shot
+        # for the other two verbs), a pry bar is the permanent tool with two
+        # verbs, and a multi-tool answers every door there is -- once a run.
+        GLOWSTICK: (Verb.REVEAL,), PRY_BAR: (Verb.DIG, Verb.BREAK),
+        CHISEL: (Verb.FIX,), GILDING_CLOTH: (Verb.FIX, Verb.REVEAL),
+        WRECKING_BAR: (Verb.BREAK,),
+        MULTI_TOOL: (Verb.DIG, Verb.REVEAL, Verb.FIX, Verb.BREAK),
+        # A drill answers every door and pays in deck space (see MAKES); dirt
+        # has no verb at all, which is what "does nothing" means here.
+        DRILL: (Verb.BREAK, Verb.FIX, Verb.DIG, Verb.REVEAL),
+        DIRT: (),
+        PICKAXE: (Verb.DIG,),
+        SPARK: (Verb.REVEAL,),
+        VODKA: (),
+    }
+    # What one use spends of the run's energy (see MAX_ENERGY). The four starters
+    # cost 1; a brick is free, which is what makes a 0-energy opening possible.
+    ENERGY: ClassVar[dict[int, int]] = {
+        SHOVEL: 1, FLASHLIGHT: 1, SCREWDRIVER: 1, HAMMER: 1,
+        BRICK: 0, MATCH: 1,
+        # Breadth is what the bigger numbers buy: two verbs a use costs 2 of a
+        # run's 3, and a tool that answers ANY door costs all 3.
+        GLOWSTICK: 0, PRY_BAR: 2, CHISEL: 1, GILDING_CLOTH: 2,
+        WRECKING_BAR: 1, MULTI_TOOL: 3,
+        DIRT: 0, DRILL: 0, PICKAXE: 1, SPARK: 0, VODKA: 1,
+    }
+    # The tools that are DESTROYED by using them: the "consume" keyword.
+    CONSUMES: ClassVar[tuple] = (BRICK, MATCH, GLOWSTICK, CHISEL,
+                                 GILDING_CLOTH, WRECKING_BAR, SPARK, VODKA)
+    # ...and how many items one draws after it is consumed: the match's
+    # "discard this item and draw an item".
+    DRAWS: ClassVar[dict[int, int]] = {MATCH: 1}
+    # The AMOUNT each tool carries (its magnitude, see items.ToolItem.amount and
+    # Game._item_magnitudes). A tool that only opens the door holds no number of
+    # its own (0); these two shape the REWARD, and their amount is how many
+    # steps of that shaping one use makes -- which is also what a golem folds
+    # when it combines two of them (see AMOUNT_EFFECT).
+    AMOUNTS: ClassVar[dict[int, float]] = {CHISEL: 1, GILDING_CLOTH: 1}
+    # What a tool's amount DOES to the opening it makes: the chisel pushes the
+    # reward's pack one SIZE up the ladder, the gilding cloth one QUALITY tier
+    # up. A tool with no entry only opens the door.
+    AMOUNT_EFFECT: ClassVar[dict[int, str]] = {
+        CHISEL: "pack_size", GILDING_CLOTH: "quality",
+    }
+    # The words the sidebar prints for what an amount means (see the Magnitude
+    # row in Game._describe_item): "1 pack size bigger a use".
+    AMOUNT_LABELS: ClassVar[dict[int, str]] = {
+        CHISEL: "pack size bigger a use",
+        GILDING_CLOTH: "quality tier higher a use",
+    }
+    # The tools that take every structure standing NEXT TO the one they are used
+    # on with them: one swing, every neighbour that answers the verb.
+    SWEEPS: ClassVar[tuple] = (WRECKING_BAR,)
+    # What a tool LEAVES BEHIND in the player's DECK when it is used: the item
+    # it packs in ((kind, value), how many). A drill answers every door for no
+    # energy and pays in deck space; a pickaxe digs and strikes a spark.
+    MAKES: ClassVar[dict[int, tuple]] = {
+        DRILL: (("tool", DIRT), 1),
+        PICKAXE: (("tool", SPARK), 1),
+    }
+    # The modifiers an item of this kind is BORN with (see components.Modifier).
+    # A spark is TEMPORARY however it arrives -- struck by a pickaxe or dealt by
+    # a Tool Pack -- so the keyword on its tile is always true.
+    BORN_WITH: ClassVar[dict[int, tuple]] = {
+        SPARK: ((Modifier.TEMPORARY, 1),),
+    }
+    # The one tool that does not OPEN anything: it pours stacks of a modifier
+    # onto a CARD instead (see Ability.MODIFY / Game._apply_modifier_tool).
+    MODIFIES: ClassVar[dict[int, tuple]] = {
+        VODKA: (Modifier.FORGOTTEN, MAGNITUDES.VODKA_FORGOTTEN),
+    }
+    # The tools that are by-products rather than finds: they come out of another
+    # tool's MAKES, so a Tool Pack never deals them (dirt is junk).
+    BY_PRODUCTS: ClassVar[tuple] = (DIRT,)
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        SHOVEL: "Digs: use it on a structure to open it up.",
+        FLASHLIGHT: "Reveals: use it on a structure to show what it holds.",
+        SCREWDRIVER: "Fixes: use it on a structure to put it in order.",
+        HAMMER: "Breaks: use it on a structure to smash it open.",
+        BRICK: "Breaks or digs a structure for no energy, then it is used up.",
+        MATCH: "Reveals a structure, then burns out: it is thrown away and you draw an item.",
+        GLOWSTICK: "Reveals a structure for no energy, then it is used up.",
+        PRY_BAR: "Digs or breaks a structure. It is never spent, but costs 2 energy.",
+        CHISEL: "Fixes a structure and pushes its reward one pack size bigger.",
+        GILDING_CLOTH: "Fixes or reveals a structure; the reward arrives a quality tier higher.",
+        WRECKING_BAR: "Breaks a structure and every structure next to it, then is used up.",
+        MULTI_TOOL: "Answers every verb, so it opens any structure -- for all 3 energy.",
+        DIRT: "Does nothing at all: a lump of dirt taking up room in your deck.",
+        DRILL: "Opens any structure for no energy, but packs a lump of Dirt into your deck.",
+        PICKAXE: "Digs a structure open and strikes a Spark into your deck.",
+        SPARK: "Reveals a structure for no energy and burns out. It is Temporary: gone after this run.",
+        VODKA: "Pours 3 stacks of forgotten into a card, then is drunk.",
+    }
+    COMMENTS: ClassVar[dict[int, str]] = {
+        SHOVEL: "Down we go.",
+        FLASHLIGHT: "A little light.",
+        SCREWDRIVER: "Tighten it up.",
+        HAMMER: "Everything looks like a nail.",
+        BRICK: "Good for one thing.",
+        MATCH: "Strike it once.",
+        GLOWSTICK: "Snap and shine.",
+        PRY_BAR: "Leverage.",
+        CHISEL: "A little off the top.",
+        GILDING_CLOTH: "Make it shine.",
+        WRECKING_BAR: "Take the wall with it.",
+        MULTI_TOOL: "Everything, once.",
+        DIRT: "Just dirt.",
+        DRILL: "Loud, and it leaves a mess.",
+        PICKAXE: "Strike while the vein is open.",
+        SPARK: "One bright moment.",
+        VODKA: "You will not remember this.",
+    }
+    COLORS: ClassVar[dict[int, tuple]] = {
+        SHOVEL: (120, 95, 60),
+        FLASHLIGHT: (195, 180, 70),
+        SCREWDRIVER: (80, 120, 150),
+        HAMMER: (120, 80, 80),
+        BRICK: (150, 85, 65),
+        MATCH: (200, 120, 60),
+        GLOWSTICK: (150, 205, 120),
+        PRY_BAR: (140, 140, 160),
+        CHISEL: (110, 150, 150),
+        GILDING_CLOTH: (200, 170, 90),
+        WRECKING_BAR: (170, 90, 110),
+        MULTI_TOOL: (95, 115, 150),
+        DIRT: (110, 90, 70),
+        DRILL: (170, 140, 60),
+        PICKAXE: (120, 130, 145),
+        SPARK: (230, 210, 90),
+        VODKA: (150, 190, 210),
+    }
+    GLYPHS: ClassVar[dict[int, str]] = {
+        SHOVEL: "d", FLASHLIGHT: "r", SCREWDRIVER: "f", HAMMER: "b",
+        BRICK: "k", MATCH: "m",
+        GLOWSTICK: "g", PRY_BAR: "p", CHISEL: "c", GILDING_CLOTH: "l",
+        WRECKING_BAR: "w", MULTI_TOOL: "t",
+        DIRT: ".", DRILL: "D", PICKAXE: "i", SPARK: "*", VODKA: "v",
+    }
+    # What a one-shot tool is worth if it is sold, and what a TOOL pack prices
+    # its options at (see components.pack_base_price).
+    PRICES: ClassVar[dict[int, int]] = {
+        SHOVEL: 0, FLASHLIGHT: 0, SCREWDRIVER: 0, HAMMER: 0, BRICK: 12,
+        MATCH: 14,
+        # What a Tool Pack prices these at: breadth and permanence cost.
+        GLOWSTICK: 10, PRY_BAR: 40, CHISEL: 24, GILDING_CLOTH: 34,
+        WRECKING_BAR: 22, MULTI_TOOL: 60,
+        # Dirt is junk and worth nothing; a spark is a free opening, so it is
+        # cheap; the two permanent tools cost what their breadth is worth.
+        DIRT: 0, DRILL: 36, PICKAXE: 28, SPARK: 8, VODKA: 26,
+    }
+    # The tools the player STARTS with. The one-shot ones are not starting kit:
+    # they come out of TOOL packs.
+    STARTERS: ClassVar[tuple] = (SHOVEL, FLASHLIGHT, SCREWDRIVER, HAMMER)
+    # The catalogue, in reading order: the four starters (one verb each), then
+    # the one-shots, then the two the golem can fold (the amount tools).
+    ORDER: ClassVar[list[int]] = [
+        SHOVEL, FLASHLIGHT, SCREWDRIVER, HAMMER,
+        BRICK, MATCH, GLOWSTICK, WRECKING_BAR,
+        CHISEL, GILDING_CLOTH, PRY_BAR, MULTI_TOOL,
+        DRILL, PICKAXE, SPARK, VODKA, DIRT,
+    ]
+    # What a TOOL pack deals (see components.tool_pack_options): everything but
+    # the four starters, so every tool in the game is obtainable from one.
+    PACK_ORDER: ClassVar[tuple] = (BRICK, MATCH, GLOWSTICK, WRECKING_BAR,
+                                   CHISEL, GILDING_CLOTH, PRY_BAR,
+                                   MULTI_TOOL, DRILL, PICKAXE, SPARK, VODKA)
+
+    @classmethod
+    def name(cls, tool):
+        return cls.NAMES.get(tool, "Unknown tool")
+
+    @classmethod
+    def verbs(cls, tool):
+        """Every Verb this tool applies, in the order it tries them."""
+        return tuple(cls.VERBS.get(tool, (Verb.DIG,)))
+
+    @classmethod
+    def verb(cls, tool):
+        """The first Verb this tool applies, or None for one that has none.
+
+        A dirt has no verb at all (it "does nothing"), and a vodka does not OPEN
+        anything either -- it pours modifiers onto a card (see MODIFIES) -- so
+        neither has a first verb to name.
+        """
+        verbs = cls.verbs(tool)
+        return verbs[0] if verbs else None
+
+    @classmethod
+    def energy(cls, tool):
+        """What one use of the tool spends of the run's energy."""
+        return cls.ENERGY.get(tool, 1)
+
+    @classmethod
+    def consumes(cls, tool):
+        """True when the tool is DESTROYED by using it (the "consume" keyword)."""
+        return tool in cls.CONSUMES
+
+    @classmethod
+    def draws(cls, tool):
+        """How many items one use draws for the player afterwards (0 for none)."""
+        return cls.DRAWS.get(tool, 0)
+
+    @classmethod
+    def keywords(cls, tool):
+        """The tool's text, as keywords (see Keyword).
+
+        A tool with no verbs and nothing to modify -- a lump of DIRT -- reads
+        "unplayable", because that is exactly what it does: nothing.
+        """
+        words = [Keyword.for_verb(verb) for verb in cls.verbs(tool)]
+        if cls.consumes(tool):
+            words.append(Keyword.CONSUME)
+        if cls.draws(tool):
+            words.append(Keyword.DRAW)
+        if not words:
+            words.append(Keyword.UNPLAYABLE)
+        return tuple(words)
+
+    @classmethod
+    def description(cls, tool):
+        return cls.DESCRIPTIONS.get(tool, "A tool.")
+
+    @classmethod
+    def comment(cls, tool):
+        return cls.COMMENTS.get(tool, "")
+
+    @classmethod
+    def amount(cls, tool):
+        """The AMOUNT (magnitude) a tool carries: how many steps its reward is
+        shaped by (see AMOUNT_EFFECT), 0 for a tool that only opens the door."""
+        return cls.AMOUNTS.get(tool, 0)
+
+    @classmethod
+    def amount_effect(cls, tool):
+        """What the tool's amount does to its reward ("pack_size"/"quality")."""
+        return cls.AMOUNT_EFFECT.get(tool)
+
+    @classmethod
+    def amount_label(cls, tool):
+        """What the number means, in the sidebar's words (0 has no label)."""
+        return cls.AMOUNT_LABELS.get(tool, "")
+
+    @classmethod
+    def sweeps(cls, tool):
+        """True when one use of the tool opens the structures NEXT to its target."""
+        return tool in cls.SWEEPS
+
+    @classmethod
+    def makes(cls, tool):
+        """What the tool leaves in the deck: ((kind, value), count), or None."""
+        return cls.MAKES.get(tool)
+
+    @classmethod
+    def born_with(cls, tool):
+        """The modifiers an item of this tool is made with (see BORN_WITH)."""
+        return cls.BORN_WITH.get(tool, ())
+
+    @classmethod
+    def modifies(cls, tool):
+        """The (modifier, stacks) this tool pours onto a card, or None."""
+        return cls.MODIFIES.get(tool)
+
+    @classmethod
+    def opens_structures(cls, tool):
+        """True when the tool is used on a STRUCTURE (every tool but dirt/vodka)."""
+        return bool(cls.verbs(tool))
+
+    @classmethod
+    def bigger_pack_size(cls, size, steps):
+        """A pack size ``steps`` rungs up the ladder, never past the biggest.
+
+        The chisel's whole payoff: a structure that rolls its pack at random (see
+        Game._structure_reward) comes out one size bigger per point of amount,
+        and a Normal pack pushed three rungs is a Mega one.
+        """
+        order = list(Pack.SIZE_ORDER)
+        index = order.index(size) if size in order else 0
+        return order[max(0, min(len(order) - 1, index + int(steps)))]
+
+    @classmethod
+    def better_quality(cls, quality, steps):
+        """A tier ``steps`` rungs up the ladder, never past DIAMOND."""
+        for _ in range(max(0, int(steps))):
+            made = Quality.combines_into(quality)
+            if made is None:
+                break
+            quality = made
+        return quality
+
+    @classmethod
+    def for_verb(cls, verb):
+        """The STARTER tool that applies ``verb`` (one per verb, see VERBS)."""
+        for tool in cls.STARTERS:
+            if verb in cls.verbs(tool):
+                return tool
+        return None
+
+class Passive:
+    """An UNPLAYABLE item: it is never used, it just lies in the hand and pays.
+
+    User request: "add an item, 'concrete', that gives +30 chips at the start of
+    the run, and is passive." A passive has no ability at all (see
+    Game._use_ability), which is exactly what its one keyword says, and its
+    payoff is read once at the start of every run (see Game._apply_passive_items),
+    at the same moment the cards' start effects fire.
+    """
+    CONCRETE = 0
+
+    NAMES: ClassVar[dict[int, str]] = {CONCRETE: "Concrete"}
+    # The text is a template: a passive carries its own AMOUNT (see the amount
+    # classmethod below and items.PassiveItem.amount), so a Concrete a golem
+    # folded with another one really says "Adds 60 chips".
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        CONCRETE: ("Adds {amount:g} chips at the start of "
+                   "every run. It cannot be used."),
+    }
+    # The payoff each passive pays at the start of a run: (scorer, magnitude), in
+    # the same shape a whole card's row uses (see MAGNITUDES.CARD_RATIOS).
+    PAYOFFS: ClassVar[dict[int, tuple[int, float]]] = {
+        CONCRETE: (Scorer.CHIPS_ADD, MAGNITUDES.CONCRETE_CHIPS),
+    }
+    COMMENTS: ClassVar[dict[int, str]] = {CONCRETE: "Set in stone."}
+    PRICES: ClassVar[dict[int, int]] = {CONCRETE: 16}
+    COLORS: ClassVar[dict[int, tuple]] = {CONCRETE: (150, 150, 145)}
+    GLYPHS: ClassVar[dict[int, str]] = {CONCRETE: "c"}
+    ORDER: ClassVar[list[int]] = [CONCRETE]
+
+    @classmethod
+    def name(cls, passive):
+        return cls.NAMES.get(passive, "Unknown item")
+
+    @classmethod
+    def description(cls, passive, amount=None):
+        """What the passive does, at the magnitude it actually carries.
+
+        A passive has an amount like every other item (Concrete's 30 chips), so
+        a combined one describes the number it really pays rather than the
+        table's average.
+        """
+        if amount is None:
+            amount = cls.amount(passive)
+        return cls.DESCRIPTIONS.get(passive, "An item.").format(amount=amount)
+
+    @classmethod
+    def comment(cls, passive):
+        return cls.COMMENTS.get(passive, "")
+
+    @classmethod
+    def payoff(cls, passive):
+        """The (scorer, magnitude) a passive pays at the start of every run."""
+        return cls.PAYOFFS.get(passive, (Scorer.NONE, 0))
+
+    @classmethod
+    def amount(cls, passive):
+        """The AMOUNT (magnitude) a passive carries: its payoff's number.
+
+        Every item in the game carries one (see items.PassiveItem.amount), so
+        Concrete's is MAGNITUDES.CONCRETE_CHIPS -- 30 chips -- and a golem that
+        folds two of them together leaves a Concrete of 60.
+        """
+        return cls.PAYOFFS.get(passive, (Scorer.NONE, 0))[1]
+
+    @classmethod
+    def keywords(cls, passive):
+        """A passive item's whole text is one word: it cannot be used."""
+        return (Keyword.UNPLAYABLE,)
+
+
+def tool_pack_options():
+    """The (kind, value) items a TOOL pack offers: the one-shots and the passives."""
+    return ([("tool", value) for value in Tool.PACK_ORDER]
+            + [("passive", value) for value in Passive.ORDER])
+
+
+class Keyword:
+    """The single words an item's text is made of.
+
+    User request: "add terminology for items. just include a single word that
+    means something more specific." Every word is one rule, so an item's keywords
+    ARE what it does and the player only has to learn a handful of them:
+
+        dig, reveal, fix, break  -- which verb opens a structure (see Verb)
+        consume                  -- the item is destroyed when it is used
+        draw N                   -- using it draws N items
+        unplayable               -- it cannot be used at all: a passive item
+
+    Items never spell these rules out a second time: a tool's, a structure's and
+    a passive item's keywords all come from here (see Keyword.of), which is the
+    one place the vocabulary lives.
+    """
+    # The four verbs share the Verb table's own words, so a verb and its keyword
+    # can never drift apart.
+    DIG = 0
+    REVEAL = 1
+    FIX = 2
+    BREAK = 3
+    CONSUME = 4
+    DRAW = 5
+    UNPLAYABLE = 6
+    TEMPORARY = 7
+
+    NAMES: ClassVar[dict[int, str]] = {
+        DIG: "dig", REVEAL: "reveal", FIX: "fix", BREAK: "break",
+        CONSUME: "consume", DRAW: "draw", UNPLAYABLE: "unplayable",
+        TEMPORARY: "temporary",
+    }
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        DIG: "Opens a structure by digging it up",
+        REVEAL: "Opens a structure by showing what is inside it",
+        FIX: "Opens a structure by putting it in order",
+        BREAK: "Opens a structure by smashing it open",
+        CONSUME: "Destroyed when it is used",
+        DRAW: "Using it draws this many items",
+        UNPLAYABLE: "Cannot be used: it is a passive item",
+        TEMPORARY: "Destroyed at the end of the run it was made for",
+    }
+    # The keyword each Verb is written with.
+    VERB_KEYWORDS: ClassVar[dict[int, int]] = {
+        Verb.DIG: DIG, Verb.REVEAL: REVEAL, Verb.FIX: FIX, Verb.BREAK: BREAK,
+    }
+    ORDER: ClassVar[list[int]] = [DIG, REVEAL, FIX, BREAK, CONSUME, DRAW,
+                                  UNPLAYABLE, TEMPORARY]
+
+    @classmethod
+    def for_verb(cls, verb):
+        """The keyword a Verb is written with."""
+        return cls.VERB_KEYWORDS.get(verb, cls.DIG)
+
+    @classmethod
+    def name(cls, keyword):
+        return cls.NAMES.get(keyword, "")
+
+    @classmethod
+    def description(cls, keyword):
+        return cls.DESCRIPTIONS.get(keyword, "")
+
+    @classmethod
+    def text(cls, keywords, counts=None):
+        """The keywords as one line: "break, dig, consume" (or "" for none).
+
+        ``counts`` fills in the number a counted keyword needs, so a match reads
+        "reveal, consume, draw 1".
+        """
+        counts = counts or {}
+        words = []
+        for keyword in keywords:
+            name = cls.name(keyword)
+            if keyword == cls.DRAW and counts.get(keyword):
+                name = f"{name} {counts[keyword]:g}"
+            if name:
+                words.append(name)
+        return ", ".join(words)
+
+    @classmethod
+    def line(cls, item):
+        """An item's keywords as the one line the sidebar shows.
+
+        The words come from Keyword.of and the numbers from the item itself, so
+        a match reads "reveal, consume, draw 1" and a brick "break, dig,
+        consume": the same rules, in the same words, wherever they are shown.
+        """
+        counts = {}
+        if getattr(item, "kind", None) == "tool" and Tool.draws(item.value):
+            counts[cls.DRAW] = Tool.draws(item.value)
+        return cls.text(cls.of(item), counts)
+
+    @classmethod
+    def of(cls, item):
+        """The keywords an item is described with, in Keyword.ORDER.
+
+        A tool reads its verbs, whether it is consumed and what it draws; a
+        passive item reads "unplayable"; a structure reads the verbs it answers
+        to. Anything else (a block, a component, a card) has no keywords: its
+        behaviour is its own text.
+        """
+        kind = getattr(item, "kind", None)
+        if kind == "tool":
+            words = list(Tool.keywords(item.value))
+        elif kind == "passive":
+            words = list(Passive.keywords(item.value))
+        elif kind == "structure":
+            words = [cls.for_verb(verb) for verb in Structure.verbs(item.value)]
+        else:
+            words = []
+        # A modifier can ALSO be a word on the tile: TEMPORARY is one (user
+        # request: "the keyword 'temporary' means it will be destroyed next
+        # round"), and it reads wherever the item is shown. The words keep the
+        # order the item's own table gave them (a brick reads "break, dig").
+        if Modifier.has(item, Modifier.TEMPORARY) and cls.TEMPORARY not in words:
+            words.append(cls.TEMPORARY)
+        return tuple(words)
+
+
+
 class Component:
     """A purchasable building piece: a shape, an effect, a scorer, or a condition.
 
@@ -2579,7 +4094,8 @@ class Component:
     # group is not a purchasable component (see the MATCH GROUPS section).
     # CONDITION = "condition"
 
-    def __init__(self, kind, value, amount=0, price=0, name="", col=0, row=0):
+    def __init__(self, kind, value, amount=0, price=0, name="", col=0, row=0,
+                 quality=Quality.NORMAL):
         self.kind = kind
         self.value = value
         self.amount = amount
@@ -2588,6 +4104,9 @@ class Component:
         self.col = col  # the SHOP cell the offer is drawn in (never a board cell)
         self.row = row
         self.board_cell = None  # the board square the owned component lies on
+        # The tier a golem left it at (see Quality): a component a golem has
+        # combined wears its word in its name and its colour on its tile.
+        self.quality = quality
 
     @property
     def shape(self):
@@ -2619,29 +4138,35 @@ class Component:
         return self.amount or Effect.MAGNITUDE.get(self.value, 0)
 
     @classmethod
-    def shape_component(cls, value, price=None, name="", col=0, row=0):
+    def shape_component(cls, value, price=None, name="", col=0, row=0,
+                        quality=Quality.NORMAL):
         if price is None:
             price = COMPONENT_PRICES.get((cls.SHAPE, value), 0)
-        return cls(cls.SHAPE, value, price=price, name=name or Shape.name(value), col=col, row=row)
+        return cls(cls.SHAPE, value, price=price, name=name or Shape.name(value),
+                   col=col, row=row, quality=quality)
 
     @classmethod
-    def effect_component(cls, value, price=None, name="", col=0, row=0, magnitude=None):
+    def effect_component(cls, value, price=None, name="", col=0, row=0, magnitude=None,
+                         quality=Quality.NORMAL):
         """An effect piece. ``magnitude`` is its own rolled strength, which the
         piece CARRIES (its payoff and its description) but never pays for: the
         piece costs the catalog price however strongly it rolled."""
         if price is None:
             price = effect_component_price(value)
         return cls(cls.EFFECT, value, amount=magnitude or 0, price=price,
-                   name=name or Effect.name(value), col=col, row=row)
+                   name=name or Effect.name(value), col=col, row=row,
+                   quality=quality)
 
     @classmethod
-    def scorer_component(cls, value, amount=0, price=None, name="", col=0, row=0):
+    def scorer_component(cls, value, amount=0, price=None, name="", col=0, row=0,
+                         quality=Quality.NORMAL):
         """A scorer piece. ``amount`` is its own rolled magnitude: it sets the
         piece's payoff, but never its price (see scorer_component_price)."""
         if price is None:
             price = scorer_component_price(value)
         return cls(cls.SCORER, value, amount=amount, price=price,
-                   name=name or Scorer.name(value), col=col, row=row)
+                   name=name or Scorer.name(value), col=col, row=row,
+                   quality=quality)
 
     # COMMENTED OUT with the conditions: the condition component (the trigger
     # half a player bought and paired with a scorer in the card builder).
@@ -2651,6 +4176,158 @@ class Component:
     #     if price is None:
     #         price = COMPONENT_PRICES.get((cls.CONDITION, value), 0)
     #     return cls(cls.CONDITION, value, price=price, name=name or condition_name(value), col=col, row=row)
+
+
+class Group:
+    """The FAMILY an item belongs to, and what that family is for.
+
+    User request: "sort all items into groups, and show it in their description
+    what group they are in." Every item the game can show belongs to exactly one
+    group, DERIVED from what it is (Group.of — the same rule Keyword.of and
+    Quality.of use), so an item can never be made in a group nobody can read,
+    and its description says in one line what the group is for.
+
+    User request: "join together cards, tools, and actions into one group called
+    'cards'." A card, an action and a tool are one family (CARDS): they are the
+    things the player KEEPS and plays, differing only in what holding one does —
+    a card pays every run, an action fires once, a tool opens a structure.
+
+    The group also sorts items: Group.ORDER is the reading order the deck's
+    overlay lists a collection in (see Game.deck_overlay_items), so the deck
+    reads by family — the block parts first, because they are what a hand is
+    built from — rather than in the order things were bought.
+
+    The kinds that are not the player's have groups of their own: a level's FOE
+    and its PROPs (the sidebar describes them too, and what they are is the most
+    useful thing to say about them) and a TRIAL, which is a way to play a run
+    rather than an item — its group is what the collection's cells print on those
+    entries, so every cell of the codex says what it is looking at.
+    """
+    BLOCK = 0
+    PART = 1
+    CARDS = 2
+    STRUCTURE = 3
+    PACK = 4
+    PASSIVE = 5
+    TOKEN = 6
+    RESOURCE = 7
+    FOE = 8
+    PROP = 9
+    TRIAL = 10
+
+    NAMES: ClassVar[dict[int, str]] = {
+        BLOCK: "Block", PART: "Part", CARDS: "Cards",
+        STRUCTURE: "Structure", PACK: "Pack",
+        PASSIVE: "Passive", TOKEN: "Token", RESOURCE: "Resource",
+        FOE: "Foe", PROP: "Prop", TRIAL: "Trial",
+    }
+    # What each family is, in the one line its items' descriptions print.
+    DESCRIPTIONS: ClassVar[dict[int, str]] = {
+        BLOCK: ("A square of board the marble bounces off and scores on: one "
+                "shape, its effects and its scorer."),
+        PART: ("A piece of a block — a shape, an effect or a scorer — laid out "
+               "with the others and assembled into a block with S."),
+        CARDS: ("Something you keep and play: a card pays every run, an action "
+                "fires once, and a tool opens a structure."),
+        STRUCTURE: ("Scenery a tool opens into an action or a pack. It costs "
+                    "nothing and is spent when it opens."),
+        PACK: ("A bundle of offers: press S to deal its options and keep the "
+               "ones you choose."),
+        PASSIVE: ("Unplayable: it pays at the start of a run simply by being "
+                  "owned."),
+        TOKEN: ("A kept block: its scorer fires every run on its own, without a "
+                "marble ever touching it."),
+        RESOURCE: ("Points of one scorer, banked at once instead of kept as an "
+                   "item."),
+        FOE: ("The level's enemy: it fights back instead of scoring, and a "
+              "marble's hit deals its chips x mult as damage."),
+        PROP: ("The level's own furniture: it is part of the course and can "
+               "never be taken up, sold or upgraded."),
+        TRIAL: ("A way to play a run: it changes the rules for the run you "
+                "play under it, and is beaten by finishing one."),
+    }
+    # Which item KIND makes up each group (see Component.SHAPE / _item_name). A
+    # board block has no `kind` of its own; Group.of reads it as a "block".
+    KINDS: ClassVar[dict[int, tuple]] = {
+        BLOCK: ("block",),
+        PART: (Component.SHAPE, Component.EFFECT, Component.SCORER),
+        CARDS: ("card", "action", "tool"),
+        STRUCTURE: ("structure",),
+        PACK: ("pack",),
+        PASSIVE: ("passive",),
+        TOKEN: ("token",),
+        RESOURCE: ("resource",),
+        TRIAL: ("trial",),
+    }
+    # The colour a group's badge wears in an item's description (see
+    # ui._draw_group_badge): one hue per family, so the group is recognisable
+    # before a word of it is read. The whole CARDS family shares one hue, since
+    # it is one family now.
+    COLORS: ClassVar[dict[int, tuple]] = {
+        BLOCK: (124, 172, 232),      # board blue
+        PART: (146, 200, 116),       # the pieces a block is built from
+        CARDS: (214, 138, 208),      # what you keep and play
+        STRUCTURE: (170, 148, 126),  # scenery and clay
+        PACK: (198, 198, 118),       # a bundle
+        PASSIVE: (152, 152, 152),    # it just lies there
+        TOKEN: (186, 158, 238),      # a kept block
+        RESOURCE: (118, 190, 220),   # banked points
+        FOE: (224, 96, 96),          # the level's enemy
+        PROP: (146, 134, 122),       # the level's furniture
+        TRIAL: (238, 168, 96),       # a way to play a run
+    }
+    ORDER: ClassVar[list[int]] = [BLOCK, PART, CARDS, STRUCTURE, PACK, PASSIVE,
+                                  TOKEN, RESOURCE, FOE, PROP, TRIAL]
+
+    @classmethod
+    def name(cls, group):
+        return cls.NAMES.get(group, "Item")
+
+    @classmethod
+    def description(cls, group):
+        return cls.DESCRIPTIONS.get(group, "")
+
+    @classmethod
+    def color(cls, group):
+        """The colour this group's badge wears (see ui._draw_group_badge)."""
+        return cls.COLORS.get(group, (200, 200, 200))
+
+    @classmethod
+    def of_kind(cls, kind):
+        """The group a bare item KIND belongs to, or None (see Group.KINDS)."""
+        for group, kinds in cls.KINDS.items():
+            if kind in kinds:
+                return group
+        return None
+
+    @classmethod
+    def of(cls, item):
+        """The group an item is in, or None for something that is not an item.
+
+        The level's own things say so first (an enemy is a Foe and its furniture
+        a Prop, whatever they are built from), then the item's own kind decides.
+        A Block standing on the board carries no kind, so it reads as a block;
+        the top bar's readouts (Cash, Energy) are not items at all and have no
+        group.
+        """
+        if item is None:
+            return None
+        if getattr(item, "is_enemy", False):
+            return cls.FOE
+        if getattr(item, "is_level_prop", False):
+            return cls.PROP
+        kind = getattr(item, "kind", None)
+        if kind is None and hasattr(item, "rect"):
+            kind = "block"
+        return cls.of_kind(kind)
+
+    @classmethod
+    def rank(cls, group):
+        """Where a group sorts (the index of its row in Group.ORDER)."""
+        try:
+            return cls.ORDER.index(group)
+        except ValueError:
+            return len(cls.ORDER)
 
 
 # Fixed price for every component type. A block's price is 90% of the sum of
@@ -2706,6 +4383,9 @@ COMPONENT_PRICES = {
     # patrols a whole lane and can carry a marble with it), but nowhere near
     # the splitter's "another marble" price.
     (Component.EFFECT, Effect.GONDOLA): 46,
+    # Wasteful does nothing to the marble: it is a build-phase ability, worth
+    # about an ordinary wall effect.
+    (Component.EFFECT, Effect.WASTEFUL): 30,
     (Component.SCORER, Scorer.NONE): 6,
     (Component.SCORER, Scorer.CHIPS_ADD): 12,
     (Component.SCORER, Scorer.MULT_ADD): 17,
@@ -2959,6 +4639,9 @@ def pack_base_price(pack_type):
         return average_card_price()
     if pack_type == Pack.ACTION:
         return _flat_average(list(Action.PRICES.values()))
+    if pack_type == Pack.TOOL:
+        return _flat_average([Tool.PRICES[value] for value in Tool.PACK_ORDER]
+                             + [Passive.PRICES[value] for value in Passive.ORDER])
     if pack_type == Pack.RESOURCE:
         scorers = list(Scorer.RESOURCE_RATE)
         points = _flat_average([RESOURCE_PACK_FACTOR
@@ -3393,7 +5076,7 @@ def _generic_effect_phrase(scorer, amount=None, dev="", block_phrase=None):
         return (f"{points_text(resource_points_for(Scorer.PICKY, amount))} option "
                 f"point{_plural_points(resource_points_for(Scorer.PICKY, amount))}{pdev}")
     if scorer == Scorer.FRESH:
-        return f"{amount:g} free reroll{_plural(amount)}{dev}"
+        return f"{amount:g} Reroll card{_plural(amount)}{dev}"
     if scorer == Scorer.SATANIC:
         return f"x{amount:g} mult{dev}"
     if scorer == Scorer.SUMMIT:
@@ -3975,3 +5658,440 @@ def card_price_for(card):
     """
     return Card.PRICES.get(card, 20)
 
+# =============================================================================
+# LEVELS
+#
+# A game is 8 rounds of 3 runs (24 RUNS), and every run is one LEVEL (user
+# request: "instead of having a score requirement, create levels where each
+# level has a different set of structures and enemies, and different parts of
+# the board are unlocked"). A level is WON when every enemy in it is defeated
+# and every marble has reached the Finish; the player may give up on a level at
+# any time with Y, which counts it as lost (three lost levels end the game).
+# =============================================================================
+
+
+class EnemyKind:
+    """The kinds of enemy a level can hold (see enemies.Enemy for the brains)."""
+
+    IDLE = 0        # a sitting target
+    PATROL = 1      # slides back and forth along its row
+    FLEE = 2        # runs away from the nearest marble
+    ARMOURED = 3    # only a limited number of hits land on it
+    DEVOURER = 4    # eats the marble that touches it
+
+    ORDER = (IDLE, PATROL, FLEE, ARMOURED, DEVOURER)
+
+
+ENEMY_NAMES = {
+    EnemyKind.IDLE: "Slime",
+    EnemyKind.PATROL: "Drifter",
+    EnemyKind.FLEE: "Coward",
+    EnemyKind.ARMOURED: "Beetle",
+    EnemyKind.DEVOURER: "Maw",
+}
+
+ENEMY_DESCRIPTIONS = {
+    EnemyKind.IDLE: "Sits still and takes whatever the marble deals it",
+    EnemyKind.PATROL: "Slides back and forth along its row",
+    EnemyKind.FLEE: "Runs away from the nearest marble",
+    EnemyKind.ARMOURED: "Only a few hits land on it, so each one must count",
+    EnemyKind.DEVOURER: "Swallows the marble that touches it",
+}
+
+# How much of a LEVEL's health budget one enemy of each kind is worth, relative
+# to the others. A level's TOTAL health is what its run used to ask for as a
+# score (see Level.enemy_health and Game._level_health_budget), so these shares
+# only decide how that total is split between the enemies standing in it: a Maw
+# soaks about twice what a Slime does, whatever the level asks for. An enemy
+# built with no budget to split (a hand-placed one, a test) wears its share as
+# its health, and a marble deals chips x mult with each hit.
+ENEMY_HP_SHARE = {
+    EnemyKind.IDLE: 240,
+    EnemyKind.PATROL: 260,
+    EnemyKind.FLEE: 380,
+    EnemyKind.ARMOURED: 240,
+    EnemyKind.DEVOURER: 520,
+}
+
+
+def split_enemy_health(kinds, budget):
+    """Split a level's health budget between its enemies: whole numbers, exact.
+
+    ``kinds`` are the enemies' EnemyKinds and ``budget`` is the damage the level
+    asks for in total -- the score its run used to require before levels
+    replaced the score target (user request: "make the sum of all enemies'
+    health equal to the total required score that was originally there"). The
+    split follows ENEMY_HP_SHARE, and the LAST hit of the share-out is what keeps
+    the promise: the remainders are handed out one point at a time, largest
+    remainder first, so the enemies always add up to the budget exactly rather
+    than to "about" it. Every enemy gets at least 1 point, so a run whose target
+    is 0 still puts a real (if feeble) obstacle on the board.
+    """
+    kinds = tuple(kinds)
+    if not kinds:
+        return ()
+    budget = max(int(budget), len(kinds))
+    weights = [ENEMY_HP_SHARE.get(kind, ENEMY_HP_SHARE[EnemyKind.IDLE])
+               for kind in kinds]
+    total = sum(weights)
+    health = [budget * weight // total for weight in weights]
+    # Hand the rounding remainder to the enemies with the most left over, so no
+    # point of the budget is lost to the floor division above.
+    remainders = sorted(range(len(kinds)),
+                        key=lambda index: (-(budget * weights[index] % total),
+                                           index))
+    for index in remainders[:budget - sum(health)]:
+        health[index] += 1
+    return tuple(health)
+
+# How many hits an ARMOURED enemy can take at all (damage past the last one is
+# ignored, so a huge single hit cannot carry through).
+ARMOURED_HITS = 3
+
+ENEMY_COLORS = {
+    EnemyKind.IDLE: (196, 84, 120),
+    EnemyKind.PATROL: (188, 132, 72),
+    EnemyKind.FLEE: (120, 148, 196),
+    EnemyKind.ARMOURED: (96, 128, 96),
+    EnemyKind.DEVOURER: (150, 84, 190),
+}
+
+
+# The blocks a level may place as its own furniture, keyed by the marker a
+# level's props use. A marker says only WHICH prop stands on a square; the shape,
+# effect and angle are the same data every other block is built from (see
+# Game._place_level_props). Accelerator angles follow Block's own convention:
+# 0 pushes up, 90 right, 180 down, 270 left (the direction its arrow points).
+PROP_PARTS = {
+    "w": {"shape": Shape.RECT},                                    # plain wall
+    "o": {"shape": Shape.RECT, "effects": (Effect.BOUNCY,)},        # bouncy
+    "x": {"shape": Shape.RECT, "effects": (Effect.PHASE,)},         # phase
+    "t": {"shape": Shape.RECT, "effects": (Effect.PISTON,)},        # piston
+    "~": {"shape": Shape.RECT, "effects": (Effect.SLIPPERY,)},      # ice
+    "g": {"shape": Shape.RECT, "effects": (Effect.GONDOLA,)},       # cable car
+    "^": {"shape": Shape.RECT, "effects": (Effect.ACCELERATOR,), "angle": 0},
+    ">": {"shape": Shape.RECT, "effects": (Effect.ACCELERATOR,), "angle": 90},
+    "v": {"shape": Shape.RECT, "effects": (Effect.ACCELERATOR,), "angle": 180},
+    "<": {"shape": Shape.RECT, "effects": (Effect.ACCELERATOR,), "angle": 270},
+    "/": {"shape": Shape.SLOPE, "angle": 0},                        # ramp up-right
+    "\\": {"shape": Shape.SLOPE, "angle": 90},                       # ramp up-left
+    "-": {"shape": Shape.FLAT_LINE},                                # shelf
+    "k": {"shape": Shape.KEY, "key_number": 1},                     # key
+    "l": {"shape": Shape.LOCK, "key_number": 1},                    # its lock
+}
+
+
+# How many structures a level puts out every run (user request: "have 4
+# structures each run instead of 1"). A level authors the KINDS that suit it and
+# Level._plan_structures repeats them up to this many, so the board always holds
+# four things worth a tool -- one more than the three energy a run is given,
+# which is the choice the structures are there to pose.
+STRUCTURES_PER_RUN = 4
+
+
+class Level:
+    """One level: its squares, the props on them, its enemies and structures.
+
+    ``parts`` builds the level's own set of pre-unlocked board squares from
+    (kind, dx, dy, width, height) rectangles offset from the CENTRE square of the
+    board: "rect" adds squares, "hole" takes them away again. Every level opens
+    about the same NUMBER of squares but in a different SHAPE -- a wide arena, a
+    hole-punched field, two tiers joined by a neck, an hourglass shaft, a tower, a
+    cross, two rooms and a corridor, a ring, corner rooms joined by thin
+    corridors, detached islands -- so the board itself is what makes a level feel
+    different.
+
+    ``props`` are the blocks the level places for the player, ("^", dx, dy) etc
+    (see PROP_PARTS): walls to bounce off, bouncers, accelerators to climb with,
+    phase blocks, slopes, shelves, a key and its lock.
+
+    ``enemies`` are (kind, dx, dy) placements. An enemy placed on a square the
+    level does NOT open is BURIED: it is drawn inside the wall and can only be
+    reached once the player buys that square (or phases into it), which is what
+    makes those levels a decision about Board Units. Enemies placed at opposite
+    ends of the board force the marble to be driven upwards with pistons and
+    accelerators. What an enemy is WORTH in health is not stored here: a level's
+    total health is the score its run used to require (see enemy_health), split
+    between its enemies by kind.
+
+    ``structures`` are the structure kinds the level puts out, and every level
+    offers STRUCTURES_PER_RUN of them: the list repeats until it is four long, so
+    a level that authors one pit hands out four pits and a level that authors
+    pit/pool/mirror hands out those three plus a second pit.
+    """
+
+    def __init__(self, number, name, parts, props, enemies, structures):
+        self.number = number
+        self.name = name
+        self.parts = parts
+        self.props = props
+        # The structures this level puts on its own squares (user request: "add
+        # structures as part of the level"): the shop deals nothing any more, so
+        # a pit, a crystal pool or a mirror is a piece of the LEVEL, standing on
+        # one of the squares the level opens and opened with a tool like any
+        # other structure.
+        self.authored_structures = tuple(structures)
+        self.structures = self._plan_structures(structures)
+        self.cells = self._cells(parts)
+        self.enemy_spawns = tuple(enemies)
+        self.enemies = tuple(kind for kind, _, _ in enemies)
+        self.structure_spawns = self._structure_spawns()
+
+    @staticmethod
+    def _plan_structures(values):
+        """The structures a run of this level actually lays out.
+
+        Every run gets STRUCTURES_PER_RUN of them (user request: "have 4
+        structures each run instead of 1"), so the level's own kinds repeat until
+        the board holds four: a pit level hands out four pits, a level that
+        authored pit/pool/mirror hands out those three and a pit again.
+        """
+        values = tuple(values)
+        if not values:
+            return ()
+        return tuple(values[index % len(values)]
+                     for index in range(STRUCTURES_PER_RUN))
+
+    @staticmethod
+    def _cells(parts):
+        """The squares a level's rectangles add and its holes take away."""
+        cells = set()
+        for kind, dx, dy, width, height in parts:
+            for x in range(dx, dx + width):
+                for y in range(dy, dy + height):
+                    if kind == "rect":
+                        cells.add((x, y))
+                    else:
+                        cells.discard((x, y))
+        return frozenset(cells)
+
+    @property
+    def enemy_count(self):
+        return len(self.enemies)
+
+    def enemy_health(self, budget, kinds=None):
+        """How much health each enemy of this level gets out of ``budget``.
+
+        ``budget`` is the damage the whole level asks for -- the score its run
+        used to require before levels replaced the score target -- so the
+        enemies' health always adds up to it (see split_enemy_health). ``kinds``
+        defaults to the level's own cast; the game passes the enemies it actually
+        placed, which is how a level whose square was already taken still spends
+        its whole budget on the enemies that did make it onto the board.
+        """
+        if kinds is None:
+            kinds = self.enemies
+        return split_enemy_health(kinds, budget)
+
+    def _structure_spawns(self):
+        """Where this level's structures stand: spread through its own squares.
+
+        The level's free squares (see below) are cut into one slice per
+        structure and each structure takes the middle of its slice, so four of
+        them land near each end of the level and at even intervals between --
+        four structures down one diagonal would leave the rest of the board with
+        nothing to open. A square the level already uses for a prop or an enemy
+        is passed over: a structure must neither stand on the level's own
+        furniture nor take an enemy's square (it is the LEVEL's thing, and the
+        level's shape is what decides where its cast and its scenery go).
+        """
+        cells = sorted(self.cells, key=lambda cell: (cell[1], cell[0]))
+        values = getattr(self, "structures", ())
+        if not cells or not values:
+            return ()
+        busy = {(dx, dy) for _, dx, dy in self.enemy_spawns}
+        busy |= {(dx, dy) for _, dx, dy in self.props}
+        free = [cell for cell in cells if cell not in busy] or cells
+        count = len(values)
+        spawns = []
+        for index, value in enumerate(values):
+            start = index * len(free) // count
+            stop = max(start + 1, (index + 1) * len(free) // count)
+            dx, dy = free[(start + stop - 1) // 2]
+            spawns.append((value, dx, dy))
+        return tuple(spawns)
+
+    def is_buried(self, dx, dy):
+        """True when the square is one the level does NOT open (an enemy in a wall)."""
+        return (dx, dy) not in self.cells
+
+    @property
+    def size(self):
+        """The level's footprint in squares (its bounding box)."""
+        xs = [x for x, _ in self.cells]
+        ys = [y for _, y in self.cells]
+        return (max(xs) - min(xs) + 1, max(ys) - min(ys) + 1)
+
+    def __repr__(self):  # pragma: no cover - debugging aid
+        return f"Level({self.number}, {self.name!r})"
+
+
+LEVELS = (
+    # --- Slime Garden: the plain shapes -------------------------------------
+    Level(1, "Slime Garden",
+          (("rect", -4, -3, 9, 6),),
+          (),
+          ((EnemyKind.IDLE, 0, 0),),
+          (Structure.PIT,)),
+    Level(2, "Slime Garden",
+          (("rect", -5, -3, 10, 6), ("hole", -1, -1, 2, 2)),
+          (("w", 0, -3), ("w", 0, 2)),
+          ((EnemyKind.PATROL, -3, 0), (EnemyKind.IDLE, 2, 1)),
+          (Structure.PIT, Structure.SHED)),
+    Level(3, "Slime Garden",
+          (("rect", -4, -3, 8, 7),),
+          (("o", -3, 2), ("o", 3, 2), ("o", 0, -3)),
+          ((EnemyKind.IDLE, 0, -2), (EnemyKind.PATROL, 0, 2)),
+          (Structure.PIT, Structure.CRYSTAL_POOL)),
+    # --- Crystal Shore: things separated ------------------------------------
+    Level(4, "Crystal Shore",
+          (("rect", -5, -4, 9, 3), ("rect", -4, 1, 9, 3), ("rect", -1, -1, 2, 1)),
+          (("/", 0, -1), ("<", -4, 2), ("-", -4, -4), ("-", 3, -4)),
+          ((EnemyKind.PATROL, -2, -3), (EnemyKind.IDLE, 1, 2)),
+          (Structure.CRYSTAL_POOL, Structure.QUARRY)),
+    Level(5, "Crystal Shore",
+          (("rect", -5, -4, 10, 2), ("rect", -5, 2, 10, 2), ("rect", -1, -2, 2, 4)),
+          (("o", -4, -4), ("o", 3, -4), ("o", -4, 3), ("o", 3, 3)),
+          ((EnemyKind.FLEE, 0, -4), (EnemyKind.PATROL, 0, 3)),
+          (Structure.CRYSTAL_POOL, Structure.SHRINE)),
+    Level(6, "Crystal Shore",
+          (("rect", -4, -2, 9, 5), ("rect", 0, 4, 2, 2)),
+          (("x", 0, 2),),
+          ((EnemyKind.IDLE, 0, 0), (EnemyKind.IDLE, 0, 4)),
+          (Structure.CRYSTAL_POOL, Structure.MIRROR, Structure.GOLEM)),
+    # --- Mirror Halls: vertical play ---------------------------------------
+    Level(7, "Mirror Halls",
+          (("rect", -4, -4, 8, 3), ("rect", -4, 1, 8, 3),
+           ("rect", -4, -1, 1, 2), ("rect", 3, -1, 1, 2)),
+          (("^", -4, 2), ("^", 3, 2), ("g", -4, 0), ("-", -4, -4), ("-", 3, -4)),
+          ((EnemyKind.IDLE, 0, -3), (EnemyKind.IDLE, -3, 2)),
+          (Structure.MIRROR, Structure.VAULT)),
+    Level(8, "Mirror Halls",
+          (("rect", -2, -4, 4, 9), ("rect", -5, -1, 10, 3)),
+          (("o", -5, 0), ("o", 4, 0)),
+          ((EnemyKind.IDLE, 0, -4), (EnemyKind.PATROL, -4, 0),
+           (EnemyKind.ARMOURED, 0, 4)),
+          (Structure.MIRROR, Structure.LIBRARY)),
+    Level(9, "Mirror Halls",
+          (("rect", -5, -2, 4, 5), ("rect", -1, -1, 4, 2), ("rect", 3, -2, 4, 5)),
+          (("x", 0, -1), ("/", -5, -2), ("/", 6, -2)),
+          ((EnemyKind.FLEE, -4, 0), (EnemyKind.ARMOURED, 0, 0),
+           (EnemyKind.IDLE, 4, 0)),
+          (Structure.MIRROR, Structure.PIT, Structure.GOLEM)),
+    # --- Deep Pits: holes and buried things --------------------------------
+    Level(10, "Deep Pits",
+          (("rect", -5, -3, 10, 6), ("hole", -3, -1, 2, 2), ("hole", 1, -1, 2, 2)),
+          (("o", -5, 2), ("o", 4, 2)),
+          ((EnemyKind.PATROL, 0, -3), (EnemyKind.IDLE, 5, -3)),
+          (Structure.PIT, Structure.MINT)),
+    Level(11, "Deep Pits",
+          (("rect", -5, -4, 2, 9), ("rect", -3, -1, 7, 2), ("rect", 3, -4, 2, 9)),
+          (("\\", -5, 0), ("/", 4, 0)),
+          ((EnemyKind.IDLE, -5, -4), (EnemyKind.DEVOURER, 0, 0),
+           (EnemyKind.IDLE, 4, 4)),
+          (Structure.PIT, Structure.DEPOT)),
+    Level(12, "Deep Pits",
+          (("rect", -5, -2, 5, 5), ("rect", 1, -2, 5, 5)),
+          (("-", -4, 2), ("-", 4, 2)),
+          ((EnemyKind.DEVOURER, 0, 0), (EnemyKind.IDLE, -3, 0),
+           (EnemyKind.ARMOURED, 3, 0), (EnemyKind.DEVOURER, 5, 3)),
+          (Structure.PIT, Structure.CRYSTAL_POOL, Structure.GOLEM)),
+    # --- The Cold Field: ice, shelves, stairs -------------------------------
+    Level(13, "The Cold Field",
+          (("rect", -5, -2, 11, 5), ("hole", -4, -2, 2, 2), ("hole", 2, 1, 2, 2)),
+          (("~", -3, 2), ("~", -2, 2), ("~", -1, 2), ("~", 1, 2),
+           ("-", -5, 0), ("-", 5, 0)),
+          ((EnemyKind.FLEE, -4, 0), (EnemyKind.ARMOURED, 0, 0),
+           (EnemyKind.IDLE, 4, 2)),
+          (Structure.CRYSTAL_POOL, Structure.MIRROR, Structure.CABINET)),
+    Level(14, "The Cold Field",
+          (("rect", -5, 2, 10, 2), ("rect", -5, 0, 4, 2), ("rect", -2, -2, 4, 2),
+           ("rect", 1, -4, 4, 2), ("rect", 4, -2, 2, 4)),
+          (("/", -5, 0), ("/", -2, -2), ("/", 1, -4), ("~", 1, 2), ("~", 3, 2)),
+          ((EnemyKind.IDLE, 3, -4), (EnemyKind.PATROL, -3, 2)),
+          (Structure.CRYSTAL_POOL, Structure.WORKBENCH)),
+    Level(15, "The Cold Field",
+          (("rect", -5, -4, 10, 8), ("hole", -3, -2, 6, 4)),
+          (("~", -2, -4), ("~", 2, -4), ("~", -2, 3), ("~", 2, 3)),
+          ((EnemyKind.PATROL, -4, 0), (EnemyKind.ARMOURED, 0, -4),
+           (EnemyKind.FLEE, 4, 0)),
+          (Structure.MIRROR, Structure.RIFT)),
+    # --- Hollow Spire: tall things -----------------------------------------
+    Level(16, "Hollow Spire",
+          (("rect", -2, -5, 5, 11),),
+          (("-", -2, -3), ("-", 2, -1), ("-", -2, 1), ("-", 2, 3), ("^", 0, 4)),
+          ((EnemyKind.IDLE, 0, -5), (EnemyKind.ARMOURED, 0, 0),
+           (EnemyKind.DEVOURER, 0, 5)),
+          (Structure.PIT, Structure.MIRROR, Structure.GOLEM)),
+    Level(17, "Hollow Spire",
+          (("rect", -5, -4, 3, 3), ("rect", 3, -4, 3, 3),
+           ("rect", -5, 2, 3, 3), ("rect", 3, 2, 3, 3),
+           ("rect", 0, -3, 1, 1), ("rect", -2, -3, 5, 1), ("rect", 0, 3, 1, 1),
+           ("rect", -2, 3, 5, 1), ("rect", 0, 0, 1, 1)),
+          (("o", -4, -2), ("o", 4, -2), ("o", -4, 2), ("o", 4, 2)),
+          ((EnemyKind.ARMOURED, -4, -4), (EnemyKind.PATROL, 4, -4),
+           (EnemyKind.FLEE, -4, 3), (EnemyKind.IDLE, 4, 3),
+           (EnemyKind.DEVOURER, 0, 0)),
+          (Structure.PIT, Structure.CRYSTAL_POOL, Structure.SHED)),
+    Level(18, "Hollow Spire",
+          (("rect", -4, -3, 9, 6), ("hole", -2, -1, 2, 2)),
+          (("k", -4, -3), ("l", 0, 1)),
+          ((EnemyKind.DEVOURER, 0, 2), (EnemyKind.PATROL, -3, 0)),
+          (Structure.PIT, Structure.MIRROR, Structure.GOLEM, Structure.QUARRY)),
+    # --- Glass Cathedral: naves, columns, rings ----------------------------
+    Level(19, "Glass Cathedral",
+          (("rect", -5, 1, 10, 3), ("rect", -5, -4, 10, 2),
+           ("rect", -4, -2, 1, 3), ("rect", 3, -2, 1, 3)),
+          (("o", -5, -4), ("o", 4, -4), ("^", -4, 2), ("^", 3, 2)),
+          ((EnemyKind.ARMOURED, -4, -4), (EnemyKind.PATROL, 0, 1),
+           (EnemyKind.IDLE, 4, 2)),
+          (Structure.MIRROR, Structure.CRYSTAL_POOL)),
+    Level(20, "Glass Cathedral",
+          (("rect", -5, -2, 5, 5), ("rect", 1, -3, 3, 3), ("rect", 0, 3, 3, 3),
+           ("rect", 4, 1, 2, 2)),
+          (("x", -3, 0), ("x", 2, -3), ("x", 1, 3), ("v", 4, 1)),
+          ((EnemyKind.IDLE, -4, 0), (EnemyKind.ARMOURED, 2, -2),
+           (EnemyKind.FLEE, 1, 4)),
+          (Structure.MIRROR, Structure.SHRINE, Structure.VAULT)),
+    Level(21, "Glass Cathedral",
+          (("rect", -5, -4, 10, 2), ("rect", -5, -2, 2, 6), ("rect", 3, -2, 2, 6),
+           ("rect", -1, 4, 4, 1)),
+          (("^", -4, -1), ("^", 4, 2)),
+          ((EnemyKind.IDLE, 0, -4), (EnemyKind.PATROL, -4, 0),
+           (EnemyKind.FLEE, 4, 1), (EnemyKind.ARMOURED, 0, 4)),
+          (Structure.PIT, Structure.MIRROR, Structure.GOLEM)),
+    # --- The Last Marble: the big finishes ---------------------------------
+    Level(22, "The Last Marble",
+          (("rect", -5, -2, 11, 5),),
+          (("w", -3, -2), ("w", 3, -2), ("w", -3, 2), ("w", 3, 2),
+           ("o", -5, 0), ("o", 5, 0)),
+          ((EnemyKind.ARMOURED, -4, 0), (EnemyKind.FLEE, 4, 0),
+           (EnemyKind.PATROL, 0, -2), (EnemyKind.IDLE, 0, 2),
+           (EnemyKind.DEVOURER, 0, 0)),
+          (Structure.PIT, Structure.CRYSTAL_POOL, Structure.MIRROR, Structure.GOLEM)),
+    Level(23, "The Last Marble",
+          (("rect", -4, -4, 8, 3), ("rect", -4, 2, 8, 3), ("rect", -1, -1, 2, 3)),
+          (("^", -3, 2), ("^", 2, 2), (">", -4, 3), ("t", 0, 1)),
+          ((EnemyKind.ARMOURED, -3, -3), (EnemyKind.PATROL, 2, -3),
+           (EnemyKind.DEVOURER, 0, 3)),
+          (Structure.CRYSTAL_POOL, Structure.MIRROR, Structure.GOLEM,
+           Structure.LIBRARY)),
+    Level(24, "The Last Marble",
+          (("rect", -5, -2, 10, 5), ("rect", -2, -5, 2, 2), ("rect", 2, 4, 2, 2)),
+          (("o", -5, -2), ("o", 4, 1), ("^", 0, 2), ("x", -5, 2)),
+          ((EnemyKind.DEVOURER, 0, 0), (EnemyKind.ARMOURED, -4, -2),
+           (EnemyKind.ARMOURED, 4, 2), (EnemyKind.FLEE, -4, 2),
+           (EnemyKind.FLEE, 4, -2), (EnemyKind.IDLE, -2, -5),
+           (EnemyKind.IDLE, 2, 4), (EnemyKind.PATROL, 0, -2)),
+          (Structure.PIT, Structure.CRYSTAL_POOL, Structure.MIRROR,
+           Structure.GOLEM, Structure.QUARRY, Structure.SHRINE,
+           Structure.VAULT, Structure.WORKBENCH, Structure.DEPOT,
+           Structure.LIBRARY, Structure.CABINET, Structure.MINT,
+           Structure.RIFT, Structure.SHED)),
+)
+
+
+def level_for(run_number):
+    """The Level a run of the game plays (run 0 is level 1; the last level repeats)."""
+    index = min(max(int(run_number), 0), len(LEVELS) - 1)
+    return LEVELS[index]

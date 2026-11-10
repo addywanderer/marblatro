@@ -30,14 +30,12 @@ class ToolboxTests(GameTestCase):
 
         self.game._buy_shop_item(offer)
 
-        # The bought item is a copy of the offer (see items.owned_copy): the
-        # shelf keeps the offer, the player keeps their own block.
+        # The tile the player bought IS their block now, unlocked where it lay.
         self.assertEqual(len(self.game.toolbox.items), 1)
         bought = self.game.toolbox.items[0]
-        self.assertIsNot(bought, offer)
+        self.assertIs(bought, offer)
         self.assertEqual(bought.shape, main.Shape.RECT)
         self.assertEqual(bought.effects, [])
-        self.assertEqual(offer.shape, main.Shape.RECT)
         self.assertLess(self.game.cash, 1000)
 
 
@@ -368,7 +366,7 @@ class ToolboxTests(GameTestCase):
 
     def test_non_continue_click_during_post_run_retries(self):
         self.game.cash = 100
-        self._complete_run(10000, required=1000)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
 
         self._click((20, 20))  # any action that isn't CONTINUE acts as RETRY
@@ -381,16 +379,27 @@ class ToolboxTests(GameTestCase):
 
 
     def test_toolbox_starts_with_start_and_finish(self):
-        items = list(self.game.toolbox.items)
-        scorers = [item.scorer for item in items]
+        blocks = [item for item in self.game.toolbox.items
+                  if item.kind == "block"]
+        scorers = [item.scorer for item in blocks]
 
-        self.assertEqual(len(items), 2)
-        self.assertTrue(all(item.kind == "block" for item in items))
         self.assertIn(main.Scorer.START, scorers)
         self.assertIn(main.Scorer.FINISH, scorers)
+        self.assertEqual(len(scorers), 2)   # nothing else starts as a block
+
+
+    def test_toolbox_starts_with_the_four_tools(self):
+        # The player starts able to open every structure: one tool per verb (see
+        # components.Tool).
+        tools = [item for item in self.game.toolbox.items if item.kind == "tool"]
+        self.assertEqual(sorted(item.verb for item in tools),
+                         sorted(main.Tool.STARTERS))
+        for item in tools:
+            self.assertEqual(item.verb, main.Tool.verb(item.value))
 
 
     def test_item_at_cell_finds_an_owned_item(self):
+        self._stock_shelf(3)
         self.game.toolbox.items.clear()
         item = self.game.shop.items[0]
         self.game.toolbox.add(item)

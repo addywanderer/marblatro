@@ -423,30 +423,46 @@ class RunsTests(GameTestCase):
         self.assertFalse(self.game.run_complete)
 
 
-    def test_run_not_cleared_when_score_below_requirement(self):
+    def test_a_level_is_not_cleared_while_an_enemy_stands(self):
+        # A level is won by clearing its enemies and getting every marble home,
+        # so a huge score does not save a run that leaves an enemy alive.
         marble = self._add_marble()
         marble.distance = 100.0
         marble.finished = True
         self.game.run_active = True
         self.game.run_complete = False
         self.game.run_time = 3.0
-        self.game.score_chips = 100
-        self.game.score_mult = 2
-        self.game.required_score = 10000
+        self.game.score_chips = 1000000
+        self.game.score_mult = 100
+        self.game.grid[(1, 1)] = main.Enemy(1, 1)
 
         self.game._handle_block_contacts([])
 
         self.assertTrue(self.game.run_complete)
         self.assertFalse(self.game.run_cleared)
         self.assertTrue(self.game.awaiting_after_run)
-        # A failed run counts as a fail but doesn't advance until CONTINUE.
+        # A failed level counts as a fail but doesn't advance until CONTINUE.
         self.assertEqual(self.game.run_results, [False])
         self.assertEqual(self.game.failed_runs, 1)
-        self.assertEqual(self.game.required_score, 10000)
 
-        self.game._continue_run()
+    def test_a_level_clears_once_its_enemies_are_down(self):
+        # The other half: with no enemy left standing, a home marble wins the
+        # level however modest its score.
+        marble = self._add_marble()
+        marble.finished = True
+        self.game.run_active = True
+        self.game.run_complete = False
+        self.game.run_time = 3.0
+        self.game.score_chips = 1
+        self.game.score_mult = 1
 
-        self.assertEqual(self.game.required_score, main.REQUIRED_SCORES[1])
+        self.game._handle_block_contacts([])
+
+        self.assertTrue(self.game.run_complete)
+        self.assertTrue(self.game.run_cleared)
+        self.assertEqual(self.game.run_results, [True])
+        self.assertEqual(self.game.runs_cleared, 1)
+        self.assertEqual(self.game.failed_runs, 0)
 
 
     def test_reset_run_clears_run_cleared_flag(self):
@@ -470,7 +486,7 @@ class RunsTests(GameTestCase):
         # numpy float -> numpy bool into run_results, which then breaks JSON
         # saves ("Object of type bool is not JSON serializable").
         self.game.marble_type = main.MarbleType.PING_PONG  # any type triggers it
-        self._complete_run(1000000, required=1)
+        self._complete_run(1000000)
         self.assertEqual(self.game.run_results, [True])
         self.assertIs(type(self.game.run_results[0]), bool)
         self.assertIs(type(self.game.score_total), float)
@@ -498,15 +514,15 @@ class RunsTests(GameTestCase):
     def test_three_failed_runs_means_defeat(self):
         # The 3rd lost run ends the game immediately with a defeat game over.
         # (Required scores are set explicitly so each run's outcome is exact.)
-        self._complete_run(1000000, required=1)  # run 1: clear
+        self._complete_run(1000000)  # run 1: clear
         self.game._continue_run()
-        self._complete_run(100, required=1000)  # run 2: fail (1st loss)
-        self.game._continue_run()
-        self.assertFalse(self.game.game_over)
-        self._complete_run(100, required=1000)  # run 3: fail (2nd loss)
+        self._complete_run(100, cleared=False)  # run 2: fail (1st loss)
         self.game._continue_run()
         self.assertFalse(self.game.game_over)
-        self._complete_run(100, required=1000)  # run 4: fail (3rd loss)
+        self._complete_run(100, cleared=False)  # run 3: fail (2nd loss)
+        self.game._continue_run()
+        self.assertFalse(self.game.game_over)
+        self._complete_run(100, cleared=False)  # run 4: fail (3rd loss)
         self.game._continue_run()
         self.assertTrue(self.game.game_over)
         self.assertFalse(self.game.game_won)
@@ -517,7 +533,7 @@ class RunsTests(GameTestCase):
 
     def test_perfect_win_when_all_runs_cleared(self):
         for _ in range(main.TOTAL_RUNS):
-            self._complete_run(1000000, required=1)
+            self._complete_run(1000000)
             self.game._continue_run()
         self.assertTrue(self.game.game_over)
         self.assertTrue(self.game.game_won)
@@ -530,9 +546,9 @@ class RunsTests(GameTestCase):
         # and wins (not perfect). Failing the final run would end in defeat.
         for run in range(main.TOTAL_RUNS):
             if run in (2, 12):
-                self._complete_run(100, required=1000)  # fail
+                self._complete_run(100, cleared=False)  # fail
             else:
-                self._complete_run(1000000, required=1)  # clear
+                self._complete_run(1000000)  # clear
             self.game._continue_run()
         self.assertTrue(self.game.game_over)
         self.assertTrue(self.game.game_won)
@@ -755,7 +771,7 @@ class RunsTests(GameTestCase):
         self.game._on_fragile_broken(block)
         self.game._on_fragile_broken(block)  # two breaks this run
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 6)
-        self._complete_run(10000, required=100)
+        self._complete_run(10000)
         self.game._continue_run()
         self.assertEqual(self.game.wrecking_bonus[main.Scorer.MULT_ADD], 6)
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 0)
@@ -1044,7 +1060,7 @@ class RunsTests(GameTestCase):
 
     def test_retry_undoes_cleared_run(self):
         self.game.cash = 100
-        self._complete_run(10000, required=1)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
         self.assertEqual(self.game.runs_cleared, 1)
 
@@ -1055,13 +1071,13 @@ class RunsTests(GameTestCase):
         self.assertEqual(self.game.last_run_cash_gained, 0)
         self.assertAlmostEqual(self.game.cash, 100)  # award undone
         self.assertEqual(self.game.run_number, 0)
-        self.assertEqual(self.game.required_score, 1)
+        self.assertEqual(self.game.required_score, main.REQUIRED_SCORES[0])
         self.assertFalse(self.game.awaiting_after_run)
         self.assertFalse(self.game.run_complete)
 
 
     def test_retry_undoes_failed_run(self):
-        self._complete_run(100, required=1000)
+        self._complete_run(100, cleared=False)
         self.assertEqual(self.game.failed_runs, 1)
 
         self.game._retry_run()
@@ -1072,7 +1088,7 @@ class RunsTests(GameTestCase):
 
 
     def test_continue_advances_to_next_run(self):
-        self._complete_run(10000, required=1000)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
 
         self.game._continue_run()  # the player CONTINUEs to the next run
@@ -1178,12 +1194,12 @@ class RunsTests(GameTestCase):
 
     def test_continue_after_final_run_ends_game(self):
         for _ in range(main.TOTAL_RUNS - 1):
-            self._complete_run(1000000, required=1)
+            self._complete_run(1000000)
             self.game._continue_run()
         self.assertFalse(self.game.game_over)
         self.assertEqual(self.game.run_number, main.TOTAL_RUNS - 1)
 
-        self._complete_run(1000000, required=1)  # 24th run clears and CONTINUEs
+        self._complete_run(1000000)  # 24th run clears and CONTINUEs
         self.game._continue_run()
 
         self.assertTrue(self.game.game_over)

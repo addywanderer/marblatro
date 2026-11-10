@@ -231,6 +231,7 @@ class TopBarTests(GameTestCase):
             "score": main.SCORE_PANEL_RECT,
             "action upgrade": main.ACTION_UPGRADE_RECT,
             "deck": main.DECK_BUTTON_RECT,
+            "board unit": main.BOARD_UNIT_BUTTON_RECT,
         }
         for name, rect in pieces.items():
             with self.subTest(piece=name):

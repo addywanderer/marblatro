@@ -643,7 +643,9 @@ class BlocksTests(GameTestCase):
         # lights nothing.
         playing_total = self._finish_a_run_short_of_its_target(banked_xmult=0.0)
         self.assertLess(playing_total, self.game.required_score)
-        self.assertFalse(self.game.run_cleared)
+        # The score target no longer decides the LEVEL (its enemies do, see
+        # components.LEVELS), but the fire still only lights for a run that
+        # beats it.
         self.assertLess(self.game.score_total, self.game.required_score)
         self.assertEqual(self.game.fire_intensity, 0.0)
 
@@ -1313,9 +1315,10 @@ class BlocksTests(GameTestCase):
         block = main.Block(0, 0, scorer=main.Scorer.SHARP, trigger_limit=2)
         factor = block.scorer_amount
         self.assertEqual(block.triggers_left, 2)
+        # One marble takes both triggers, so both factors land on the same
+        # marble's mult (the score is per marble — see Game.score_chips).
+        marble = self._add_marble()
         for _ in range(2):
-            self.game.marbles = []
-            marble = self._add_marble()
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
             self.assertEqual(self.game.run_xmult_pending, 1.0)   # never banked
@@ -1329,11 +1332,12 @@ class BlocksTests(GameTestCase):
         self.game.score_mult = 1
         self.game.run_active = True
         factor = None
+        # One marble touches both blocks in turn, so the two factors compound on
+        # the same marble (see Game.score_chips).
+        marble = self._add_marble()
         for _ in range(2):
-            self.game.marbles = []
             block = main.Block(0, 0, scorer=main.Scorer.SHARP)
             factor = block.scorer_amount
-            marble = self._add_marble()
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
         self.assertAlmostEqual(self.game.score_mult, factor ** 2)
@@ -1385,7 +1389,7 @@ class BlocksTests(GameTestCase):
 
     def test_key_during_post_run_retries(self):
         self.game.cash = 100
-        self._complete_run(10000, required=1000)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
 
         self._press(main.pygame.K_t)  # any key during the post-run state retries
@@ -1404,7 +1408,7 @@ class BlocksTests(GameTestCase):
         self.game.toolbox.add(block)
         self.game._equip_block(block)
         self.game.cash = 100
-        self._complete_run(10000, required=1000)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
 
         self._click(self._grid_pos(1, 1))  # place a block during the post-run state
@@ -1414,20 +1418,23 @@ class BlocksTests(GameTestCase):
         self.assertIn((1, 1), self.game.grid)  # then the action played out
 
 
-    def test_y_key_does_not_advance_during_active_run(self):
-        # Pressing Y while a run is still in progress (marbles not finished)
-        # must not skip ahead to the next round.
+    def test_y_key_gives_up_on_an_active_level(self):
+        # A level cannot be LOST by playing, so Y abandons it at any time and
+        # the level counts as lost: the run ends uncleared, waiting for the
+        # player's RETRY/CONTINUE, and the run number does not move yet.
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
         self.game.reset_run(False)
         self.assertTrue(self.game.run_active)
-        self.assertFalse(self.game.run_complete)
 
         self._press(main.pygame.K_y)
 
+        self.assertFalse(self.game.run_active)
+        self.assertTrue(self.game.run_complete)
+        self.assertFalse(self.game.run_cleared)
+        self.assertTrue(self.game.awaiting_after_run)
+        self.assertEqual(self.game.run_results, [False])
+        self.assertEqual(self.game.failed_runs, 1)
         self.assertEqual(self.game.run_number, 0)
-        self.assertEqual(self.game.required_score, main.REQUIRED_SCORES[0])
-        self.assertFalse(self.game.run_complete)
-        self.assertFalse(self.game.awaiting_after_run)
 
 
     def test_y_key_continues_after_run_completes(self):
@@ -1435,7 +1442,7 @@ class BlocksTests(GameTestCase):
         # run WITHOUT retrying first (the run result is kept).
         self.game.cash = 100
         self.game.run_time = main.TIME_IDEAL
-        self._complete_run(10000, required=1)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
 
         self._press(main.pygame.K_y)
@@ -1474,7 +1481,7 @@ class BlocksTests(GameTestCase):
 
 
     def test_reset_run_blocked_while_awaiting_choice(self):
-        self._complete_run(10000, required=1000)
+        self._complete_run(10000)
         self.assertTrue(self.game.awaiting_after_run)
         self.game.grid[(0, 0)] = main.Block(0, 0, scorer=main.Scorer.START)
 

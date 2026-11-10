@@ -44,8 +44,11 @@ from components import (
     Rarity,
     Scorer,
     Shape,
+    PROP_PARTS,
+    Structure,
     Trial,
     block_price_for,
+    level_for,
     card_description,
     card_price_for,
     card_scorer,
@@ -83,6 +86,8 @@ from items import (
     offer_key,
     resource_point_label,
 )
+from enemies import Enemy
+from items import StructureItem
 from marble import Marble, _configure_marble_type
 from physics import PhysicsEngine
 from shop import Shop
@@ -107,18 +112,35 @@ class RunsMixin:
         self.run_active = True
         self.run_complete = False
         self.run_cleared = False
-        self.score_chips = RUN_BASE_CHIPS
-        self.score_mult = RUN_BASE_MULT
+        # A run that starts is no place to still be choosing cards from the
+        # deck: an Eyeball pick armed before it is dropped with its overlay (the
+        # ACTION is untouched — nothing was spent on a pick that never drew).
+        self.deck_pick_action = None
+        self.deck_pick_left = 0
+        self.deck_shown = False
+        # The run's BASE score (chips x mult): every marble this run releases is
+        # seeded from it, and a payoff paid while no marble exists (a card that
+        # fires at the start of the run) moves it. The live score lives on the
+        # marbles themselves (see the score_chips / score_mult properties).
+        base_chips = RUN_BASE_CHIPS
+        base_mult = RUN_BASE_MULT
         # Permanent metagame upgrades (bought with dice on the title screen's
         # UPGRADES tab) apply at the start of every run: +chips, +mult, and an
         # xMult multiplier. A save can turn these off on the marble-selection
         # screen (upgrades_enabled), defaulting to on.
         if self.upgrades_enabled:
-            self.score_chips += metagame.chip_bonus()
-            self.score_mult += metagame.mult_bonus()
+            base_chips += metagame.chip_bonus()
+            base_mult += metagame.mult_bonus()
             xmult = metagame.xmult_bonus()
             if xmult != 1.0:
-                self.score_mult = self.score_mult * xmult
+                base_mult = base_mult * xmult
+        self._score_marble = None
+        self._base_chips = base_chips
+        self._base_mult = base_mult
+        # Any marble left over from the previous run is cleared BEFORE the
+        # start-of-run payoffs below, so those payoffs move the base score
+        # rather than a stale marble's.
+        self.marbles = []
         # The run's own dice are reset here, so replaying the run (R, T, a
         # retry) rolls the same luck it had the first time round instead of a
         # fresh set (see run_rng / _choose_trial). This has to happen BEFORE the
@@ -163,6 +185,9 @@ class RunsMixin:
         # only ever touches a run that is being thrown away.
         self.free_rerolls = max(0, self.free_rerolls - self.free_rerolls_run_gain)
         self.free_rerolls_run_gain = 0
+        # The Reroll cards that run dealt come off the board for the same
+        # reason (see _spawn_reroll_cards): the discarded run did not earn them.
+        self._take_back_run_rerolls()
         # The inventory slots THIS run's Packed blocks won come back off the
         # total for the same reason: the discarded run did not earn them. They
         # are kept once the run is continued (see _continue_run), so a committed
@@ -193,6 +218,9 @@ class RunsMixin:
         if choose_trial:
             self._roll_run_random_outputs()
         self._apply_cards()
+        # ...and every UNPLAYABLE item the player owns pays its start-of-run
+        # payoff at the same moment (user request: the passive Concrete).
+        self._apply_passive_items()
         self.run_time = 0.0
         # Fresh run: no black-hole pull time has accumulated yet (astronaut).
         self.black_hole_time = 0.0
@@ -212,10 +240,19 @@ class RunsMixin:
         self.visited_cells = set()
         # Fresh run: no Drill-scorer locked squares earned yet.
         self.drill_run_units = 0
+        # Fresh run: the TOOLS are back to full energy (user request: "energy
+        # resets to max each run"). Every use of a tool spends one (see
+        # _apply_tool), so this is what makes opening structures a per-run
+        # decision, and restarting or retrying a run gives the same budget back
+        # — the run being thrown away did not keep what it spent.
+        self.energy = self.max_energy
         # Fresh run: no blocks destroyed yet (Undertaker) and no Debt block has
         # cancelled the run's interest yet.
         self.run_blocks_destroyed = 0
         self.debt_run_triggered = False
+        # Fresh run: nothing has been thrown away yet, so the Trash Can card
+        # starts the run paying nothing (see _discard_item).
+        self.discarded_items_run = 0
         # Fresh run: the Procrastination rewinds have not been spent yet. The
         # marbles below are newly built, so their motion-history deques start
         # empty too — a new run can never rewind into the last one's past.
@@ -276,7 +313,19 @@ class RunsMixin:
             # Every Lock closes again at the start of each run, so the marble
             # must reach its Key again this run (see _unlock_matching_locks).
             block.locked = block.shape == Shape.LOCK
-        self.marbles = []
+        # The level is put back BEFORE the marble exists (user request: "load the
+        # level beforehand"), so the run starts on the board the player has been
+        # building on: its squares are opened, its props are rebuilt on their own
+        # cells, its enemies come back to theirs at full health and its
+        # structures stay where they stand (see _begin_level — a level is planned
+        # once, when it becomes current, and never re-decided here). A level is
+        # won by clearing its enemies while getting every marble to the Finish —
+        # there is no score target any more.
+        self._begin_level()
+        # (self.marbles was already cleared at the top of the run, before the
+        # start-of-run payoffs, so they landed on the base score.) The marble is
+        # released HERE, which is what starting a run means (user request:
+        # "create a marble only when the player presses t to start the run").
         for start_block in starts:
             self._release_start_marble(start_block)
             # The Doppelganger whole card releases a second marble from every
@@ -288,6 +337,339 @@ class RunsMixin:
         # after the marbles exist (the scorer path reads the run's marble).
         self._apply_tokens()
         return True
+
+    def _discard_run(self):
+        """Go back to building: the run in flight is thrown away with its marble.
+
+        User request: "create a marble only when the player presses t to start
+        the run. delete the marble when the run is reset." A marble lives exactly
+        as long as the run it is playing: reset_run releases it, and every path
+        that resets the board back to the build phase — R, a retry, unlocking a
+        square, moving an item about — takes it away again, so the build phase
+        never shows a marble nobody is playing with.
+        """
+        self.marbles = []
+        self.run_active = False
+
+    # --- levels ---------------------------------------------------------
+
+    def current_level(self):
+        """The Level this run plays (a run IS a level; see components.LEVELS)."""
+        return level_for(self.run_number)
+
+    def live_enemies(self):
+        """Every enemy still standing on the board."""
+        return [block for block in self.board_blocks()
+                if getattr(block, "is_enemy", False) and block.alive]
+
+    def _begin_level(self):
+        """Lay out the level this run plays: its squares, props, structures and cast.
+
+        User request: "load the level beforehand instead of when the game
+        updates so that the level does not appear to change randomly." A level is
+        laid out when it becomes the current one — a brand-new game (see
+        _reset_board_to_start) and the CONTINUE that advances to the next run
+        (see _continue_run) — and starting a run only puts that same layout BACK:
+        the props go on their own offsets, the enemies come back to their own
+        squares at full health and the structures keep the squares they stand on
+        (see _place_level_props / _place_level_enemies / _place_level_structures).
+        Nothing here reads the board to decide where things go, so the level the
+        player builds against is the level they play.
+        """
+        level = self.current_level()
+        # A DIFFERENT level replaces everything the previous one laid out; the
+        # SAME level (a run start, a retry, a load) keeps what is standing, so
+        # nothing about it can move.
+        same_level = getattr(self, "level_number", None) == level.number
+        if not same_level:
+            # A level that is only now being laid out owes its full cast of
+            # structures: the ones the last level spent were the last level's,
+            # and so were the ones it rerolled into something else.
+            self.spent_structures = set()
+            self.structure_rerolls = {}
+        self.level_number = level.number
+        self.enemies_defeated = 0
+        self._open_level_region(level.cells)
+        self._place_level_props(level)
+        self._place_level_structures(level, keep=same_level)
+        self._place_level_enemies(level, keep=same_level)
+
+    def _open_level_region(self, cells):
+        """Unlock the board squares this level opens up.
+
+        ``cells`` are the level's own squares, offset from the centre square of
+        the board (see components.Level), so each level pre-unlocks a different
+        SHAPE of board. A level only ever UNLOCKS squares: anything already
+        unlocked (an earlier level's squares, a Board Unit the player bought)
+        stays unlocked.
+        """
+        for dx, dy in cells:
+            cell = (GRID_WIDTH // 2 + dx, GRID_HEIGHT // 2 + dy)
+            if 0 <= cell[0] < GRID_WIDTH and 0 <= cell[1] < GRID_HEIGHT:
+                self.unlocked_cells.add(cell)
+        self._board_walls_dirty = True
+
+    def _level_cell(self, dx, dy):
+        """The board square a level's offset lands on."""
+        return (GRID_WIDTH // 2 + dx, GRID_HEIGHT // 2 + dy)
+
+    def _player_cells(self):
+        """The squares the PLAYER's own things stand on — never the level's.
+
+        A level lays itself out against this, so its furniture and its cast never
+        land on something the player built, and the player's build never pushes
+        them about: the level's plan is its own offsets, and it is only ever
+        filled IN, never re-decided (user request: "load the level beforehand
+        ... so that the level does not appear to change randomly"). Counting the
+        level's own blocks here is what used to make the second layout move
+        everything.
+        """
+        cells = set()
+        for item in self.owned_items():
+            cell = self.item_cell(item)
+            if cell is not None:
+                cells.add(cell)
+        for cell, block in self.grid.items():
+            if (getattr(block, "is_level_prop", False)
+                    or getattr(block, "is_enemy", False)):
+                continue
+            cells.add(cell)
+        return cells
+
+    def _player_block_cells(self):
+        """The squares the player's own BLOCKS stand on (their items aside).
+
+        A structure is placed on its level's own square whatever item happens to
+        lie there — an item is scenery and takes another square on the next
+        layout pass — but never on a block the player built, which is why this is
+        the narrower question (see _place_level_structures).
+        """
+        return {cell for cell, block in self.grid.items()
+                if not getattr(block, "is_level_prop", False)
+                and not getattr(block, "is_enemy", False)}
+
+    def _place_level_props(self, level):
+        """Build the blocks the level places for the player.
+
+        A level's props are its own furniture -- walls, bouncers, accelerators to
+        climb with, phase blocks, slopes, shelves, a key and its lock. They are
+        not the player's: they cannot be selected, taken up or sold (see
+        _erase_block_at), and they are REBUILT on their own squares whenever the
+        level is put back, so a broken or bombed one comes back exactly where it
+        was. Their square is the level's own offset and never the board's state,
+        so laying the level out twice cannot move it; only a square the PLAYER
+        has built on is left to the player.
+        """
+        for cell in [cell for cell, block in self.grid.items()
+                     if getattr(block, "is_level_prop", False)]:
+            del self.grid[cell]
+        taken = self._player_cells()
+        for marker, dx, dy in level.props:
+            cell = self._level_cell(dx, dy)
+            if cell not in self.unlocked_cells or cell in taken:
+                continue
+            parts = PROP_PARTS.get(marker)
+            if parts is None:
+                continue
+            block = Block(cell[0], cell[1],
+                          shape=parts.get("shape", Shape.RECT),
+                          effects=parts.get("effects"),
+                          angle=parts.get("angle", 0),
+                          key_number=parts.get("key_number", 0))
+            block.is_level_prop = True
+            self.grid[cell] = block
+            taken.add(cell)
+
+    def _place_level_structures(self, level, keep=True):
+        """Put the level's structures on the board, where its plan puts them.
+
+        A structure is part of the LEVEL now (user request: "add structures as
+        part of the level"): a pit, a crystal pool or a mirror stands on one of
+        the level's own squares, wears no padlock and costs nothing, and a tool
+        opens it where it lies (see Game._apply_tool). Every run clears the
+        previous level's structures and lays out this level's own.
+
+        The level offers STRUCTURES_PER_RUN of them (user request: "have 4
+        structures each run instead of 1"), so a square the player has already
+        built on does not shrink the offer: the structure moves to the free
+        square nearest the one the level picked. A structure the level ALREADY
+        has keeps the square it stands on — the plan is filled in, never
+        re-decided — so starting or retrying a run cannot shuffle them.
+
+        A structure the player REROLLED is the plan's own entry in another
+        shape (see Game.structure_rerolls): the plan deals what the reroll made
+        of it, so the reroll survives every later layout pass exactly as an
+        opened structure's absence does.
+        """
+        rerolled = getattr(self, "structure_rerolls", None) or {}
+        planned = [(index, rerolled.get(index, value), dx, dy)
+                   for index, (value, dx, dy)
+                   in enumerate(level.structure_spawns)]
+        still_needed = {}
+        for _index, value, _dx, _dy in planned:
+            still_needed[value] = still_needed.get(value, 0) + 1
+        # What the level already has stays, and takes one of its plan's entries;
+        # anything over belongs to a level (or a run) that is over.
+        kept = []
+        for item in [item for item in self.shop.items
+                     if getattr(item, "is_level_structure", False)]:
+            if keep and still_needed.get(item.value, 0) > 0:
+                still_needed[item.value] -= 1
+                kept.append(item)
+                continue
+            if item in self.shop.items:
+                self.shop.items.remove(item)
+            self.set_item_cell(item, None)
+            self._forget_item(item)
+        taken = self._player_block_cells() | {self.item_cell(item) for item in kept}
+        for index, value, dx, dy in planned:
+            if still_needed.get(value, 0) <= 0:
+                continue
+            still_needed[value] -= 1
+            cell = self._level_cell(dx, dy)
+            # A structure the player has already OPENED this level visit stays
+            # gone, wherever it stood: laying the level out again (a board edit,
+            # an R, a T) must not hand out another pack (user report: moving the
+            # tool used to put the structure back).
+            if self._structure_is_spent(value, cell):
+                continue
+            if cell not in self.unlocked_cells or cell in taken:
+                cell = self._free_level_cell(level, taken, dx, dy)
+                if cell is None:
+                    continue
+                if self._structure_is_spent(value, cell):
+                    continue
+            # The structure's square is the level's, but the item standing on it
+            # is the PLAYER's: it steps aside to another square rather than
+            # being pushed into the deck, exactly like an item a block is built
+            # or a structure is moved over (a tool that vanished into the deck
+            # was a bug, not a layout).
+            for other in self.owned_items():
+                if self.item_cell(other) == cell:
+                    self._seat_aside(other, cell)
+            item = StructureItem(value, Structure.PRICES[value])
+            item.is_level_structure = True
+            # Which entry of the level's plan this is: a reroll (see
+            # Game._action_reroll) rewrites that entry rather than moving the
+            # structure, so the layout pass below keeps dealing what the reroll
+            # made of it.
+            item.plan_index = index
+            # The structure stands on the square its LEVEL picked (user request:
+            # "make structures be placed in different areas of the level, instead
+            # of always at the top"). It has to be the item's BOARD SQUARE, not
+            # its shelf col/row: those are the shop's drawing cells, and an item
+            # with no board square is laid out by the next ensure_board_cells in
+            # reading order -- which is the top of the board.
+            self.set_item_cell(item, cell)
+            self.shop.items.append(item)
+            taken.add(cell)
+
+    def _structure_is_spent(self, value, cell):
+        """True when this structure was already opened on this square.
+
+        The level visit's record of spents is `(value, x, y)` (see
+        Game.spent_structures / _consume_structure): a structure is a thing the
+        player OPENED, not a reward to be re-dealt by the next layout pass.
+        """
+        return (value, cell[0], cell[1]) in self.spent_structures
+
+    def _free_level_cell(self, level, taken, dx, dy):
+        """The free square of a level closest to (dx, dy), or None if it has none.
+
+        Used when a structure's own square is already spoken for, so the run
+        still gets the four structures it is owed. An enemy's square is never
+        used either: a structure standing where its level's cast has to spawn
+        would push an enemy -- and its share of the level's health -- off the
+        board.
+        """
+        reserved = {(ex, ey) for _, ex, ey in level.enemy_spawns}
+        best = None
+        for level_cell in sorted(level.cells, key=lambda cell: (cell[1], cell[0])):
+            if level_cell in reserved:
+                continue
+            cell = self._level_cell(*level_cell)
+            if cell not in self.unlocked_cells or cell in taken:
+                continue
+            distance = abs(level_cell[0] - dx) + abs(level_cell[1] - dy)
+            if best is None or distance < best[0]:
+                best = (distance, cell)
+        return None if best is None else best[1]
+
+    def _place_level_enemies(self, level, keep=True):
+        """Put the level's enemies on their own squares, at full health.
+
+        Each enemy has its own square, so a level can put one at the top of the
+        board and another at the bottom, and every level's cast sits somewhere
+        different. An enemy whose square the level does not open is BURIED in the
+        wall (see components.Level): it is drawn there, and the marble can only
+        reach it once the player buys that square or phases into it.
+
+        An enemy already standing on its own square is RESET rather than rebuilt
+        (see Enemy.reset), so laying the level out again — the start of a run, a
+        retry — puts the same enemy back on the same square with its whole share
+        of health instead of re-deciding where the cast goes.
+
+        The level's health is the SCORE its run used to require -- the target the
+        game asked for before levels replaced it (user request: "make the sum of
+        all enemies' health equal to the total required score that was originally
+        there"). That total is split between the enemies that actually reach the
+        board by kind, so a level's enemies always add up to exactly the run's
+        target however many of them there are.
+        """
+        planned = []
+        for kind, dx, dy in level.enemy_spawns:
+            cell = self._level_cell(dx, dy)
+            if not (0 <= cell[0] < GRID_WIDTH and 0 <= cell[1] < GRID_HEIGHT):
+                continue
+            planned.append((kind, cell))
+        # An enemy that no longer belongs to this level leaves the board, and the
+        # ones that do are kept as they are (they are about to be reset).
+        planned_cells = {cell for _kind, cell in planned}
+        for cell in [cell for cell, block in self.grid.items()
+                     if getattr(block, "is_enemy", False)]:
+            if cell not in planned_cells:
+                del self.grid[cell]
+        taken = self._player_cells()
+        enemies = []
+        for kind, cell in planned:
+            enemy = self.grid.get(cell) if keep else None
+            if enemy is not None and getattr(enemy, "is_enemy", False):
+                if enemy.kind != kind:
+                    del self.grid[cell]
+                    enemy = None
+            if enemy is None:
+                if cell in taken:
+                    continue
+                enemy = Enemy(cell[0], cell[1], kind)
+                self.grid[cell] = enemy
+            enemies.append(enemy)
+        health = level.enemy_health(self._level_health_budget(),
+                                    [enemy.kind for enemy in enemies])
+        for enemy, hp in zip(enemies, health):
+            enemy.max_hp = hp
+            enemy.reset()
+
+    def _level_health_budget(self):
+        """The damage a level asks for in total: the run's required score.
+
+        The score target is still computed and kept for every run (see
+        _refresh_run_target): it is what the run's trial scales (Sky High
+        doubles it, Grace v2 drops it to 0) and what the cash award measures the
+        run's score against, so reading the level's health off it keeps the two
+        in step -- a doubled target is a level with twice the health.
+        """
+        return max(0, int(getattr(self, "required_score", 0) or 0))
+
+    def _update_enemies(self, dt):
+        """Let every enemy on the board move for a frame.
+
+        Enemies are handed the unlocked squares, so a moving enemy keeps to the
+        board the player can actually reach: it turns round at the edge of its
+        room instead of sliding over locked squares.
+        """
+        for block in self.board_blocks():
+            if getattr(block, "is_enemy", False):
+                block.step(dt, self.marbles, self.unlocked_cells)
 
     def _particle_amount_text(self, amount):
         """Format a scored amount for a popup: whole numbers plain, floats trimmed."""
@@ -815,7 +1197,15 @@ class RunsMixin:
         rewrite it: the Inferno card raises it (see INFERNO_EXPONENT_BONUS) and
         Infinity lifts the 1-point ceiling off distance and uniqueness entirely.
         """
-        base = max(self.score_chips * self.score_mult, 1)
+        # The score is per MARBLE, so the run's payoff is what every marble on
+        # the board is worth added up (a split therefore pays for both halves);
+        # with no marble at all it is the run's base pair.
+        if self.marbles:
+            worth = sum(max(marble.chips * marble.mult, 0)
+                        for marble in self.marbles)
+        else:
+            worth = self._base_chips * self._base_mult
+        base = max(worth, 1)
         time_good, dist_good, uniq_good, _ = self._score_factors()
         exponent = 0.5 + (time_good + dist_good + uniq_good) * (1/2)
         # The Inferno whole card raises the exponent itself, so it multiplies

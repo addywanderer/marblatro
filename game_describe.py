@@ -22,6 +22,8 @@ import sounds
 import ui
 from ui import Popup, ScoreParticle, TrailParticle
 from components import (
+    Modifier,
+    Ability,
     CARD_SCORERS,
     COMPONENT_PRICES,
     DEFAULT_DIFFICULTY,
@@ -39,9 +41,16 @@ from components import (
     Component,
     Difficulty,
     Effect,
+    Group,
+    Keyword,
+    Passive,
     MarbleType,
     Pack,
+    Quality,
     Rarity,
+    Structure,
+    Tool,
+    Verb,
     Scorer,
     Shape,
     Trial,
@@ -71,6 +80,7 @@ from config import *
 from blocks import Block
 from items import (
     CASH_BREAKDOWN,
+    ENERGY_READOUT,
     ActionItem,
     BlockItem,
     CardItem,
@@ -87,6 +97,24 @@ from marble import Marble, _configure_marble_type
 from physics import PhysicsEngine
 from shop import Shop
 from toolbox import Toolbox
+
+
+def _hit_points(value):
+    """An enemy's health in the fewest characters: 8.4M rather than 838860800.
+
+    A level's health is the score its run used to require (see
+    components.Level.enemy_health), so a late level's numbers run to nine digits
+    and the plain form would push the row out of the sidebar.
+    """
+    value = max(0, int(value))
+    for limit, suffix in ((1_000_000_000, "B"), (1_000_000, "M"),
+                          (1_000, "k")):
+        if value >= limit:
+            text = f"{value / limit:.1f}"
+            if text.endswith(".0"):
+                text = text[:-2]
+            return text + suffix
+    return str(value)
 
 
 class DescribeMixin:
@@ -263,6 +291,82 @@ class DescribeMixin:
         return f"{units:g} units"
 
     def _describe_item(self, item):
+        """The sidebar rows for an item, plus its ABILITY (see components.Ability).
+
+        Everything an item can be USED for comes from the one ability table, so
+        an item that gains a capability gains its sidebar row with it: the
+        contract line below ("Needs ... Costs ...") is generated, never written
+        by hand, which is what keeps the hint and the handler saying the same
+        thing.
+        """
+        rows = list(self._describe_item_parts(item))
+        # What FAMILY it belongs to, and what that family is for (see Group):
+        # every item says which group it is in, right after its own text. The
+        # info box lifts this row out and draws it as a highlighted box under the
+        # item's name (see ui.draw_item_info / Game._describe_item_rows).
+        group_row = self._group_row(item)
+        if group_row is not None:
+            rows.append(group_row)
+        # What has been DONE to it (see components.Modifier): a golem's tier, a
+        # vodka's forgotten stacks, a spark's temporary, an action's v2, a
+        # token's runs. One row per modifier, from the one table, so an item
+        # with no modifiers has no row at all.
+        for modifier, stacks in Modifier.of(item):
+            text = Modifier.description(modifier)
+            if stacks not in (1, Modifier.PERMANENT):
+                text = f"{text} ({stacks} stacks)"
+            rows.append((f"Modifier - {Modifier.name(modifier).capitalize()}",
+                         text))
+        ability = Ability.of(item)
+        if ability is not None and not getattr(item, "is_enemy", False):
+            count = (self.required_targets(item)
+                     if ability == Ability.APPLY else None)
+            # A tool's opening costs ITS energy: 1 for the four the player
+            # starts with, nothing for a brick (see Tool.ENERGY).
+            cost = None
+            if ability == Ability.OPEN and getattr(item, "kind", None) == "tool":
+                energy = Tool.energy(item.value)
+                cost = f"{energy} energy" if energy else "nothing"
+            if ability == Ability.APPLY:
+                # An ACTION that asks for energy (the newest three) says so
+                # here, on top of the action itself being spent (see
+                # Action.ENERGY).
+                asks = Action.energy(getattr(item, "value", None))
+                if asks:
+                    cost = f"the action itself and {asks} energy"
+            rows.append((f"Ability - {Ability.name(ability)}",
+                         f"{Ability.contract(ability, count, cost)} "
+                         f"Press S to use it."))
+        return rows
+
+    def _group_row(self, item):
+        """The description row that names an item's GROUP, or None.
+
+        User request: "sort all items into groups, and show it in their
+        description what group they are in" — and then "show an item's group in
+        a highlighted box directly under the item's name". The row is written
+        here, once, so the info box can draw it as that box (see
+        ui.draw_item_info) without writing the group's name or meaning a second
+        time (see components.Group).
+        """
+        group = Group.of(item)
+        if group is None:
+            return None
+        return (f"Group - {Group.name(group)}", Group.description(group))
+
+    def _describe_item_rows(self, item):
+        """(the group row, the item's other description rows), for the info box.
+
+        The group is drawn as a highlighted box under the item's name, so the
+        box asks for the two halves separately: what goes in the box, and what
+        goes below it. A pack's option cells want the second half only, so a
+        group's line never stands in for an option's own text.
+        """
+        group_row = self._group_row(item)
+        return (group_row,
+                [row for row in self._describe_item(item) if row != group_row])
+
+    def _describe_item_parts(self, item):
         """Return [(label, description)] rows shown in the sidebar.
 
         Blocks break down into their shape, effect, and scorer so the player
@@ -272,10 +376,22 @@ class DescribeMixin:
         """
         if item is CASH_BREAKDOWN:
             return self._cash_breakdown_rows()
+        if item is ENERGY_READOUT:
+            return self._energy_rows()
         # The row a state-dependent item needs is the same wherever the item is
         # shown (a placed block, one in hand, a shop component, a card), so it
         # is read once here (see _live_payoff_row).
         live = self._live_payoff_row(item)
+        if getattr(item, "is_enemy", False):
+            # An enemy is the level's, not the player's: it reads out what it is,
+            # how it behaves and how much fight it has left.
+            return [
+                (f"Enemy - {item.name}", item.description),
+                ("Health", f"{_hit_points(item.hp)} of "
+                           f"{_hit_points(item.max_hp)} left"),
+                ("Damage", "The marble that touches it deals its chips x mult "
+                           "as damage and spends them"),
+            ]
         if getattr(item, "kind", None) == "pack":
             # A pack describes itself by what it holds and by its size's rule:
             # how many options it deals out and how many of them are kept.
@@ -299,15 +415,60 @@ class DescribeMixin:
                             f"{resource_point_label(item.scorer)} point{plural} "
                             f"at once")),
             ]
-        if getattr(item, "kind", None) == "unit":
-            # The Board Unit is not an item: it is one square of board the
-            # player can open (see Game._buy_board_unit).
+        if getattr(item, "kind", None) == "structure":
+            # A structure says what opens it and what comes out: the tool is
+            # the player's clue to which of the four they need.
+            rows = [(f"Structure - {Structure.name(item.value)}",
+                     Structure.description(item.value)),
+                    ("Opened by", ", ".join(
+                        f"{Tool.name(Tool.for_verb(verb))} "
+                        f"({Verb.name(verb)})"
+                        for verb in Structure.verbs(item.value)) or "nothing"),
+                    ("Cost", ("Free — a tool opens it where it lies, 1 energy "
+                              "a use"))]
+            comment = Structure.comment(item.value)
+            if comment:
+                rows.append(("Note", comment))
+            return rows
+        if getattr(item, "kind", None) == "tool":
+            # A tool is its KEYWORDS (see components.Keyword): the verbs it
+            # applies, whether using it destroys it and what it draws. The four
+            # the player starts with are words 1-4 of the whole vocabulary.
+            rows = [
+                (f"Tool - {Tool.name(item.value)}",
+                 Tool.description(item.value)),
+                ("Keywords", Keyword.line(item)),
+                ("Energy", (f"{Tool.energy(item.value)} a use"
+                            f" ({self.energy} left this run)")),
+            ]
+            if Tool.consumes(item.value):
+                rows.append(("Consume", Keyword.description(Keyword.CONSUME)))
+            if Tool.draws(item.value):
+                rows.append(("Draw",
+                             f"{Tool.draws(item.value):g} item"
+                             f"{'' if Tool.draws(item.value) == 1 else 's'}"
+                             f" after it is used"))
+            if getattr(item, "amount", 0):
+                # A tool that SHAPES its reward states the number it holds, and
+                # what that number means for this tool (a chisel's pack sizes, a
+                # gilding cloth's tiers), so a golem-doubled one reads 2.
+                rows.append(("Magnitude",
+                             f"{self._particle_amount_text(item.amount)} "
+                             f"{Tool.amount_label(item.value)}"))
+            if Tool.sweeps(item.value):
+                rows.append(("Sweep", "Opens every structure next to the one "
+                                      "it is used on"))
+            return rows
+        if getattr(item, "kind", None) == "passive":
+            # An UNPLAYABLE item: it is never used, it pays at the start of the
+            # run, and that is the whole of it (user request: the Concrete). It
+            # describes the magnitude it actually carries, so a combined one
+            # reads out the chips it really adds.
             return [
-                ("Board Unit",
-                 ("Buy one to unlock a locked square: the marble can travel "
-                  "there, and items can be laid out on it.")),
-                ("In hand", f"{self.board_units} unit"
-                            f"{'' if self.board_units == 1 else 's'}"),
+                (f"Item - {Passive.name(item.value)}",
+                 Passive.description(item.value, item.amount)),
+                ("Keywords", Keyword.line(item)),
+                ("Passive", Keyword.description(Keyword.UNPLAYABLE)),
             ]
         if getattr(item, "kind", None) == "token":
             # A token is a whole kept block, so it describes itself the way that
@@ -396,12 +557,20 @@ class DescribeMixin:
             else:
                 version_text = ("v1 — upgrade to v2 for "
                                 f"${self._inflated(ACTION_UPGRADE_COST)}")
-            return [
+            rows = [
                 (f"Action - {Action.name(item.value)}",
-                 Action.description(item.value, version)),
+                 Action.description(item.value, version,
+                                    getattr(item, "amount", 0))),
                 ("Version", version_text),
-                ("Comment", Action.comment(item.value)),
             ]
+            if getattr(item, "amount", 0):
+                # An action that carries a magnitude states the number it is
+                # holding, so a Lantern a golem doubled reads out the draws it
+                # really gives (see MAGNITUDES.ACTIONS).
+                rows.append(("Magnitude",
+                             f"{self._particle_amount_text(item.amount)} a use"))
+            rows.append(("Comment", Action.comment(item.value)))
+            return rows
         if item.kind == Component.SHAPE:
             return [(f"Shape - {Shape.name(item.value)}", shape_description(item.value))]
         if item.kind == Component.EFFECT:
@@ -468,6 +637,24 @@ class DescribeMixin:
             ("Total", f"${self.last_run_cash_gained} earned on the last run"),
         ]
 
+    def _energy_rows(self):
+        """Sidebar rows for the top bar's ENERGY bar (see ui.draw_energy_bar).
+
+        Energy is the run's budget for the four tools, so the readout says what
+        it is for, what it stands at right now, and that it comes back with the
+        next run (user request: "the player's max energy is 3, and energy resets
+        to max each run").
+        """
+        return [
+            ("Energy", (f"{self.energy} of {self.max_energy} left this run.")),
+            ("Spent by", ("Using a tool: the shovel (digs), the flashlight "
+                          "(reveals), the screwdriver (fixes) or the hammer "
+                          "(breaks) costs 1 energy per structure it opens.")),
+            ("Refills", ("Back to full at the start of every run — restarting or "
+                         "retrying a run gives the same budget again.")),
+        ]
+
+
     def _action_hint(self, item, source):
         """A short hint telling the player how to act on the hovered item."""
         if source == "shop":
@@ -476,12 +663,11 @@ class DescribeMixin:
             # hover (see ui.info_layout), so the hint is where the player reads
             # it.
             hint = None
-            if getattr(item, "kind", None) == "unit":
-                in_hand = getattr(self, "board_units", 0)
-                ready = (f"{in_hand} in hand — click a locked square to open it"
-                         if in_hand else
-                         "then click a locked square to open it")
-                hint = f"Right-click to buy for ${self._buy_price(item)} — {ready}"
+            if getattr(item, "kind", None) == "structure":
+                # Structures are FREE (user request): there is nothing to buy, so
+                # the hint is how to open one instead of what it costs.
+                hint = (f"Free — arm a tool on it and press S "
+                        f"({Structure.description(item.value)})")
             elif getattr(item, "kind", None) == "pack":
                 hint = (f"Right-click to buy and open for ${self._buy_price(item)} "
                         f"({Pack.size_description(item.size)})")
@@ -497,7 +683,14 @@ class DescribeMixin:
         if source == "deck":
             # The deck overlay's tiles: these are the items waiting in the deck
             # (or the ones already drawn), so the hint says where the item stands
-            # and how the overlay closes.
+            # and how the overlay closes. While an EYEBALL pick is armed the
+            # overlay is a picker, and the hint says what is pickable (see
+            # Game.arm_deck_pick).
+            if self.deck_pick_armed():
+                if item in self.eyeball_cards():
+                    return "Click to DRAW this card out of the deck with the Eyeball"
+                return ("Eyeball draws a CARD — this one is not | Esc keeps the "
+                        "card for later")
             drawn = self.item_cell(item) is not None
             where = ("drawn onto the board this run" if drawn
                      else "in the deck — the next draw may deal it")
@@ -526,17 +719,48 @@ class DescribeMixin:
             if item.fires_at_end:
                 return "Fires at the end of each run it covers (xMult)"
             return "Fires at the start of each run it covers"
+        if source == "energy":
+            # The bar is a resource, not an item: its hint is the one thing the
+            # player needs to know when it runs dry.
+            if self.energy <= 0:
+                return "No energy left this run — it refills at the next run"
+            return (f"{self.energy} opening{'' if self.energy == 1 else 's'} left "
+                    "this run | one per tool use, refilled every run")
         if source == "board":
+            if getattr(item, "kind", None) == "structure":
+                return Structure.description(item.value)
+            if getattr(item, "kind", None) == "tool":
+                verbs = getattr(item, "verbs", None) or (item.verb,)
+                return (f"{'/'.join(Verb.name(v) for v in verbs).capitalize()}: "
+                        f"select it, then a structure, then press S "
+                        f"({Tool.energy(item.value)} energy)")
+            if getattr(item, "kind", None) == "pack":
+                return "Press S to open it"
+            if getattr(item, "kind", None) == "passive":
+                # An UNPLAYABLE item: there is nothing to press, and saying so
+                # is the whole hint (see components.Keyword).
+                return (f"{Keyword.line(item).capitalize()} \u2014 click to move "
+                        f"it, B to sell it")
             # Everything the player owns lies on the board, so one hint covers
             # the cards, the actions and the parts (see Game.ensure_board_cells).
             kind = getattr(item, "kind", None)
             if kind == "card":
                 return "Click to select (click again to deselect) | B to sell"
             if kind == "action":
+                if getattr(item, "value", None) == Action.EYEBALL:
+                    return ("Press S to pick a card in your deck to draw "
+                            f"({Action.energy(Action.EYEBALL)} energy)")
+                if Action.targets_structures(getattr(item, "value", None)):
+                    return "Click a target structure, then press S to reroll it"
                 if not Action.needs_target(getattr(item, "value", None)):
                     return "Press S to use — it needs no target"
                 return "Click a target block/card, then press S to use"
-            if (isinstance(item, Block)
+            if self.is_wasteful(item):
+                # Wasteful is used rather than aimed: the block is the actor and
+                # the item selected behind it is what it takes with it.
+                hint = ("S with one other item selected: throw both away and draw "
+                        "a new item from the deck")
+            elif (isinstance(item, Block)
                     or getattr(item, "placed_cell", None) is not None):
                 hint = ("Click to pick the block up and move it "
                         "(V takes every block up)")

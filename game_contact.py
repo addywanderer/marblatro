@@ -83,6 +83,7 @@ from items import (
     offer_key,
     resource_point_label,
 )
+from enemies import EnemyKind
 from marble import Marble, _configure_marble_type
 from physics import PhysicsEngine
 from shop import Shop
@@ -371,6 +372,10 @@ class ContactMixin:
         copy.bouncy_castle = getattr(marble, "bouncy_castle", False)
         copy.effect_mass_mult = getattr(marble, "effect_mass_mult", 1.0)
         copy.start_block = getattr(marble, "start_block", None)
+        # Both halves are worth what the whole marble was worth: a split copy
+        # carries its parent's chips and mult and scores on from there.
+        copy.chips = marble.chips
+        copy.mult = marble.mult
         # The keys the half came from its parent carrying: a split copy is a full
         # marble, so a key one half collected still opens its lock for it (see
         # _gate_key_and_lock).
@@ -382,6 +387,47 @@ class ContactMixin:
         sounds.play_mech()
         return copy
 
+    def _damage_enemy(self, marble, enemy):
+        """Deal this marble's score to an enemy, then wipe the marble's score.
+
+        The marble pays with everything it has built: ``chips * mult`` is the
+        damage, and its chips and mult both drop back to zero (the user's "it
+        deals its score as damage, and its chips and mult are reset to 0"), so a
+        marble has to earn its score again before its next blow lands for
+        anything. An ARMOURED enemy ignores damage once its hits are used up; a
+        DEVOURER swallows the marble that touched it either way.
+        """
+        damage = max(float(marble.chips) * float(marble.mult), 0.0)
+        marble.chips = 0
+        marble.mult = 0
+        self._spawn_block_particle(
+            enemy, self._particle_amount_text(damage), ORANGE)
+        sounds.play_mech()
+        if enemy.can_be_hit():
+            enemy.hp -= damage
+            enemy.hit_flash = 0.35
+            if enemy.hits_left is not None:
+                enemy.hits_left -= 1
+            if enemy.hp <= 0:
+                self._defeat_enemy(enemy)
+        if enemy.kind == EnemyKind.DEVOURER:
+            self._swallow_marble(marble)
+
+    def _defeat_enemy(self, enemy):
+        """Take a killed enemy off the board."""
+        enemy.alive = False
+        if self.grid.get((enemy.x, enemy.y)) is enemy:
+            del self.grid[(enemy.x, enemy.y)]
+        self.enemies_defeated += 1
+        sounds.play_mech()
+
+    def _swallow_marble(self, marble):
+        """A devourer eats the marble: it is gone from this run for good."""
+        if marble in self.marbles:
+            self.marbles.remove(marble)
+        self._spawn_score_particle(marble.position[0], marble.position[1],
+                                   "Eaten", RED)
+
     def _handle_block_contacts(self, blocks):
         if not self.run_active and not self.run_complete:
             return
@@ -390,12 +436,30 @@ class ContactMixin:
         # self.marbles while this loop runs (the copy is first simulated on the
         # next frame).
         for marble in list(self.marbles):
+            # Whatever this marble touches pays into ITS chips and mult (see
+            # Game.score_chips), so a card or token payoff fired from its
+            # contacts lands on the same marble as the block scorers do.
+            self._score_marble = marble
             # Locked-board walls are physical but never score: they are filtered
             # out here so they don't fire quick cards, count as touches, score,
             # or read as the first/last contacted block.
             contacts = [b for b in marble.collisions_this_tick
                         if not getattr(b, "is_board_wall", False)]
             last_contacts = list(marble.collisions_last_tick)
+            # An ENEMY is fought, not scored: the marble deals its score to the
+            # enemy as damage (chips x mult), which WIPES the marble's own chips
+            # and mult, and the enemy is dropped from this list so the scoring
+            # path below never sees it (user request: "when the marble collides
+            # with an enemy, it deals its score as damage, and its chips and
+            # mult are reset to 0").
+            enemies = [b for b in contacts if getattr(b, "is_enemy", False)]
+            if enemies:
+                for enemy in enemies:
+                    self._damage_enemy(marble, enemy)
+                contacts = [b for b in contacts
+                            if not getattr(b, "is_enemy", False)]
+                if not contacts:
+                    continue
             # Quick cards armed by an earlier condition (their condition was
             # satisfied) pay now: the reward uses THIS (the next) block's hit
             # speed, exactly like a Quick block scorer.
@@ -577,7 +641,13 @@ class ContactMixin:
             self.run_complete = True
             # ``bool(...)`` keeps the result a native Python bool (a numpy
             # comparison would store a numpy.bool_ that breaks JSON saves).
-            cleared = bool(self.score_total >= self.required_score)
+            # The level is WON by clearing its enemies while getting every
+            # marble home -- the score target is gone (user request: "instead of
+            # having a score requirement ... the player can only win a level
+            # when all enemies are defeated and all marbles reach the finish").
+            # Enemies left standing mean the level can no longer be won: the
+            # player presses Y to move on and it counts as lost.
+            cleared = not self.live_enemies()
             self.run_cleared = cleared
             self.run_results.append(cleared)
             self._award_cash()

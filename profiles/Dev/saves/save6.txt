@@ -1,36 +1,24 @@
 {
   "version": 1,
-  "cash": 22,
-  "run_number": 0,
+  "cash": 141,
+  "run_number": 1,
   "round_index": 0,
-  "run_in_round": 0,
-  "required_score": 100,
+  "run_in_round": 1,
+  "required_score": 200,
   "target_forced": false,
   "required_scores": [
-    100
+    100,
+    200
   ],
-  "run_results": [],
-  "runs_cleared": 0,
+  "run_results": [
+    true
+  ],
+  "runs_cleared": 1,
   "failed_runs": 0,
-  "current_trial": 15,
+  "current_trial": 20,
   "trial_decision": null,
   "difficulty": 4,
-  "cards": [
-    {
-      "kind": "card",
-      "value": 3,
-      "price": 22,
-      "amount": 0,
-      "col": 2,
-      "row": 1,
-      "board_cell": [
-        15,
-        6
-      ],
-      "name": "Plane",
-      "random_rolls": null
-    }
-  ],
+  "cards": [],
   "actions": [],
   "toolbox": [
     {
@@ -43,12 +31,15 @@
         3
       ],
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 4,
       "scorer_amount": 0.0,
       "price": 109,
       "name": "Start Block",
+      "quality": 0,
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -56,7 +47,11 @@
       "angle": null,
       "triggers_left": null,
       "random_rolls": null,
-      "placed_cell": null
+      "placed_cell": [
+        11,
+        3
+      ],
+      "modifiers": []
     },
     {
       "kind": "block",
@@ -68,12 +63,15 @@
         3
       ],
       "shape": 0,
-      "effects": [],
+      "effects": [
+        0
+      ],
       "effect_amounts": {},
       "scorer": 5,
       "scorer_amount": 0.0,
       "price": 53,
       "name": "Finish Block",
+      "quality": 0,
       "portal_number": 0,
       "key_number": 0,
       "trigger_limit": 1,
@@ -81,198 +79,164 @@
       "angle": null,
       "triggers_left": null,
       "random_rolls": null,
-      "placed_cell": null
+      "placed_cell": [
+        18,
+        10
+      ],
+      "modifiers": []
+    },
+    {
+      "kind": "tool",
+      "value": 0,
+      "amount": 0.0,
+      "col": 0,
+      "row": 0,
+      "board_cell": [
+        18,
+        4
+      ],
+      "name": "Shovel",
+      "modifiers": []
+    },
+    {
+      "kind": "tool",
+      "value": 1,
+      "amount": 0.0,
+      "col": 1,
+      "row": 0,
+      "board_cell": null,
+      "name": "Flashlight",
+      "modifiers": []
+    },
+    {
+      "kind": "tool",
+      "value": 2,
+      "amount": 0.0,
+      "col": 2,
+      "row": 0,
+      "board_cell": null,
+      "name": "Screwdriver",
+      "modifiers": []
+    },
+    {
+      "kind": "tool",
+      "value": 3,
+      "amount": 0.0,
+      "col": 3,
+      "row": 0,
+      "board_cell": [
+        16,
+        3
+      ],
+      "name": "Hammer",
+      "modifiers": []
     },
     {
       "kind": "effect",
-      "value": 7,
-      "amount": 1297.6,
-      "price": 16,
-      "name": "Rotate",
-      "col": 3,
-      "row": 1,
-      "board_cell": [
-        14,
-        3
-      ]
-    }
-  ],
-  "toolbox_stash": [],
-  "grid": [],
-  "shop": [
-    {
-      "kind": "action",
       "value": 1,
-      "price": 24,
-      "version": 1,
-      "col": 1,
-      "row": 1,
+      "amount": 156.2,
+      "price": 28,
+      "name": "Bouncy",
+      "quality": 0,
+      "col": 0,
+      "row": 0,
+      "board_cell": [
+        15,
+        3
+      ],
+      "modifiers": []
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
+      "board_cell": null,
+      "shape": 13,
+      "effects": [],
+      "effect_amounts": {},
+      "scorer": 7,
+      "scorer_amount": 15.28,
+      "price": 18,
+      "name": "Spike Cash",
+      "quality": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": 90,
+      "triggers_left": 0,
+      "random_rolls": null,
+      "placed_cell": null,
+      "modifiers": []
+    },
+    {
+      "kind": "block",
+      "placed": false,
+      "col": 0,
+      "row": 0,
       "board_cell": [
         13,
         3
       ],
-      "name": "Recognition"
-    },
-    {
-      "kind": "effect",
-      "value": 7,
-      "amount": 1297.6,
-      "price": 16,
-      "name": "Rotate",
-      "col": 3,
-      "row": 1,
-      "board_cell": [
-        15,
-        3
-      ]
-    },
-    {
-      "kind": "scorer",
-      "value": 28,
-      "amount": 2.791,
-      "price": 22,
-      "name": "Frontier",
-      "col": 4,
-      "row": 1,
-      "board_cell": [
-        16,
-        3
-      ]
-    },
-    {
-      "kind": "shape",
-      "value": 19,
-      "amount": 0,
-      "price": 9,
-      "name": "Bump",
-      "col": 5,
-      "row": 1,
-      "board_cell": [
-        17,
-        3
-      ]
+      "shape": 0,
+      "effects": [
+        17
+      ],
+      "effect_amounts": {},
+      "scorer": 32,
+      "scorer_amount": 0.04279,
+      "price": 112,
+      "name": "Rect Colossus",
+      "quality": 0,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "angle": 90,
+      "triggers_left": 0,
+      "random_rolls": null,
+      "placed_cell": null,
+      "modifiers": []
     },
     {
       "kind": "pack",
       "pack_type": 3,
-      "size": 3,
+      "size": 4,
       "keep": 2,
       "kept": 0,
-      "price": 23,
-      "col": 6,
-      "row": 1,
+      "price": 28,
+      "col": 0,
+      "row": 0,
       "board_cell": [
         18,
-        3
+        7
       ],
-      "name": "Mega Part Pack",
+      "name": "Giga Part Pack",
       "options": [
         {
-          "kind": "scorer",
-          "value": 7,
-          "amount": 15.78,
-          "price": 14,
-          "name": "Cash",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "shape",
-          "value": 15,
-          "amount": 0,
-          "price": 9,
-          "name": "Corner",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "shape",
-          "value": 1,
-          "amount": 0,
-          "price": 11,
-          "name": "Slope",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "shape",
-          "value": 3,
-          "amount": 0,
-          "price": 10,
-          "name": "None",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "shape",
-          "value": 4,
-          "amount": 0,
-          "price": 8,
-          "name": "Circle",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        }
-      ]
-    },
-    {
-      "kind": "pack",
-      "pack_type": 2,
-      "size": 3,
-      "keep": 2,
-      "kept": 0,
-      "price": 26,
-      "col": 7,
-      "row": 1,
-      "board_cell": [
-        11,
-        4
-      ],
-      "name": "Mega Scorer Pack",
-      "options": [
-        {
-          "kind": "scorer",
-          "value": 20,
-          "amount": 7.236,
-          "price": 24,
-          "name": "Airball",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "scorer",
-          "value": 14,
-          "amount": 1.46,
-          "price": 27,
-          "name": "Effective",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "scorer",
-          "value": 10,
-          "amount": 0.935,
-          "price": 16,
-          "name": "Shreds",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        },
-        {
-          "kind": "scorer",
-          "value": 28,
-          "amount": 5.28,
+          "kind": "effect",
+          "value": 12,
+          "amount": 0.4569,
           "price": 22,
-          "name": "Frontier",
+          "name": "Sticky",
+          "quality": 0,
           "col": 0,
           "row": 0,
-          "board_cell": null
+          "board_cell": null,
+          "modifiers": []
+        },
+        {
+          "kind": "scorer",
+          "value": 6,
+          "amount": 0,
+          "price": 16,
+          "name": "Quick",
+          "quality": 0,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "modifiers": []
         },
         {
           "kind": "scorer",
@@ -280,80 +244,208 @@
           "amount": 0,
           "price": 24,
           "name": "Lucky",
-          "col": 0,
-          "row": 0,
-          "board_cell": null
-        }
-      ]
-    },
-    {
-      "kind": "pack",
-      "pack_type": 5,
-      "size": 0,
-      "keep": 1,
-      "kept": 0,
-      "price": 15,
-      "col": 8,
-      "row": 1,
-      "board_cell": [
-        12,
-        4
-      ],
-      "name": "Normal Card Pack",
-      "options": [
-        {
-          "kind": "card",
-          "value": 3745,
-          "price": 32,
-          "amount": 1.965,
+          "quality": 0,
           "col": 0,
           "row": 0,
           "board_cell": null,
-          "name": "Conveyor card (Drill)",
-          "random_rolls": null
+          "modifiers": []
         },
         {
-          "kind": "card",
-          "value": 3832,
-          "price": 19,
-          "amount": 0.973,
+          "kind": "shape",
+          "value": 20,
+          "amount": 0,
+          "price": 48,
+          "name": "Key",
+          "quality": 0,
           "col": 0,
           "row": 0,
           "board_cell": null,
-          "name": "Splitter card (Shreds)",
-          "random_rolls": null
+          "modifiers": []
         },
         {
-          "kind": "card",
-          "value": 3889,
-          "price": 27,
-          "amount": 76.46,
+          "kind": "scorer",
+          "value": 17,
+          "amount": 0.01417,
+          "price": 24,
+          "name": "Voyager",
+          "quality": 0,
           "col": 0,
           "row": 0,
           "board_cell": null,
-          "name": "Gondola card (Debt)",
-          "random_rolls": null
+          "modifiers": []
+        },
+        {
+          "kind": "shape",
+          "value": 4,
+          "amount": 0,
+          "price": 8,
+          "name": "Circle",
+          "quality": 0,
+          "col": 0,
+          "row": 0,
+          "board_cell": null,
+          "modifiers": []
         }
-      ]
-    },
-    {
-      "kind": "unit",
-      "price": 8,
-      "col": 9,
-      "row": 1,
-      "board_cell": [
-        13,
-        4
       ],
-      "name": "Board Unit"
+      "modifiers": []
     }
   ],
-  "open_pack": null,
+  "toolbox_stash": [],
+  "grid": [
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 11,
+      "y": 3,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 4,
+      "scorer_amount": 0.0,
+      "quality": 0,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 109,
+      "random_rolls": null,
+      "modifiers": []
+    },
+    {
+      "kind": "block",
+      "placed": true,
+      "x": 18,
+      "y": 10,
+      "shape": 0,
+      "effects": [
+        0
+      ],
+      "effect_amounts": {},
+      "scorer": 5,
+      "scorer_amount": 0.0,
+      "quality": 0,
+      "angle": 90,
+      "portal_number": 0,
+      "key_number": 0,
+      "trigger_limit": 1,
+      "trigger_paid": 0,
+      "spin": 0.0,
+      "triggers_left": 1,
+      "portal_uses_left": 0,
+      "fragile_shape": null,
+      "resale_price": 53,
+      "random_rolls": null,
+      "modifiers": []
+    }
+  ],
+  "shop": [],
+  "open_pack": {
+    "kind": "pack",
+    "pack_type": 3,
+    "size": 3,
+    "keep": 2,
+    "kept": 0,
+    "price": 23,
+    "col": 0,
+    "row": 0,
+    "board_cell": null,
+    "name": "Mega Part Pack",
+    "options": [
+      {
+        "kind": "scorer",
+        "value": 33,
+        "amount": 26.66,
+        "price": 26,
+        "name": "Undertaker",
+        "quality": 0,
+        "col": 0,
+        "row": 0,
+        "board_cell": null,
+        "modifiers": []
+      },
+      {
+        "kind": "scorer",
+        "value": 22,
+        "amount": 1.329,
+        "price": 24,
+        "name": "Drill",
+        "quality": 0,
+        "col": 0,
+        "row": 0,
+        "board_cell": null,
+        "modifiers": []
+      },
+      {
+        "kind": "effect",
+        "value": 1,
+        "amount": 96.0,
+        "price": 28,
+        "name": "Bouncy",
+        "quality": 0,
+        "col": 0,
+        "row": 0,
+        "board_cell": null,
+        "modifiers": []
+      },
+      {
+        "kind": "scorer",
+        "value": 18,
+        "amount": 10.362,
+        "price": 32,
+        "name": "Satanic",
+        "quality": 0,
+        "col": 0,
+        "row": 0,
+        "board_cell": null,
+        "modifiers": []
+      },
+      {
+        "kind": "scorer",
+        "value": 16,
+        "amount": 0.906,
+        "price": 17,
+        "name": "Picky",
+        "quality": 0,
+        "col": 0,
+        "row": 0,
+        "board_cell": null,
+        "modifiers": []
+      }
+    ],
+    "modifiers": []
+  },
   "pending_pack_action": null,
   "shop_locked": [],
   "component_purchases": [
     [
+      "scorer",
+      32,
+      1
+    ],
+    [
       "effect",
+      1,
+      1
+    ],
+    [
+      "effect",
+      17,
+      1
+    ],
+    [
+      "shape",
+      13,
+      1
+    ],
+    [
+      "scorer",
       7,
       1
     ]
@@ -399,8 +491,16 @@
   "continue_past_game_over": false,
   "score_chips": 30,
   "score_mult": 4,
-  "last_run_cash_gained": 0,
-  "last_run_cash_breakdown": {},
+  "last_run_cash_gained": 81,
+  "last_run_cash_breakdown": {
+    "base": 20,
+    "interest": 7,
+    "score": 39,
+    "cards": 0,
+    "scorers": 15,
+    "essence": 0,
+    "debt": false
+  },
   "unlocked_cells": [
     [
       12,
@@ -435,7 +535,19 @@
       9
     ],
     [
+      19,
+      6
+    ],
+    [
       17,
+      6
+    ],
+    [
+      19,
+      9
+    ],
+    [
+      10,
       6
     ],
     [
@@ -443,16 +555,20 @@
       5
     ],
     [
+      10,
+      9
+    ],
+    [
       11,
       8
     ],
     [
-      13,
-      5
-    ],
-    [
       16,
       4
+    ],
+    [
+      13,
+      5
     ],
     [
       13,
@@ -523,16 +639,32 @@
       4
     ],
     [
+      19,
+      5
+    ],
+    [
       11,
       7
+    ],
+    [
+      19,
+      8
     ],
     [
       13,
       4
     ],
     [
+      10,
+      5
+    ],
+    [
       11,
       10
+    ],
+    [
+      10,
+      8
     ],
     [
       13,
@@ -603,8 +735,20 @@
       7
     ],
     [
+      19,
+      4
+    ],
+    [
       17,
       10
+    ],
+    [
+      19,
+      7
+    ],
+    [
+      10,
+      4
     ],
     [
       11,
@@ -613,6 +757,10 @@
     [
       11,
       9
+    ],
+    [
+      10,
+      7
     ],
     [
       11,
@@ -659,5 +807,20 @@
       8
     ]
   ],
-  "board_units": 0
+  "board_units": 0,
+  "energy": 3,
+  "level_number": 2,
+  "enemies_defeated": 0,
+  "spent_structures": [
+    [
+      0,
+      17,
+      4
+    ],
+    [
+      0,
+      18,
+      7
+    ]
+  ]
 }

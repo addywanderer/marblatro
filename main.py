@@ -47,10 +47,14 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Quality,
     Rarity,
     Scorer,
     Shape,
+    Structure,
+    Tool,
     Trial,
+    Verb,
     block_price_for,
     card_description,
     card_price_for,
@@ -97,13 +101,16 @@ from rolling import _random_card_scorer  # noqa: F401  the tests roll with it
 from blocks import Block
 from items import (                      # noqa: F401
     CASH_BREAKDOWN,
+    ENERGY_READOUT,
     ActionItem,
     BlockItem,
-    BoardUnitOffer,
     CardItem,
     ItemPack,
+    PassiveItem,
     ResourceOption,
     ScorerToken,
+    StructureItem,
+    ToolItem,
     CashBreakdown,
     _s,
     make_card_item,
@@ -117,6 +124,28 @@ import toolbox                           # noqa: F401
 from toolbox import Toolbox              # noqa: F401
 import marble                            # noqa: F401
 from marble import Marble, _configure_marble_type  # noqa: F401
+import enemies                            # noqa: F401
+from enemies import Enemy                 # noqa: F401
+from components import (  # noqa: F401
+    ARMOURED_HITS,
+    Ability,
+    ENEMY_HP_SHARE,
+    Group,
+    Keyword,
+    Modifiable,
+    Modifier,
+    Quality,
+    STRUCTURES_PER_RUN,
+    PROP_PARTS,
+    ENEMY_NAMES,
+    EnemyKind,
+    LEVELS,
+    Level,
+    Passive,
+    level_for,
+    split_enemy_health,
+    tool_pack_options,
+)
 
 
 # Sound effects are synthesized in their own module; importing it also starts

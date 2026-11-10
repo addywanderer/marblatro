@@ -22,6 +22,7 @@ import sounds
 import ui
 from ui import Popup, ScoreParticle, TrailParticle
 from components import (
+    Modifier,
     CARD_SCORERS,
     COMPONENT_PRICES,
     DEFAULT_DIFFICULTY,
@@ -41,6 +42,7 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Quality,
     Rarity,
     Scorer,
     Shape,
@@ -71,6 +73,7 @@ from config import *
 from blocks import Block
 from items import (
     CASH_BREAKDOWN,
+    ENERGY_READOUT,
     ActionItem,
     BlockItem,
     CardItem,
@@ -236,28 +239,35 @@ class SlotsMixin:
         action stays just "Death". The trigger count shown is the block's
         EFFECTIVE one (see _trigger_limit), so a Concert-boosted block reads one
         higher than its own printed limit while the card is owned.
+
+        An item a golem has combined says so in its name (see Quality): "Golden
+        Lantern", "Diamond Golden Pipe +Chips v2" — the tier is part of what the
+        item IS, so every message about it says it.
         """
         if item is CASH_BREAKDOWN:
             return "Last run cash gained"
+        if item is ENERGY_READOUT:
+            return "Energy"
         if getattr(item, "kind", None) == "pack":
             # A pack is named for its size AND its type: "Jumbo Shape Pack" is
             # exactly what it holds (see ItemPack.name).
             return item.name
         if getattr(item, "kind", None) == "resource":
             return f"{item.name} ({Scorer.name(item.scorer)})"
+        tier = Quality.title(item)
         if isinstance(item, Block) or getattr(item, "kind", None) == "block":
             effects = " ".join(Effect.name(e) for e in item.effects if e != Effect.NONE)
             parts = ([effects, Shape.name(item.shape), Scorer.name(item.scorer)] if effects
                      else [Shape.name(item.shape), Scorer.name(item.scorer)])
             limit = self._trigger_limit(item)
-            return f"{' '.join(parts)} v{limit}"
+            return f"{tier}{' '.join(parts)} v{limit}"
         name = getattr(item, "name", "")
         if getattr(item, "kind", None) == "action" and name:
             version = getattr(item, "version", 1)
-            return f"{name} v{version}" if version >= 2 else name
+            return f"{tier}{name} v{version}" if version >= 2 else f"{tier}{name}"
         if name:
-            return name
-        return f"{Shape.name(item.shape)} {Scorer.name(item.scorer)}"
+            return f"{tier}{name}"
+        return f"{tier}{Shape.name(item.shape)} {Scorer.name(item.scorer)}"
 
     def board_item_at(self, pos):
         """The item standing on the board at a screen position, or None.
@@ -281,7 +291,27 @@ class SlotsMixin:
         """
         if card is None:
             return False
-        return card is self.disabled_card
+        return Modifier.has(card, Modifier.DISABLED)
+
+    @property
+    def disabled_card(self):
+        """The card the Card-cutter trial has silenced for this run.
+
+        It is kept as the card's own DISABLED modifier (see components.Modifier):
+        assigning it marks the card and unmarks the one before, so every reader
+        -- the trial, the sidebar, the save file and the tests -- still talks
+        about "the disabled card" while there is only one place the state lives.
+        """
+        return self._disabled_card
+
+    @disabled_card.setter
+    def disabled_card(self, card):
+        previous = getattr(self, "_disabled_card", None)
+        if previous is not None and previous is not card:
+            Modifier.set_stacks(previous, Modifier.DISABLED, 0)
+        self._disabled_card = card
+        if card is not None:
+            Modifier.set_stacks(card, Modifier.DISABLED, 1)
 
     def _owns_card(self, value):
         """True when the player owns a card of this value, disabled or not.

@@ -34,13 +34,15 @@ BAR_TEXT_Y = _ui_source.BAR_TEXT_Y
 BAR_TEXT_WIDTH = _ui_source.BAR_TEXT_WIDTH
 DECK_BUTTON_RECT = _ui_source.DECK_BUTTON_RECT
 DECK_OVERLAY_BUTTON_RECT = _ui_source.DECK_OVERLAY_BUTTON_RECT
+ENERGY_BAR_RECT = _ui_source.ENERGY_BAR_RECT
+ENERGY_COLOR = _ui_source.ENERGY_COLOR
+MAX_ENERGY = _ui_source.MAX_ENERGY
 BLACK = _ui_source.BLACK
 BLOCK_INTERIOR_COLOR = _ui_source.BLOCK_INTERIOR_COLOR
 BLUE = _ui_source.BLUE
 BORD_WIDTH = _ui_source.BORD_WIDTH
-BOARD_UNIT_COL = _ui_source.BOARD_UNIT_COL
+BOARD_UNIT_BUTTON_RECT = _ui_source.BOARD_UNIT_BUTTON_RECT
 BOARD_UNIT_PRICE = _ui_source.BOARD_UNIT_PRICE
-BOARD_UNIT_ROW = _ui_source.BOARD_UNIT_ROW
 ACTION_UPGRADE_COST = _ui_source.ACTION_UPGRADE_COST
 ACTION_UPGRADE_RECT = _ui_source.ACTION_UPGRADE_RECT
 CARD_COLOR = _ui_source.CARD_COLOR
@@ -102,7 +104,12 @@ ActionItem = _ui_source.ActionItem
 Block = _ui_source.Block
 BlockItem = _ui_source.BlockItem
 CardItem = _ui_source.CardItem
+PassiveItem = _ui_source.PassiveItem
+StructureItem = _ui_source.StructureItem
+ToolItem = _ui_source.ToolItem
 MarbleType = _ui_source.MarbleType
+Modifier = _ui_source.Modifier
+Quality = _ui_source.Quality
 achievements = _ui_source.achievements
 collection = _ui_source.collection
 metagame = _ui_source.metagame
@@ -153,8 +160,13 @@ from components import (
     Card,
     Component,
     Effect,
+    Group,
     Pack,
+    Quality,
     Rarity,
+    Structure,
+    Tool,
+    Passive,
     Scorer,
     Shape,
     Trial,
@@ -432,7 +444,8 @@ def draw_shop_item(screen, item, rect):
               scorer_amount=item.scorer_amount, origin=rect.topleft,
               portal_number=getattr(item, "portal_number", 0),
               key_number=getattr(item, "key_number", 0),
-              effects=getattr(item, "effects", None)), screen)
+              effects=getattr(item, "effects", None),
+              quality=Quality.of(item)), screen)
     elif item.kind == Component.SHAPE:
         draw_block_shape_only(Block(0, 0, shape=item.value, origin=rect.topleft), screen)
     elif item.kind == Component.EFFECT:
@@ -440,6 +453,10 @@ def draw_shop_item(screen, item, rect):
     elif item.kind == Component.SCORER:
         pygame.draw.rect(screen, Scorer.color(item.value), rect)
         pygame.draw.rect(screen, WHITE, rect, 2)
+        # ...and the scorer's own mark on it (see _scorer_art), so the tile says
+        # WHICH scorer it is and not only which colour it is.
+        _blit_icon_art(screen, _scorer_art(item.value), rect.center,
+                       int(min(rect.width, rect.height) * 0.62))
     # COMMENTED OUT with the conditions: a condition component was drawn as a
     # trigger tile (a white face with a mini shape/effect or a letter glyph).
     #
@@ -457,29 +474,312 @@ def draw_shop_item(screen, item, rect):
         draw_resource_option(screen, item, rect)
     elif getattr(item, "kind", None) == "pack":
         draw_pack(screen, item, rect)
-    elif getattr(item, "kind", None) == "unit":
-        draw_board_unit_tile(screen, rect)
+    elif getattr(item, "kind", None) == "structure":
+        draw_structure(screen, item, rect)
+    elif getattr(item, "kind", None) == "tool":
+        draw_tool(screen, item, rect)
+    elif getattr(item, "kind", None) == "passive":
+        draw_passive(screen, item, rect)
+    # A combined item wears its tier (see components.Quality): a frame in the
+    # tier's colour and a gem in the corner, so a golden or diamond item is
+    # picked out of the board at a glance. A block is marked by draw_block,
+    # which draws the item's own face.
+    if getattr(item, "kind", None) != "block":
+        _draw_modifier_marks(screen, rect, item)
 
 
-def draw_board_unit_tile(screen, rect, units=0):
-    """Draw the Board Unit offer: a green tile with an "expand the board" glyph.
+def _draw_modifier_marks(screen, rect, item):
+    """Mark an item with everything riding on it (see components.Modifier).
 
-    A Board Unit is not an item — it is a square of board the player can open —
-    so it wears its own green tile with a plus sign rather than any item art. A
-    badge counts the units already in hand (``units``), so the tile doubles as
-    the readout the old shop panel's tile carried.
+    Two halves, because they answer different questions: the TIER gets the frame
+    and the gem (a golem's work is worth something, see _draw_quality_mark), and
+    the modifiers that run on a clock get a small plate in the bottom-left --
+    "F3" for three stacks of forgotten, "T" for a temporary item -- so a board
+    reads what has been done to an item at a glance.
     """
-    pygame.draw.rect(screen, (45, 95, 55), rect)
-    pygame.draw.rect(screen, WHITE, rect, 2)
-    pygame.draw.rect(screen, (255, 255, 255), (rect.x + 9, rect.y + 7, 22, 26), 1)
-    pygame.draw.line(screen, (255, 255, 255), (rect.centerx, rect.y + 10),
-                     (rect.centerx, rect.y + 30), 2)
-    pygame.draw.line(screen, (255, 255, 255), (rect.x + 12, rect.centery),
-                     (rect.x + 28, rect.centery), 2)
-    if units:
-        badge = font("tiny").render(f"x{units}", True, YELLOW)
-        screen.blit(badge, badge.get_rect(bottomright=(rect.right - 3,
-                                                       rect.bottom - 3)))
+    _draw_quality_mark(screen, rect, Quality.of(item))
+    plates = [(Modifier.FORGOTTEN, f"F{Modifier.stacks(item, Modifier.FORGOTTEN)}"),
+              (Modifier.TEMPORARY, "T")]
+    x = rect.left + 3
+    for modifier, label in plates:
+        colour = Modifier.color(modifier)
+        if not colour or not Modifier.has(item, modifier):
+            continue
+        plate = pygame.Rect(x, rect.bottom - 12, 14 if len(label) > 1 else 10, 9)
+        pygame.draw.rect(screen, colour, plate, border_radius=2)
+        pygame.draw.rect(screen, (30, 30, 30), plate, 1, border_radius=2)
+        text = font("tiny").render(label, True, (25, 25, 25))
+        screen.blit(text, text.get_rect(center=plate.center))
+        x += plate.width + 2
+
+
+def _draw_quality_mark(screen, rect, quality):
+    """Mark a golem-combined item with its tier's colour and a gem.
+
+    Nothing is drawn for a plain item, so ordinary tiles look exactly as they
+    always did; a golden or diamond one wears the colour of its tier on an inset
+    frame plus a small gem in its top-right corner (see components.Quality).
+    """
+    color = Quality.color(quality)
+    if color is None:
+        return
+    pygame.draw.rect(screen, color, rect.inflate(-4, -4), 2)
+    size = max(4, min(rect.width, rect.height) // 6)
+    center = (rect.right - size - 4, rect.top + size + 4)
+    gem = [(center[0], center[1] - size), (center[0] + size, center[1]),
+           (center[0], center[1] + size), (center[0] - size, center[1])]
+    pygame.draw.polygon(screen, color, gem)
+    pygame.draw.polygon(screen, (30, 30, 30), gem, 1)
+
+
+def draw_passive(screen, item, rect, label=True):
+    """Draw an unplayable item: a plain slab with its glyph and its word.
+
+    It has no verb and no trigger, so its tile says the one thing that matters:
+    UNPLAYABLE (see components.Keyword).
+    """
+    color = Passive.COLORS.get(item.value, (140, 140, 140))
+    pygame.draw.rect(screen, color, rect, border_radius=2)
+    pygame.draw.rect(screen, (40, 40, 40), rect, 2, border_radius=2)
+    icon_size = int(min(rect.width, rect.height) * 0.6)
+    centre = (rect.centerx, rect.centery - (4 if label else 0))
+    if not _blit_icon_art(screen, _passive_art(item.value), centre, icon_size):
+        glyph = font("glyph").render(Passive.GLYPHS.get(item.value, "?"), True,
+                                     (30, 30, 30))
+        screen.blit(glyph, glyph.get_rect(center=centre))
+    if label:
+        text = font("tiny").render("PASSIVE", True, (30, 30, 30))
+        screen.blit(text, text.get_rect(midbottom=(rect.centerx, rect.bottom - 2)))
+
+
+def draw_structure(screen, item, rect):
+    """Draw a structure: a solid block of its own material, with its ICON.
+
+    A structure is not a component or a card — it is a THING on the board that a
+    tool opens (see Structure) — so it wears its material (earth, water, glass)
+    and a small drawing of what it is (see _draw_structure_icon), and the tool
+    that opens it is named on hover (see Game._describe_item).
+    """
+    color = Structure.COLORS.get(item.value, (90, 90, 90))
+    pygame.draw.rect(screen, color, rect, border_radius=4)
+    pygame.draw.rect(screen, WHITE, rect, 2, border_radius=4)
+    if not _draw_structure_icon(screen, item.value, rect):
+        # No art for this value (a save from a build that had another kind): the
+        # tile's glyph still says something rather than leaving a blank face.
+        glyph = font("glyph").render(Structure.GLYPHS.get(item.value, "?"),
+                                     True, WHITE)
+        screen.blit(glyph, glyph.get_rect(center=rect.center))
+
+
+def _draw_structure_icon(screen, value, rect):
+    """Draw a structure's own icon inside its tile.
+
+    User request: "give each structure an icon." Every structure used to wear
+    one geometric glyph; each now has a little drawing of its own — a hole, a
+    pool, a mirror, a clay figure, cut stone, a glimmering shrine, a vault door,
+    a workbench, stacked crates, shelves of books, drawers, a coin, a tear in the
+    world, a shed — drawn in pale ink over the tile's material, so a board of
+    structures reads at a glance and two of them are never confused.
+
+    Returns True when it drew something, and False for a value it has no art for
+    (draw_structure then falls back to the glyph).
+    """
+    if rect.width < 10 or rect.height < 10:
+        return False
+    light = (240, 242, 246)
+    mid = (196, 202, 210)
+    ink = (44, 42, 40)
+    x, y, w, h = rect.x, rect.y, rect.width, rect.height
+    u = max(2, min(w, h) // 8)          # one unit of the drawing
+    cx, cy = rect.center
+
+    def box(gx, gy, gw, gh, colour, radius=0):
+        pygame.draw.rect(screen, colour,
+                         pygame.Rect(int(gx), int(gy), int(gw), int(gh)),
+                         border_radius=radius)
+
+    def ring(gx, gy, r, colour, thickness=1):
+        pygame.draw.circle(screen, colour, (int(gx), int(gy)), int(r), thickness)
+
+    def disc(gx, gy, r, colour):
+        pygame.draw.circle(screen, colour, (int(gx), int(gy)), int(r))
+
+    if value == Structure.PIT:
+        # A hole in the ground, with a rim of dug earth and a stone falling in.
+        disc(cx, cy + u // 2, u * 2.6, ink)
+        ring(cx, cy + u // 2, u * 2.6, mid, max(1, u // 2))
+        disc(cx - u, cy - u, max(1, u // 2), mid)
+        disc(cx + u * 2, cy - u - u // 2, max(1, u // 3), mid)
+        return True
+    if value == Structure.CRYSTAL_POOL:
+        # Still water: a wide pool with two crystals glinting on it.
+        box(x + u * 2, cy - u, w - u * 4, u * 3, mid, radius=u)
+        box(x + u * 2, cy - u, w - u * 4, u, light, radius=u)
+        for px, py, size in ((cx - u * 2, cy + u // 2, u),
+                             (cx + u * 2, cy, max(2, u * 3 // 4))):
+            pygame.draw.polygon(screen, light,
+                                [(px, py - size), (px + size, py),
+                                 (px, py + size), (px - size, py)])
+        return True
+    if value == Structure.MIRROR:
+        # A looking glass: a silvered oval in a frame, with a shine across it.
+        box(cx - u * 2, y + u * 2, u * 4, h - u * 4, mid, radius=u * 2)
+        box(cx - u, y + u * 3, u * 2, h - u * 6, light, radius=u)
+        pygame.draw.line(screen, light, (cx - u * 2, y + u * 3),
+                         (cx - u, y + u * 2), 2)
+        return True
+    if value == Structure.GOLEM:
+        # A figure of river clay: a head, a body and two heavy arms.
+        disc(cx, y + u * 2, u * 1.4, mid)
+        box(cx - u * 1.5, y + u * 3, u * 3, h - u * 5, mid, radius=u)
+        box(cx - u * 3, y + u * 4, u, u * 3, mid, radius=u // 2)
+        box(cx + u * 2, y + u * 4, u, u * 3, mid, radius=u // 2)
+        disc(cx - u // 2, y + u * 2, max(1, u // 3), ink)
+        disc(cx + u // 2, y + u * 2, max(1, u // 3), ink)
+        return True
+    if value == Structure.QUARRY:
+        # Cut stone: three stepped blocks of a quarry face.
+        box(x + u, y + u * 4, u * 3, u * 3, mid)
+        box(x + u * 4, y + u * 3, u * 3, u * 4, light, )
+        box(x + u * 2, y + u, u * 4, u * 2, mid)
+        pygame.draw.line(screen, ink, (x + u * 2, y + u * 3),
+                         (x + u * 6, y + u * 3), 1)
+        return True
+    if value == Structure.SHRINE:
+        # An altar with something glimmering above it.
+        box(cx - u * 2, y + h - u * 3, u * 4, u * 2, mid, radius=u // 2)
+        pygame.draw.polygon(screen, light,
+                            [(cx, y + u), (cx + u, y + u * 3),
+                             (cx, y + u * 5), (cx - u, y + u * 3)])
+        ring(cx, y + u * 3, u * 2, light)
+        return True
+    if value == Structure.VAULT:
+        # A strongbox door: a round wheel with four spokes on a heavy frame.
+        box(x + u, y + u, w - u * 2, h - u * 2, mid, radius=u // 2)
+        ring(cx, cy, u * 2, ink, 2)
+        for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+            pygame.draw.line(screen, ink, (cx, cy),
+                             (cx + dx * u * 2, cy + dy * u * 2), 2)
+        disc(cx, cy, max(1, u // 2), light)
+        return True
+    if value == Structure.WORKBENCH:
+        # A bench top on two legs, with a hammer lying on it.
+        box(x + u, cy, w - u * 2, u, light)
+        box(x + u, cy + u, u, u * 3, mid)
+        box(x + w - u * 2, cy + u, u, u * 3, mid)
+        box(cx - u * 2, cy - u * 2, u * 2, u, light)
+        box(cx + u // 2, cy - u * 3, u // 2, u * 3, mid)
+        return True
+    if value == Structure.DEPOT:
+        # Crates stacked: two rows of two, with slats.
+        for gx in (x + u, x + u * 4):
+            for gy in (y + u * 2, y + u * 5):
+                box(gx, gy, u * 3, u * 2, mid)
+                pygame.draw.line(screen, ink, (gx, gy + u),
+                                 (gx + u * 3, gy + u), 1)
+        return True
+    if value == Structure.LIBRARY:
+        # Shelves of books: a shelf line with three spines on it.
+        box(x + u, y + u * 2, w - u * 2, u, mid)
+        for index, height in enumerate((u * 4, u * 5, u * 3)):
+            left = x + u * 2 + index * u * 2
+            box(left, y + h - u * 2 - height, u * 1.5, height, light)
+        box(x + u, y + h - u * 2, w - u * 2, u, mid)
+        return True
+    if value == Structure.CABINET:
+        # A chest of drawers: three drawers with a knob each.
+        box(x + u * 2, y + u, w - u * 4, h - u * 2, mid, radius=u // 2)
+        for index in range(3):
+            top = y + u * 2 + index * u * 2
+            pygame.draw.line(screen, ink, (x + u * 2, top),
+                             (x + w - u * 2, top), 1)
+            disc(cx, top - u, max(1, u // 2), light)
+        return True
+    if value == Structure.MINT:
+        # A stamped coin, with the press mark on it.
+        disc(cx, cy, u * 3, light)
+        ring(cx, cy, u * 3, ink, 2)
+        ring(cx, cy, u * 2, ink)
+        box(cx - u // 2, cy - u, u, u * 2, ink)
+        return True
+    if value == Structure.RIFT:
+        # A tear in the world: a bright seam between two dark jaws.
+        pygame.draw.polygon(screen, ink,
+                            [(cx - u * 2, y + u), (cx, cy - u),
+                             (cx - u, cy + u), (cx - u * 2, y + h - u),
+                             (cx + u, cy + u), (cx + u * 2, y + u * 2)])
+        pygame.draw.line(screen, light, (cx, cy - u * 2), (cx, cy + u * 2), 2)
+        return True
+    if value == Structure.SHED:
+        # A little shed: a pitched roof over a door.
+        pygame.draw.polygon(screen, light,
+                            [(cx, y + u), (x + w - u, cy), (x + u, cy)])
+        box(x + u * 2, cy, w - u * 4, h - u * 4, mid)
+        box(cx - u, cy + u, u * 2, h - u * 5, ink)
+        return True
+    return False
+
+
+def draw_tool(screen, item, rect, label=True):
+    """Draw a tool: a slim tile in its own colour with its verb's letter.
+
+    A tool never leaves the player's hand, so it is drawn small and plain — a
+    working tool rather than a prize — with its glyph (d / r / f / b) and a
+    corner mark for the verb it applies (see Tool / Verb).
+    """
+    color = Tool.COLORS.get(item.value, (110, 110, 110))
+    pygame.draw.rect(screen, color, rect, border_radius=3)
+    pygame.draw.rect(screen, WHITE, rect, 1, border_radius=3)
+    icon_size = int(min(rect.width, rect.height) * 0.62)
+    centre = (rect.centerx, rect.centery - (3 if label else 0))
+    if not _blit_icon_art(screen, _tool_art(item.value), centre, icon_size):
+        glyph = font("glyph").render(Tool.GLYPHS.get(item.value, "?"), True, WHITE)
+        screen.blit(glyph, glyph.get_rect(center=centre))
+    if label:
+        text = font("tiny").render(Tool.name(item.value).upper()[:6], True, WHITE)
+        screen.blit(text, text.get_rect(midbottom=(rect.centerx, rect.bottom - 2)))
+
+
+def board_unit_button_label(game):
+    """The text on the BOARD UNIT button: its price, and the units in hand."""
+    price = game._board_unit_price()
+    units = getattr(game, "board_units", 0)
+    return f"BOARD UNIT ${price}" if not units else f"BOARD UNIT ${price} x{units}"
+
+
+def draw_board_unit_button(game):
+    """Draw the bar's BOARD UNIT button: buy one unit for a square of board.
+
+    A Board Unit is not an item the player owns — it is counted in
+    ``Game.board_units`` and spent by clicking a locked square — so it needs no
+    art and no shelf slot: it is a button in the top bar (user request: "make
+    board slots a button in the top bar instead of a shop item"). The label
+    carries the price and the units already in hand, so the button is also the
+    readout.
+    """
+    rect = BOARD_UNIT_BUTTON_RECT
+    price = game._board_unit_price()
+    affordable = game.cash >= price
+    hovered = rect.collidepoint(pygame.mouse.get_pos())
+    pygame.draw.rect(game.screen,
+                     (45, 95, 55) if not hovered else (58, 118, 70),
+                     rect, border_radius=4)
+    pygame.draw.rect(game.screen, WHITE, rect, 1, border_radius=4)
+    # The glyph the old tile wore: a plus inside a square, "one square of board".
+    glyph = pygame.Rect(rect.x + 8, rect.y + 7, 18, 18)
+    pygame.draw.rect(game.screen, WHITE, glyph, 1)
+    pygame.draw.line(game.screen, WHITE, (glyph.centerx, glyph.y + 3),
+                     (glyph.centerx, glyph.bottom - 3), 1)
+    pygame.draw.line(game.screen, WHITE, (glyph.x + 3, glyph.centery),
+                     (glyph.right - 3, glyph.centery), 1)
+    label = game.tiny_font.render(board_unit_button_label(game), True,
+                                  WHITE if affordable else RED)
+    game.screen.blit(label, (glyph.right + 6, rect.centery - 2
+                             - label.get_height() // 2))
+    if game.board_units:
+        count = game.tiny_font.render(f"x{game.board_units}", True, YELLOW)
+        game.screen.blit(count, count.get_rect(bottomright=(rect.right - 3,
+                                                            rect.bottom - 3)))
 
 
 def draw_resource_option(screen, option, rect):
@@ -510,10 +810,16 @@ def draw_pack_bundle(screen, pack_type, rect):
     colour = Pack.color(pack_type)
     screen.fill((38, 38, 44), rect)
     pygame.draw.rect(screen, colour, rect, 3)
+    # What the pack HOLDS, drawn on the box itself (see _build_pack_art): the
+    # type's letter used to sit here. It goes UNDER the band, so the band still
+    # runs across the bundle as a strap and the pips still land on it.
+    icon_size = int(min(rect.width, rect.height) * 0.62)
+    if not _blit_icon_art(screen, _pack_art(pack_type),
+                          (rect.centerx, rect.centery), icon_size):
+        glyph = font("tile").render(Pack.glyph(pack_type), True, WHITE)
+        screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.top + 11)))
     band = pygame.Rect(rect.x + 2, rect.centery - 3, rect.width - 4, 7)
     screen.fill(colour, band)
-    glyph = font("tile").render(Pack.glyph(pack_type), True, WHITE)
-    screen.blit(glyph, glyph.get_rect(center=(rect.centerx, rect.top + 11)))
     return band
 
 
@@ -636,11 +942,12 @@ def draw_pack_overlay(game):
             text = font("tiny").render(line, True, (235, 235, 235))
             game.screen.blit(text, text.get_rect(midtop=(rect.centerx, y)))
             y += text.get_height() + 1
-        rows = game._describe_item(option)
+        # The option's own line — never the group's, which the info box shows as
+        # its own box (see Game._describe_item_rows) — WRAPPED into the cell
+        # rather than cut at a fixed number of characters: a hard cut runs past
+        # the cell's edge (and over its neighbours) and reads as a different item.
+        _group_row, rows = game._describe_item_rows(option)
         if rows:
-            # The option's own line, WRAPPED into the cell rather than cut at a
-            # fixed number of characters: a hard cut runs past the cell's edge
-            # (and over its neighbours) and reads as a different item.
             for line in game._wrap_text(rows[-1][1], font("tiny"),
                                         rect.width - 10)[:2]:
                 text = font("tiny").render(line, True, (170, 170, 180))
@@ -932,6 +1239,19 @@ def _build_action_art(action):
         for y in (14, 25):              # the side edges, dashed
             r(5, y, 3, 9)
             r(32, y, 3, 9)
+    elif action == Action.CLEANSING:          # a magnitude, scaled up
+        r(3, 25, 9, 12)                 # a part's magnitude...
+        r(15, 16, 9, 21)                # ...raised a step...
+        r(27, 6, 9, 31)                 # ...and raised again
+    elif action == Action.LANTERN:            # a lantern, lit
+        # A hanging lamp: the ring, the cap, the glass body drawn as an OUTLINE
+        # (so the flame shows through it) and the base. The card draws items out
+        # of the dark, so the flame is the point of the picture.
+        c(20, 4, 3, 2)                  # the hanging ring
+        r(13, 7, 14, 3)                 # cap
+        rr(10, 11, 20, 20, 3)           # the glass body
+        r(8, 32, 24, 4)                 # base
+        p([(20, 15), (24, 21), (20, 27), (16, 21)])   # the flame
     elif action == Action.FORESIGHT:          # an eye, looking ahead
         # A pointed almond (two crescents meeting at the corners), an iris that
         # touches both lids, and three lashes. Rounded arcs read as a ring or a
@@ -944,6 +1264,49 @@ def _build_action_art(action):
         l(9, 9, 6, 3, 2)                # lashes
         l(20, 4, 20, 1, 2)
         l(31, 9, 34, 3, 2)
+    elif action == Action.EYEBALL:            # a whole eyeball, ball and all
+        # The Eyeball draws a card out of the deck, so the picture is the organ
+        # itself rather than Foresight's flat almond: a filled ball with the
+        # iris and pupil CUT out of it, and three veins running back from it,
+        # which is what tells the two eyes apart at tile size.
+        c(20, 20, 14)                   # the ball
+        punch_circle(20, 20, 8)         # the iris...
+        c(20, 20, 4)                    # ...its rim, drawn back in...
+        punch_circle(20, 20, 2)         # ...and the pupil, a hole
+        l(2, 6, 8, 12, 2)               # veins trailing off the ball
+        l(38, 6, 32, 12, 2)
+        l(2, 32, 8, 27, 2)
+    elif action == Action.DEEP_POCKETS:       # a coat with full pockets
+        # A coat: shoulders, two lapels and a pocket on each side bulging with
+        # what is inside, plus a coin spilling out of one — the card buys a pack
+        # by giving up a structure.
+        p([(12, 6), (28, 6), (36, 36), (4, 36)])    # the coat's body
+        l(20, 6, 20, 36, 2)             # its front opening
+        r(6, 22, 10, 11)                # pocket (left)...
+        c(11, 24, 3)                    # ...with something in it
+        r(24, 22, 10, 11)               # pocket (right)...
+        c(29, 24, 3)
+        c(20, 15, 3)                    # a button
+    elif action == Action.NASTY_COCKTAIL:     # a cocktail glass, something in it
+        # A martini glass with a dubious drink in it and two things sticking
+        # out: the card's strength is the modifiers riding on it, so it is
+        # drawn as a drink with extras in it.
+        p([(6, 8), (34, 8), (20, 24)])  # the bowl
+        l(20, 24, 20, 33, 3)            # the stem
+        l(12, 34, 28, 34, 3)            # the foot
+        l(20, 12, 12, 3, 2)             # a straw, at an angle
+        c(15, 6, 2)                     # an olive on the rim
+        punch_circle(20, 14, 2)         # a bubble in the drink
+    elif action == Action.REROLL:             # a die, ready to be rolled again
+        # The card turns a structure into a random other one, so the picture is
+        # the thing that decides it: a solid die with its pips cut out, which
+        # no other action wears (Deja Vu's loop is an arrow, not a die).
+        r(4, 4, 32, 32)                 # the die itself
+        punch_circle(13, 13, 3)         # its pips, cut out of it
+        punch_circle(27, 13, 3)
+        punch_circle(20, 20, 3)
+        punch_circle(13, 27, 3)
+        punch_circle(27, 27, 3)
     return art
 
 
@@ -1934,6 +2297,28 @@ def _build_whole_card_art(card):
         # The marble, passing through, with the tick of its motion behind it.
         c(27, 25, 6)
         l(19, 31, 25, 31, 2)
+    elif card == Card.TRASH_CAN:              # a bin, lid on, ribs showing
+        # A tapered bin: the lid across the top, the base narrower than the
+        # brim, and two ribs down the body. The card pays for what the run
+        # threw away, so the picture is the thing things are thrown into.
+        r(5, 9, 30, 4)                  # lid
+        r(16, 4, 8, 3)                  # handle
+        l(9, 15, 12, 34, 3)             # body, left side
+        l(31, 15, 28, 34, 3)            # body, right side
+        l(11, 34, 29, 34, 3)            # base
+        l(16, 18, 17, 30, 2)            # ribs
+        l(24, 18, 23, 30, 2)
+    elif card == Card.SMELLY_SOCKS:           # a pair of socks, and the stink
+        # Two socks (a leg bending into a foot each) with stink lines rising off
+        # them: the card pays chips and mult every run, and the smell is the
+        # cost it charges. The pair is offset so it reads as two socks rather
+        # than one shape at icon size.
+        p([(5, 18), (14, 18), (14, 31), (20, 31), (20, 36), (5, 36)])
+        p([(18, 14), (27, 14), (27, 27), (33, 27), (33, 32), (18, 32)])
+        l(8, 12, 8, 7, 2)               # stink, off the left sock
+        l(8, 7, 12, 4, 2)
+        l(23, 9, 23, 5, 2)              # stink, off the right sock
+        l(23, 5, 27, 2, 2)
     return art
 
 
@@ -1995,6 +2380,371 @@ def _blit_icon_art(surface, art, center, size):
 #     """Blit a named condition's name-based icon (scaled) onto ``surface``."""
 #     return _blit_icon_art(surface, _named_condition_art(condition),
 #                           center, size)
+
+
+def _cached_item_art(key, build):
+    """The cached 40x40 art for one item value, built on first use."""
+    art = _ICON_ART_CACHE.get(key)
+    if art is None:
+        art = build()
+        _ICON_ART_CACHE[key] = art
+    return art
+
+
+def _tool_art(tool):
+    """The 40x40 icon art for a tool, or None for a value with no art."""
+    if tool not in Tool.NAMES:
+        return None
+    return _cached_item_art(("tool", tool), lambda: _build_tool_art(tool))
+
+
+def _build_tool_art(tool):
+    """Draw a tool's icon: what the tool IS, not its verb's letter.
+
+    A tool used to wear one letter (d / r / f / b / k / m). Each now shows its
+    own picture -- a spade, a torch, a screwdriver, a hammer, a brick and a lit
+    match -- drawn in WHITE because a tool's tile is a saturated colour (see
+    draw_tool).
+    """
+    art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+    c, r, rr, l, p, _arc = _icon_art_drawers(art, WHITE)
+
+    def punch(x, y, w, h):
+        pygame.draw.rect(art, (0, 0, 0, 0), (x, y, w, h))
+
+    if tool == Tool.SHOVEL:                   # a spade: grip, shaft, blade
+        r(12, 2, 16, 4)                       # the grip
+        r(18, 6, 4, 13)                       # the shaft
+        p([(6, 19), (34, 19), (34, 25), (20, 38), (6, 25)])   # the blade
+        punch(18, 23, 4, 9)                   # the blade's slot
+    elif tool == Tool.FLASHLIGHT:             # a torch throwing a cone of light
+        r(3, 15, 9, 10)                       # the body
+        p([(12, 11), (21, 11), (21, 29), (12, 29)])   # the head
+        p([(22, 14), (37, 4), (37, 36), (22, 26)])    # the beam
+    elif tool == Tool.SCREWDRIVER:            # a handle, a shaft, a flat tip
+        pygame.draw.rect(art, WHITE, (12, 2, 16, 14), border_radius=5)
+        l(20, 16, 20, 32, 4)                  # the shaft
+        r(15, 32, 10, 6)                      # the tip
+    elif tool == Tool.HAMMER:                 # a hammer with a claw
+        r(5, 6, 22, 10)                       # the head
+        p([(27, 6), (37, 11), (27, 16)])      # the claw
+        l(16, 16, 16, 37, 5)                  # the handle
+    elif tool == Tool.BRICK:                  # a brick, its mortar punched out
+        r(4, 11, 32, 18)
+        punch(4, 19, 32, 3)                   # the course line
+        punch(15, 11, 3, 8)                   # a joint above the course
+        punch(26, 22, 3, 7)                   # a joint below it
+    elif tool == Tool.MATCH:                  # a match, its head alight
+        l(13, 21, 27, 37, 3)                  # the stick
+        c(12, 15, 6)                          # the head
+        l(4, 7, 1, 4, 2)                      # sparks
+        l(19, 4, 22, 1, 2)
+        l(4, 13, 1, 11, 2)
+    elif tool == Tool.GLOWSTICK:              # a bent tube, snapping bright
+        l(9, 32, 27, 14, 6)                   # the tube
+        c(29, 12, 6)                          # the lit end
+        l(16, 6, 13, 2, 2)                    # rays
+        l(36, 22, 39, 20, 2)
+        l(33, 4, 33, 1, 2)
+    elif tool == Tool.PRY_BAR:                # a bar with a hooked claw
+        l(13, 33, 30, 9, 5)                   # the shaft
+        p([(30, 9), (38, 3), (36, 12), (32, 15)])   # the hook
+        p([(13, 33), (7, 39), (4, 34), (9, 28)])    # the wedge
+    elif tool == Tool.CHISEL:                 # a bevelled blade on a handle
+        p([(10, 4), (30, 4), (25, 20), (15, 20)])   # the blade
+        r(17, 20, 6, 6)                       # the neck
+        pygame.draw.rect(art, WHITE, (12, 26, 16, 12), border_radius=4)
+        l(15, 8, 25, 8, 2)                    # the bevel
+    elif tool == Tool.GILDING_CLOTH:          # a folded cloth and a sparkle
+        p([(3, 30), (10, 20), (19, 26), (28, 16), (36, 22), (36, 34), (3, 34)])
+        p([(28, 3), (30, 10), (37, 12), (30, 14), (28, 21), (26, 14),
+           (19, 12), (26, 10)])               # the shine
+    elif tool == Tool.WRECKING_BAR:           # a heavy bar splitting a wall
+        l(10, 36, 26, 8, 6)                   # the bar
+        p([(26, 8), (36, 2), (37, 12), (30, 16)])   # the split claw
+        l(4, 8, 9, 12, 2)                     # cracks in what it hit
+        l(9, 12, 4, 17, 2)
+        l(2, 16, 7, 19, 2)
+    elif tool == Tool.MULTI_TOOL:             # one handle, three tools out
+        pygame.draw.rect(art, WHITE, (17, 22, 6, 16), border_radius=3)
+        p([(20, 4), (26, 20), (14, 20)])      # a blade
+        l(30, 8, 24, 20, 3)                   # a screwdriver
+        l(8, 12, 16, 20, 3)                   # a saw
+        c(20, 20, 4)                          # the pivot
+    elif tool == Tool.DIRT:                   # a lump of soil, clods and all
+        p([(3, 32), (8, 20), (16, 15), (25, 18), (33, 25), (37, 32)])
+        c(12, 27, 3)                          # clods
+        c(24, 24, 3)
+        c(30, 29, 2)
+    elif tool == Tool.DRILL:                  # a drill body over its bit
+        pygame.draw.rect(art, WHITE, (6, 8, 20, 12), border_radius=3)
+        r(26, 11, 8, 6)                       # the chuck
+        l(20, 20, 20, 34, 4)                  # the bit
+        p([(16, 34), (24, 34), (20, 38)])     # its point
+        l(9, 23, 15, 27, 3)                   # the handle
+    elif tool == Tool.PICKAXE:                # a curved head on a shaft
+        _arc(4, 2, 32, 26, 20, 160, 5)        # the pick head
+        l(20, 12, 20, 37, 4)                  # the handle
+    elif tool == Tool.SPARK:                  # a struck spark
+        p([(20, 3), (24, 16), (37, 20), (24, 24), (20, 37), (16, 24),
+           (3, 20), (16, 16)])
+        l(6, 6, 2, 2, 2)                      # the struck splinters
+        l(34, 6, 38, 2, 2)
+    elif tool == Tool.VODKA:                  # a bottle, neck and label
+        r(17, 2, 6, 8)                        # the neck
+        pygame.draw.rect(art, WHITE, (11, 10, 18, 26), border_radius=4)
+        pygame.draw.rect(art, (0, 0, 0, 0), (14, 18, 12, 6))   # the label gap
+    return art
+
+
+def _passive_art(passive):
+    """The 40x40 icon art for a passive item, or None for a value with no art."""
+    if passive not in Passive.NAMES:
+        return None
+    return _cached_item_art(("passive", passive),
+                            lambda: _build_passive_art(passive))
+
+
+def _build_passive_art(passive):
+    """Draw a passive item's icon: a poured slab, aggregate and all.
+
+    Black ink, because a passive's tile is the pale grey of its material (see
+    draw_passive).
+    """
+    art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+    c, r, rr, l, p, _arc = _icon_art_drawers(art)
+    if passive == Passive.CONCRETE:
+        rr(4, 9, 32, 22, 3)                   # the slab
+        c(12, 17, 2)                          # the aggregate
+        c(27, 15, 2)
+        c(19, 25, 2)
+        c(30, 24, 1)
+        l(8, 21, 14, 26, 2)                   # a crack across it
+        l(14, 26, 17, 22, 2)
+    return art
+
+
+def _pack_art(pack_type):
+    """The 40x40 icon art for a pack type, or None for a value with no art."""
+    if pack_type not in Pack.NAMES:
+        return None
+    return _cached_item_art(("packart", pack_type),
+                            lambda: _build_pack_art(pack_type))
+
+
+def _build_pack_art(pack_type):
+    """Draw what a pack HOLDS: the one thing its bundle's letter used to say.
+
+    The bundle and its band are the type's colour (see draw_pack_bundle); the
+    icon on the box says what is inside -- shapes, effects, scorers, parts,
+    blocks, cards, actions, resource points, anything at all, or tools.
+    """
+    art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+    c, r, rr, l, p, _arc = _icon_art_drawers(art, WHITE)
+    if pack_type == Pack.SHAPE:               # a square and a circle
+        rr(5, 8, 15, 15, 3)
+        c(26, 26, 8, 3)
+    elif pack_type == Pack.EFFECT:            # a spark
+        p([(20, 3), (24, 16), (37, 20), (24, 24), (20, 37), (16, 24),
+           (3, 20), (16, 16)])
+    elif pack_type == Pack.SCORER:            # a starred tile
+        p([(20, 3), (31, 14), (35, 28), (20, 37), (5, 28), (9, 14)])
+        c(20, 20, 4)
+    elif pack_type == Pack.PART:              # a gear
+        c(20, 20, 9, 4)
+        r(17, 2, 6, 7)
+        r(17, 31, 6, 7)
+        r(2, 17, 7, 6)
+        r(31, 17, 7, 6)
+    elif pack_type == Pack.BLOCK:             # a block with a corner cut
+        p([(6, 6), (24, 6), (34, 16), (34, 34), (6, 34)])
+        l(6, 6, 24, 6, 3)
+    elif pack_type == Pack.CARD:              # two cards, fanned
+        pygame.draw.rect(art, WHITE, (5, 9, 19, 26), 3, border_radius=3)
+        pygame.draw.rect(art, WHITE, (17, 5, 19, 26), 3, border_radius=3)
+    elif pack_type == Pack.ACTION:            # a lightning bolt
+        p([(24, 3), (9, 22), (18, 22), (14, 37), (31, 16), (21, 16)])
+    elif pack_type == Pack.RESOURCE:          # a cut gem
+        p([(20, 4), (33, 15), (20, 36), (7, 15)])
+        l(7, 15, 33, 15, 2)
+        l(20, 4, 20, 36, 2)
+    elif pack_type == Pack.RANDOM:            # a die
+        rr(6, 6, 28, 28, 3)
+        c(13, 13, 3)
+        c(27, 13, 3)
+        c(20, 20, 3)
+        c(13, 27, 3)
+        c(27, 27, 3)
+    elif pack_type == Pack.TOOL:              # a wrench
+        c(12, 28, 9, 5)
+        p([(9, 21), (3, 15), (3, 5), (11, 3), (16, 9), (21, 15)])
+        l(17, 23, 30, 10, 5)
+        c(31, 8, 6, 4)
+    return art
+
+
+def _scorer_art(scorer):
+    """The 40x40 icon art for a scorer, or None for a value with no art.
+
+    The three run roles have faces of their own (a marble, a checkerboard, a
+    plain tile), so they have no art here.
+    """
+    if scorer not in Scorer.NAMES or scorer in (Scorer.NONE, Scorer.START,
+                                                Scorer.FINISH):
+        return None
+    return _cached_item_art(("scorerart", scorer),
+                            lambda: _build_scorer_art(scorer))
+
+
+def _build_scorer_art(scorer):
+    """Draw a scorer's icon: WHAT IT PAYS, as a small white drawing.
+
+    A scorer component used to be a plain colour tile -- the colour is still its
+    own (see Scorer.color), and the mark on top says which scorer it is, so two
+    scorers that sit near each other in hue are still told apart in the shop, on
+    the board and in the collection.
+    """
+    art = pygame.Surface((GRID_SIZE, GRID_SIZE), pygame.SRCALPHA)
+    c, r, rr, l, p, arc = _icon_art_drawers(art, WHITE)
+    if scorer == Scorer.CHIPS_ADD:            # a coin with a plus
+        c(20, 20, 14, 3)
+        r(18, 11, 4, 18)
+        r(11, 18, 18, 4)
+    elif scorer == Scorer.MULT_ADD:           # an up arrow
+        p([(20, 4), (34, 21), (26, 21), (26, 36), (14, 36), (14, 21), (6, 21)])
+    elif scorer == Scorer.MULT_MUL:           # a times sign
+        l(9, 9, 31, 31, 6)
+        l(31, 9, 9, 31, 6)
+    elif scorer == Scorer.QUICK:              # speed chevrons
+        p([(3, 8), (15, 20), (3, 33), (9, 33), (21, 20), (9, 8)])
+        p([(18, 8), (30, 20), (18, 33), (24, 33), (36, 20), (24, 8)])
+    elif scorer == Scorer.CASH:               # a banknote
+        rr(3, 10, 34, 20, 3)
+        c(20, 20, 6, 3)
+        l(8, 20, 8, 20, 3)
+    elif scorer == Scorer.SHARP:              # a blade
+        p([(6, 31), (30, 5), (36, 11), (12, 37)])
+        l(9, 31, 13, 35, 2)
+    elif scorer == Scorer.PARTS:              # a gear
+        c(20, 20, 9, 4)
+        r(17, 2, 6, 7)
+        r(17, 31, 6, 7)
+        r(2, 17, 7, 6)
+        r(31, 17, 7, 6)
+    elif scorer == Scorer.SHREDS:             # torn strips
+        p([(6, 6), (14, 6), (13, 34), (5, 34)])
+        p([(17, 6), (25, 6), (24, 34), (16, 34)])
+        p([(28, 6), (36, 6), (35, 34), (27, 34)])
+    elif scorer == Scorer.RUBBLE:             # a heap of stones
+        p([(4, 34), (12, 20), (20, 34)])
+        p([(14, 34), (24, 14), (33, 34)])
+        c(30, 30, 4)
+    elif scorer == Scorer.IDEAS:              # a light bulb
+        c(20, 15, 10)
+        r(16, 25, 8, 8)
+        l(17, 36, 23, 36, 3)
+    elif scorer == Scorer.RANDOM:             # a die
+        rr(6, 6, 28, 28, 3)
+        c(13, 13, 3)
+        c(27, 13, 3)
+        c(20, 20, 3)
+        c(13, 27, 3)
+        c(27, 27, 3)
+    elif scorer == Scorer.EFFECTIVE:          # two sparkles
+        p([(16, 3), (19, 15), (31, 18), (19, 21), (16, 33), (13, 21),
+           (1, 18), (13, 15)])
+        p([(30, 24), (32, 31), (38, 33), (32, 35), (30, 41), (28, 35),
+           (22, 33), (28, 31)])
+    elif scorer == Scorer.FRESH:              # a broom
+        l(28, 4, 16, 22, 5)                   # the handle
+        p([(6, 22), (20, 26), (16, 38), (2, 34)])   # the head
+        l(10, 30, 8, 36, 2)                   # bristles
+        l(15, 31, 14, 37, 2)
+    elif scorer == Scorer.PICKY:              # a funnel
+        p([(4, 6), (36, 6), (24, 20), (24, 36), (16, 36), (16, 20)])
+    elif scorer == Scorer.VOYAGER:            # a compass needle
+        p([(20, 4), (26, 20), (20, 36), (14, 20)])
+        c(20, 20, 3)
+    elif scorer == Scorer.SATANIC:            # horns
+        p([(4, 20), (10, 4), (18, 18)])
+        p([(36, 20), (30, 4), (22, 18)])
+        l(8, 26, 32, 26, 4)
+        l(12, 32, 28, 32, 4)
+    elif scorer == Scorer.SUMMIT:             # a mountain
+        p([(2, 34), (16, 8), (26, 24), (32, 14), (38, 34)])
+        l(16, 8, 12, 20, 2)
+    elif scorer == Scorer.AIRBALL:            # a ball on a puff of air
+        c(20, 8, 6)
+        arc(6, 18, 14, 14, 0, 180, 3)
+        arc(20, 18, 14, 14, 0, 180, 3)
+        arc(13, 24, 14, 14, 0, 180, 3)
+    elif scorer == Scorer.SEED:               # a sprout
+        l(20, 20, 20, 38, 3)                  # the stem
+        p([(20, 22), (8, 14), (8, 24)])       # a leaf
+        p([(20, 16), (32, 8), (32, 18)])      # the other leaf
+    elif scorer == Scorer.DRILL:              # a drill bit
+        p([(10, 4), (30, 4), (20, 38)])
+        l(12, 10, 28, 10, 2)
+        l(14, 18, 26, 18, 2)
+        l(16, 26, 24, 26, 2)
+    elif scorer == Scorer.LUCKY:              # a four-leaf clover
+        c(13, 13, 8)
+        c(27, 13, 8)
+        c(13, 27, 8)
+        c(27, 27, 8)
+        l(20, 20, 24, 34, 3)
+    elif scorer == Scorer.ROOMY:              # a grid of squares
+        rr(4, 4, 14, 14, 3)
+        rr(22, 4, 14, 14, 3)
+        rr(4, 22, 14, 14, 3)
+        rr(22, 22, 14, 14, 3)
+    elif scorer == Scorer.RALLY:              # a flag
+        l(10, 4, 10, 37, 4)                   # the pole
+        p([(12, 6), (34, 13), (12, 21)])      # the pennant
+    elif scorer == Scorer.ECHO:               # rings echoing out
+        arc(9, 9, 22, 22, 300, 240, 3)
+        arc(5, 5, 30, 30, 300, 240, 3)
+        c(20, 20, 4)
+    elif scorer == Scorer.POWERLINE:          # a lightning bolt
+        p([(24, 3), (9, 22), (18, 22), (14, 37), (31, 16), (21, 16)])
+    elif scorer == Scorer.FRONTIER:           # a fence
+        l(6, 14, 34, 14, 4)
+        l(6, 26, 34, 26, 4)
+        r(8, 6, 5, 28)
+        r(23, 6, 5, 28)
+    elif scorer == Scorer.GILDED:             # a coin with a shine
+        c(18, 22, 12, 3)
+        p([(30, 4), (33, 12), (40, 15), (33, 18), (30, 26), (27, 18),
+           (20, 15), (27, 12)])
+    elif scorer == Scorer.BOMB:               # a bomb, fuse lit
+        c(18, 24, 12)                         # the body
+        r(22, 8, 4, 8)                        # the neck
+        l(24, 8, 32, 2, 3)                    # the fuse
+        c(33, 3, 3)                           # the spark
+    elif scorer == Scorer.CLUSTER:            # a cluster of blocks
+        r(4, 4, 12, 12)
+        r(24, 4, 12, 12)
+        r(4, 24, 12, 12)
+        r(24, 24, 12, 12)
+        c(20, 20, 4)
+    elif scorer == Scorer.COLOSSUS:           # something far bigger than it looks
+        c(20, 20, 16, 3)
+        c(20, 20, 5)
+        l(2, 20, 38, 20, 1)
+        l(20, 2, 20, 38, 1)
+    elif scorer == Scorer.UNDERTAKER:         # a gravestone
+        p([(8, 36), (8, 14), (20, 4), (32, 14), (32, 36)])
+        l(20, 14, 20, 28, 3)
+        l(13, 20, 27, 20, 3)
+    elif scorer == Scorer.DEBT:               # a coin with a minus
+        c(20, 20, 14, 3)
+        r(11, 18, 18, 4)
+    elif scorer == Scorer.PACKED:             # a bag, full
+        rr(6, 14, 28, 22, 3)
+        arc(12, 2, 16, 20, 0, 180, 3)
+        l(14, 20, 14, 30, 3)
+        l(26, 20, 26, 30, 3)
+    return art
 
 
 def _draw_whole_card_icon(surface, card, center, size):
@@ -2374,6 +3124,9 @@ def _draw_checkerboard(surface, rect, square_size=8):
 
 def draw_block(block, screen, ghost=False):
     """Draw a block: its shape, its effect icon, and its pairing number."""
+    if getattr(block, "is_enemy", False):
+        _draw_enemy(block, screen)
+        return
     if ghost:
         overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT), pygame.SRCALPHA)
         _draw_block_shape(block, overlay, outline=(255, 255, 255, 200), fill=(255, 255, 255, 36))
@@ -2386,8 +3139,10 @@ def draw_block(block, screen, ghost=False):
     # shown by turning the block's interior red instead, so the player can
     # still tell which blocks have run out of triggers.
     # A block with no scoring triggers left is marked used-up: a red border
-    # (borders on) or, when block borders are turned off, a red interior.
-    exhausted = block.triggers_left <= 0
+    # (borders on) or, when block borders are turned off, a red interior. A
+    # level's own PROP is scenery for the whole run, so it never reads as used.
+    exhausted = (block.triggers_left <= 0
+                 and not getattr(block, "is_level_prop", False))
     has_scorer = block.scorer != Scorer.NONE
     # Outline for LINE shapes and the NONE dotted square (RED once used up).
     outline = RED if exhausted else WHITE
@@ -2435,6 +3190,9 @@ def draw_block(block, screen, ghost=False):
     _draw_block_shape(block, screen, outline=outline, fill=fill)
     _draw_block_effect_icon(block, screen)
     _draw_block_pair_number(block, screen)
+    # A block built from a combined item is golden or a diamond, exactly as the
+    # item in the hand is (see components.Quality).
+    _draw_modifier_marks(screen, block.rect, block)
 
 
 def _draw_block_pair_number(block, surface):
@@ -2495,6 +3253,27 @@ def _draw_padlock_glyph(block, surface, color, cut=False):
         return
     pygame.draw.circle(surface, color, ring, 7, 4)
     pygame.draw.rect(surface, color, body, 3)
+
+
+def _draw_enemy(enemy, screen):
+    """Draw an enemy tile: its kind's colour and its remaining health."""
+    if not getattr(enemy, "alive", True):
+        return
+    rect = enemy.rect.copy()
+    rect.inflate_ip(-4, -4)
+    color = enemy.color
+    if enemy.hit_flash > 0:
+        color = tuple(min(255, c + 110) for c in color)
+    pygame.draw.rect(screen, color, rect, border_radius=6)
+    pygame.draw.rect(screen, BLACK, rect, width=2, border_radius=6)
+    # Health bar across the bottom of the tile: the share of its HP left.
+    bar = pygame.Rect(rect.x + 4, rect.bottom - 11, rect.width - 8, 7)
+    pygame.draw.rect(screen, (24, 24, 28), bar)
+    share = 0.0 if enemy.max_hp <= 0 else max(0.0, enemy.hp) / enemy.max_hp
+    if share > 0:
+        filled = bar.copy()
+        filled.width = max(1, int(bar.width * share))
+        pygame.draw.rect(screen, (240, 240, 240), filled)
 
 
 def _draw_block_shape(block, surface, outline, fill):
@@ -2856,6 +3635,18 @@ def _draw_block_effect_icon(block, surface, alpha=255, color=None):
         pygame.draw.polygon(surface, color, [
             _icon_point(block, -6, 1), _icon_point(block, 6, 1),
             _icon_point(block, 6, 9), _icon_point(block, -6, 9)])
+    elif block.effect == Effect.WASTEFUL:
+        # A bin with an arrow dropping into it: the block throws itself away.
+        pygame.draw.line(surface, color, _icon_point(block, -8, -6),
+                         _icon_point(block, 8, -6), 2)
+        pygame.draw.lines(surface, color, False, [
+            _icon_point(block, -6, -4), _icon_point(block, -4, 9),
+            _icon_point(block, 4, 9), _icon_point(block, 6, -4)], 2)
+        pygame.draw.line(surface, color, _icon_point(block, 0, -12),
+                         _icon_point(block, 0, -8), 2)
+        pygame.draw.polygon(surface, color, [_icon_point(block, -3, -9),
+                                             _icon_point(block, 3, -9),
+                                             _icon_point(block, 0, -6)])
     else:
         pygame.draw.circle(surface, color, (cx, cy), 7.5, 3)
 
@@ -3340,13 +4131,7 @@ def draw(game):
             if not game.board_viewport().colliderect(rect):
                 continue
             draw_shop_item(game.screen, item, rect)
-            if getattr(item, "kind", None) == "unit" and game.board_units:
-                # The badge counts the units in hand, so the offer doubles as the
-                # readout the old shop tile carried.
-                badge = game.tiny_font.render(f"x{game.board_units}", True, YELLOW)
-                game.screen.blit(badge, badge.get_rect(
-                    bottomright=(rect.right - 3, rect.bottom - 3)))
-            if game.is_shop_offer(item):
+            if game.is_shop_offer(item) and not game.is_free_structure(item):
                 # A shop offer is not the player's yet: it wears a padlock and
                 # a chain until it is bought (user request: "add a lock-and
                 # chain ui icon over a shop item to show that has not been
@@ -3417,6 +4202,7 @@ def draw(game):
                 angle=game.current_block_angle,
                 portal_number=getattr(game.selected_toolbox_item, "portal_number", 0),
                 key_number=getattr(game.selected_toolbox_item, "key_number", 0),
+                quality=Quality.of(getattr(game, "selected_toolbox_item", None)),
                 origin=(MARBLE_BOX_COORDS[0] - cam[0], MARBLE_BOX_COORDS[1] - cam[1]),
             )
             draw_block(ghost, game.screen, ghost=True)
@@ -3591,7 +4377,7 @@ def draw_trial_options(game, box):
 
 
 def draw_score_display(game):
-    """Draw the chips / mult / total / required score readout in the top bar.
+    """Draw the level / chips / mult / total score readout in the top bar.
 
     The readout used to sit above the board; the board now fills everything
     under the bar, so the score takes a fixed slice of the BAR itself (between
@@ -3600,12 +4386,21 @@ def draw_score_display(game):
     region = SCORE_PANEL_RECT
     cx = region.centerx
 
-    # Required score sits at the top of the readout, with distance and time on
-    # either side of it.
-    required = game.required_font.render(f"{game.required_score}", True, (255, 215, 0))
+    # The LEVEL sits where the required score used to: a run IS a level now, and
+    # its goal is the enemies standing on the board rather than a score target
+    # (see components.LEVELS). Its name and the foes left share the line below.
+    level = game.current_level()
+    remaining = len(game.live_enemies())
+    if remaining:
+        title = f"{level.name}  {remaining} FOE{'' if remaining == 1 else 'S'}"
+        title_color = RED
+    else:
+        title = f"{level.name}  CLEARED"
+        title_color = GREEN
+    required = game.required_font.render(f"{level.number}", True, (255, 215, 0))
     required_rect = required.get_rect(center=(cx, region.top + 26))
     game.screen.blit(required, required_rect)
-    label = game.tiny_font.render("REQUIRED", True, (255, 215, 0))
+    label = game.tiny_font.render("LEVEL", True, (255, 215, 0))
     game.screen.blit(label, label.get_rect(midbottom=(cx, region.top + 6)))
 
     total_distance = sum(getattr(marble, "distance", 0.0) for marble in game.marbles)
@@ -3633,10 +4428,10 @@ def draw_score_display(game):
     game.screen.blit(mult, mult.get_rect(
         midleft=(region.centerx + total_rect.width // 2 + 10, total_rect.centery)))
 
-    # Unique component types touched and each score factor's normalized
-    # (0..1) effect on the exponent: distance, time, and uniqueness.
-    time_good, dist_good, uniq_good, unique_types = game._score_factors()
-    uniq_label = game.small_font.render(f"UNIQUE {unique_types}", True, (255, 215, 0))
+    # The level's name and how many of its enemies are still standing (a level
+    # is cleared by killing them all -- there is no score target any more).
+    time_good, dist_good, uniq_good, _unique_types = game._score_factors()
+    uniq_label = game.small_font.render(title, True, title_color)
     game.screen.blit(uniq_label, uniq_label.get_rect(center=(cx, region.top + 92)))
     factors = game.small_font.render(
         f"D {dist_good:.2f}  T {time_good:.2f}  U {uniq_good:.2f}", True, WHITE)
@@ -3882,8 +4677,9 @@ def draw_bar_readouts(game):
         f"Last run cash gained: {game.last_run_cash_gained}", True, GREEN)
     game.screen.blit(gained_text, last_run_cash_rect(game))
     # COMMENTED OUT: shop rerolling (user request: "comment out shop rerolling
-    # for now"). The button, its label and Game._refresh_shop's click wiring are
-    # parked here so rerolling can come back as it was.
+    # for now"). A reroll is the REROLL CARD now (see Game._action_reroll) —
+    # Fresh and Brainstorm deal it onto the board — so the button stays parked;
+    # it is kept here only so the old refresh can be read back.
     #
     # refresh_btn = SHOP_REFRESH_BUTTON_RECT
     # pygame.draw.rect(game.screen, (60, 60, 160), refresh_btn)
@@ -3903,6 +4699,56 @@ def draw_bar_readouts(game):
             game.screen.blit(line, (rect.x, y))
             y += line.get_height() + 1
     draw_deck_button(game)
+    draw_board_unit_button(game)
+    draw_energy_bar(game)
+
+
+def energy_pip_rects(game=None):
+    """The rects of the bar's energy pips, left to right.
+
+    MAX_ENERGY of them, shared out evenly across ENERGY_BAR_RECT, so the bar and
+    the pips can never disagree about how much energy a run has.
+    """
+    rect = ENERGY_BAR_RECT
+    count = max(1, getattr(game, "max_energy", MAX_ENERGY) or MAX_ENERGY)
+    gap = 6
+    width = (rect.width - gap * (count - 1)) // count
+    return [pygame.Rect(rect.x + index * (width + gap), rect.y, width, rect.height)
+            for index in range(count)]
+
+
+def energy_bar_rect(game=None):
+    """The hover rect of the bar's ENERGY readout: its caption and its pips."""
+    rect = ENERGY_BAR_RECT
+    caption_height = 18  # the tiny-font caption (16px line) + its 2px gap
+    return pygame.Rect(rect.x, rect.y - caption_height, rect.width,
+                       rect.height + caption_height + 4)
+
+
+def energy_bar_label(game):
+    """The text over the energy pips: "ENERGY 2/3"."""
+    return f"ENERGY {getattr(game, 'energy', 0)}/{getattr(game, 'max_energy', MAX_ENERGY)}"
+
+
+def draw_energy_bar(game):
+    """Draw the run's ENERGY: one pip per point, the charged ones lit.
+
+    Energy is what the four TOOLS run on (user request: "using any of
+    flashlight, screwdriver, shovel, or hammer consumes 1 energy"): each pip is
+    an opening the run can still afford, and the bar refills at the start of
+    every run (see Game.reset_run), so a full bar is what the shelf's structures
+    are opened with. Hovering it explains that (see Game._info_target_at).
+    """
+    rect = ENERGY_BAR_RECT
+    caption = game.tiny_font.render(energy_bar_label(game), True, ENERGY_COLOR)
+    game.screen.blit(caption, (rect.x, rect.y - caption.get_height() - 2))
+    energy = getattr(game, "energy", 0)
+    for index, pip in enumerate(energy_pip_rects(game)):
+        charged = index < energy
+        pygame.draw.rect(game.screen, ENERGY_COLOR if charged else (44, 44, 52),
+                         pip, border_radius=3)
+        pygame.draw.rect(game.screen, (12, 12, 16) if charged else (70, 70, 82),
+                         pip, 1, border_radius=3)
 
 
 def deck_button_label(game):
@@ -3910,10 +4756,12 @@ def deck_button_label(game):
 
     The deck is the player's whole collection (user request: "a button in the top
     bar that shows the player's whole deck"), so the button counts every item they
-    own and reports how many of them the current hand was drawn from.
+    own and reports how many of them this run DREW (see Game.drawn_items) — the
+    role blocks, the tools and anything gained during the run stand on the board
+    without having been drawn.
     """
     total = len(game.owned_items())
-    drawn = len(game.hand_items())
+    drawn = len(game.drawn_items())
     return f"DECK {total} ({drawn} drawn)"
 
 
@@ -3980,9 +4828,21 @@ def draw_deck_overlay(game):
     drawn = {id(item) for item in game.hand_items()}
     title = game.font.render(f"DECK — {len(items)} item(s)", True, WHITE)
     screen.blit(title, (panel.x + 16, panel.y + 8))
-    hint = game.tiny_font.render(
-        f"{len(drawn)} drawn onto the board this run — click anywhere to close",
-        True, YELLOW)
+    # While an EYEBALL pick is armed the overlay is a PICKER: the hint says what
+    # to click and how to back out, and every card the action could draw is
+    # framed so the choice is visible without hovering each tile (see
+    # Game.arm_deck_pick).
+    if game.deck_pick_armed():
+        left = game.deck_pick_left
+        hint_text = (f"{game.deck_pick_action.name}: click a card to draw it "
+                     f"({left} pick{'' if left == 1 else 's'} left) — Esc keeps "
+                     f"the card")
+        pickable = game.eyeball_cards()
+    else:
+        hint_text = (f"{len(drawn)} drawn onto the board this run — click "
+                     f"anywhere to close")
+        pickable = []
+    hint = game.tiny_font.render(hint_text, True, YELLOW)
     screen.blit(hint, (panel.x + 16, panel.y + 8 + title.get_height() + 2))
     for index, item in enumerate(items):
         rect = deck_item_rect(index)
@@ -3995,6 +4855,8 @@ def draw_deck_overlay(game):
             wash = pygame.Surface(rect.size, pygame.SRCALPHA)
             wash.fill((0, 0, 0, 110))
             screen.blit(wash, rect.topleft)
+        if any(item is card for card in pickable):
+            pygame.draw.rect(screen, YELLOW, rect.inflate(2, 2), 3)
     close = DECK_OVERLAY_BUTTON_RECT
     pygame.draw.rect(screen, (52, 60, 92), close, border_radius=4)
     pygame.draw.rect(screen, WHITE, close, 1, border_radius=4)
@@ -4012,8 +4874,8 @@ def draw_deck_overlay(game):
 #
 # COMMENTED OUT with the panel, kept as history: the SHOP title, the price
 # labels under each offer, the Hoard hold marker (_toggle_shop_lock has no
-# reroll left to hold an offer against) and the Board Unit tile, which is an
-# offer of its own now (see items.BoardUnitOffer / draw_board_unit_tile).
+# reroll left to hold an offer against). The Board Unit is a BUTTON in the bar
+# now, not a tile (see draw_board_unit_button / BOARD_UNIT_BUTTON_RECT).
 #
 # def draw_shop(game):
 #     """Draw the shop panel, its items, prices, refresh button, and messages."""
@@ -4034,6 +4896,43 @@ def draw_sidebar(game):
     game._draw_item_info(item, source, mouse_pos)
 
 
+# The highlighted box that names an item's group (see _draw_group_badge).
+GROUP_BADGE_PAD = 5         # pixels inside the box, on every side
+GROUP_BADGE_NAME_LINE = 17  # the group's own name
+GROUP_BADGE_LINE = 15       # one wrapped line of what the group is for
+GROUP_BADGE_GAP = 8         # space between the box and the lines around it
+
+# The info box's inner margin: its text starts this far in from the panel's
+# edge, and info_layout's measured width carries one more of them, so the badge
+# spans `rect.width - 3 * INFO_BOX_INSET` (see draw_item_info).
+INFO_BOX_INSET = 12
+
+
+def group_badge(game, item, width):
+    """The text of an item's group box: (name, wrapped lines), or None.
+
+    The name is the group's own, in capitals; the lines are the one line saying
+    what that family is for (see components.Group), wrapped to the box. An item
+    with no group — the top bar's Cash and Energy readouts are not items — has
+    no box at all, so this is None for them.
+    """
+    group = Group.of(item)
+    if group is None:
+        return None
+    name = Group.name(group).upper()
+    lines = game._wrap_text(Group.description(group), game.tiny_font,
+                            max(60, width - 2 * GROUP_BADGE_PAD))
+    return name, lines
+
+
+def group_badge_height(badge):
+    """How many pixels a group box takes, gap included (see group_badge)."""
+    if badge is None:
+        return 0
+    return (2 * GROUP_BADGE_PAD + GROUP_BADGE_NAME_LINE
+            + len(badge[1]) * GROUP_BADGE_LINE + GROUP_BADGE_GAP)
+
+
 def info_layout(game, item, source):
     """Measure an item's info box content.
 
@@ -4044,10 +4943,14 @@ def info_layout(game, item, source):
     (text, kind) pairs where kind is "label" or "body"; hint_lines is the yellow
     suggestion under them, wrapped the same way so a long hint runs onto the
     next line instead of past the box's edge.
+
+    The item's GROUP is not in desc_lines: it is drawn as a highlighted box
+    directly under the name (see _draw_group_badge), and its height is counted
+    here so the box is always big enough for it.
     """
     max_text_width = 240  # a line wider than this wraps onto the next
     name_lines = game._wrap_text(game._item_name(item), game.font, max_text_width)
-    rows = game._describe_item(item)
+    _group_row, rows = game._describe_item_rows(item)
     desc_lines = []
     for label, text in rows:
         desc_lines.append((label, "label"))
@@ -4058,7 +4961,7 @@ def info_layout(game, item, source):
 
     width = max([game.font.size(line)[0] for line in name_lines] or [0])
     width = max(width, max([game.small_font.size(line)[0] for line, _ in desc_lines] or [0]))
-    if hasattr(item, "price"):
+    if getattr(item, "price", 0) > 0:
         width = max(width, game.small_font.size(f"${item.price}")[0])
         total = game._total_price(item)
         if total is not None:
@@ -4071,13 +4974,22 @@ def info_layout(game, item, source):
     height = len(name_lines) * 26
     if getattr(item, "kind", None) in ("card", "action"):
         height += 62  # mini-card/action face (40x52) + gap
-    if hasattr(item, "price"):
+    # The group's box is measured at the width the text above it settled on, so
+    # its own lines can never push the box wider than this.
+    badge = group_badge(game, item, width)
+    if badge is not None:
+        width = max([width] + [game.tiny_font.size(line)[0]
+                               + 2 * GROUP_BADGE_PAD for line in badge[1]]
+                    + [game.small_font.size(badge[0])[0] + 2 * GROUP_BADGE_PAD])
+        width = min(width, max_text_width)
+        height += group_badge_height(badge)
+    if getattr(item, "price", 0) > 0:
         height += 20
         if game._total_price(item) is not None:
             height += 20
     height += len(desc_lines) * 17 + len(rows) * 6  # row text + gaps
     height += len(hint_lines) * 17
-    return width + 12, height, name_lines, desc_lines, hint_lines
+    return width + INFO_BOX_INSET, height, name_lines, desc_lines, hint_lines
 
 
 def info_box_rect(game, item, source, mouse_pos):
@@ -4087,8 +4999,7 @@ def info_box_rect(game, item, source, mouse_pos):
     cursor, clamped to stay fully on-screen.
     """
     width, height, _, _, _ = info_layout(game, item, source)
-    pad = 12
-    rect = pygame.Rect(0, 0, width + 2 * pad, height + 2 * pad)
+    rect = pygame.Rect(0, 0, width + 2 * INFO_BOX_INSET, height + 2 * INFO_BOX_INSET)
     rect.x = mouse_pos[0] - width // 2
     rect.y = mouse_pos[1] + GRID_SIZE
     if rect.right > SCREEN_WIDTH - 8:
@@ -4110,8 +5021,8 @@ def draw_item_info(game, item, source, mouse_pos):
     _, _, name_lines, desc_lines, hint_lines = info_layout(game, item, source)
     pygame.draw.rect(game.screen, panel_fill(game), rect)
     pygame.draw.rect(game.screen, BLACK, rect, 5)
-    x = rect.x + 12
-    y = rect.y + 12
+    x = rect.x + INFO_BOX_INSET
+    y = rect.y + INFO_BOX_INSET
 
     # An owned card/action gets a mini face at the top of the box.
     if getattr(item, "kind", None) in ("card", "action"):
@@ -4120,6 +5031,8 @@ def draw_item_info(game, item, source, mouse_pos):
             draw_card(game.screen, item, face)
         else:
             draw_action(game.screen, item, face)
+        # ...wearing the tier a golem left it at, like its tile on the board.
+        _draw_modifier_marks(game.screen, face, item)
         y += face.height + 10
 
     # The name can be long (every effect + shape + scorer + trigger limit),
@@ -4128,8 +5041,14 @@ def draw_item_info(game, item, source, mouse_pos):
         game.screen.blit(game.font.render(line, True, (255, 215, 0)), (x, y))
         y += 26
 
-    if hasattr(item, "price"):
-        # Original price (without trigger-limit upgrades).
+    # ...and directly under it, the highlighted box naming the item's GROUP
+    # (user request). It spans the width info_layout measured the text against,
+    # which is the rect less three of its inner margins (see INFO_BOX_INSET).
+    y = _draw_group_badge(game, item, x, y, rect.width - 3 * INFO_BOX_INSET)
+
+    if getattr(item, "price", 0) > 0:
+        # Original price (without trigger-limit upgrades). A FREE item (a
+        # structure) has nothing to pay, so it shows no price at all.
         price = game.small_font.render(f"${item.price}", True, WHITE)
         game.screen.blit(price, (x, y))
         y += 20
@@ -4153,6 +5072,36 @@ def draw_item_info(game, item, source, mouse_pos):
             hint_surf = game.small_font.render(line, True, YELLOW)
             game.screen.blit(hint_surf, (x, y))
             y += 17
+
+
+def _draw_group_badge(game, item, x, y, width):
+    """Draw the highlighted box naming an item's group, under its name.
+
+    User request: "show an item's group in a highlighted box directly under the
+    item's name." The box wears its group's own colour on a dark tint of it
+    (see components.Group), with the group's name on the first line and the line
+    saying what that family is for wrapped underneath — so the family is the
+    first thing read, and it always says what it means.
+
+    Returns the y the next line of the box starts at; an item with no group (the
+    bar's Cash and Energy readouts) leaves ``y`` alone.
+    """
+    badge = group_badge(game, item, width)
+    if badge is None:
+        return y
+    name, lines = badge
+    color = Group.color(Group.of(item))
+    box = pygame.Rect(x, y, width, group_badge_height(badge) - GROUP_BADGE_GAP)
+    pygame.draw.rect(game.screen, shade(color, -0.72), box, border_radius=4)
+    pygame.draw.rect(game.screen, color, box, 2, border_radius=4)
+    name_surf = game.small_font.render(name, True, color)
+    game.screen.blit(name_surf, (x + GROUP_BADGE_PAD, y + GROUP_BADGE_PAD // 2))
+    line_y = y + GROUP_BADGE_PAD // 2 + GROUP_BADGE_NAME_LINE
+    for line in lines:
+        line_surf = game.tiny_font.render(line, True, (214, 214, 214))
+        game.screen.blit(line_surf, (x + GROUP_BADGE_PAD, line_y))
+        line_y += GROUP_BADGE_LINE
+    return y + group_badge_height(badge)
 
 
 def _deviation_color(word):
@@ -4318,8 +5267,8 @@ def draw_upgrades(game):
     game.screen.blit(text, text.get_rect(center=back.center))
 def draw_collection_icon(game, kind, value, rect):
     """Draw an entry's icon (a mini card, a shape outline, an effect icon, a
-    scorer tile, a pack bundle, or a trial's or final boss's own tile) into the
-    given rect."""
+    scorer tile, a tool, a passive, a structure, a pack bundle, or a trial's or
+    final boss's own tile) into the given rect."""
     if kind in _TILE_SOURCES:
         # A trial's or a final boss's icon is its tile: the same square the
         # screen is covered in while that modifier is in play (see _build_tile).
@@ -4337,6 +5286,17 @@ def draw_collection_icon(game, kind, value, rect):
         return
     if kind == "action":
         draw_action(game.screen, ActionItem(value, 0), rect)
+        return
+    if kind == "tool":
+        # A tool's icon is its tile face: the tool's colour and its own drawing
+        # (see draw_tool), with no label at this size.
+        draw_tool(game.screen, ToolItem(value), rect, label=False)
+        return
+    if kind == "passive":
+        draw_passive(game.screen, PassiveItem(value), rect, label=False)
+        return
+    if kind == "structure":
+        draw_structure(game.screen, StructureItem(value, 0), rect)
         return
     if kind == "match_group":
         # A match group's icon: the mini shape (its first member) or effect its
@@ -4370,9 +5330,12 @@ def draw_collection_icon(game, kind, value, rect):
             pygame.draw.rect(game.screen, WHITE, rect, 2)
             return
         # Other scorers: a square filled with the scorer's color inside a
-        # white border (the same look as the in-game scorer component).
+        # white border (the same look as the in-game scorer component), with the
+        # scorer's mark on it (see _scorer_art).
         pygame.draw.rect(game.screen, Scorer.color(value), rect)
         pygame.draw.rect(game.screen, WHITE, rect, 2)
+        _blit_icon_art(game.screen, _scorer_art(value), rect.center,
+                       int(min(rect.width, rect.height) * 0.66))
         return
     shape = Shape.RECT if kind == "effect" else value
     block = Block(0, 0, shape=shape,
@@ -4393,33 +5356,85 @@ def draw_collection_icon(game, kind, value, rect):
 COLLECTION_CARD_W, COLLECTION_CARD_H = 212, 124
 COLLECTION_DESC_LINES = 5
 COLLECTION_DESC_WIDTH = COLLECTION_CARD_W - 62
+COLLECTION_COLS = 5        # entries per row
+COLLECTION_GAP = 14        # space between cells, both ways
+COLLECTION_TOP = 118       # the top of the first row
+
+
+def collection_entry_rect(index):
+    """The rect of the collection's ``index``th entry cell, before scrolling."""
+    column = index % COLLECTION_COLS
+    row = index // COLLECTION_COLS
+    x0 = (SCREEN_WIDTH - (COLLECTION_COLS * COLLECTION_CARD_W
+                          + (COLLECTION_COLS - 1) * COLLECTION_GAP)) // 2
+    return pygame.Rect(
+        x0 + column * (COLLECTION_CARD_W + COLLECTION_GAP),
+        COLLECTION_TOP + row * (COLLECTION_CARD_H + COLLECTION_GAP),
+        COLLECTION_CARD_W, COLLECTION_CARD_H)
+
+
+# The box naming an entry's GROUP, in the bottom-right corner of its cell (user
+# request: "add a box in each entry of the collection that shows which group
+# that item is in (without the group's description)").
+COLLECTION_GROUP_H = 16       # the box's height
+COLLECTION_GROUP_MARGIN = 4   # pixels between it and the cell's edges
+COLLECTION_GROUP_PAD = 5      # pixels inside it, either side of the name
+
+# Codex entry kinds that are not item kinds (see Game._collection_entries): a
+# match-group entry stands for the cards built on that group, so it belongs to
+# the same family a card does. Every other entry kind is its own kind (a trial
+# included — see Group.TRIAL), so this is the only translation needed.
+COLLECTION_ENTRY_GROUPS = {"match_group": Group.CARDS}
+
+
+def collection_entry_group(kind):
+    """The group a collection ENTRY belongs to, or None for something no
+    family covers (nothing in the codex is: every entry is labelled)."""
+    if kind in COLLECTION_ENTRY_GROUPS:
+        return COLLECTION_ENTRY_GROUPS[kind]
+    return Group.of_kind(kind)
+
+
+def collection_group_rect(game, cell, group):
+    """The box an entry's group name is written in (see draw_collection)."""
+    width = (game.tiny_font.size(Group.name(group).upper())[0]
+             + 2 * COLLECTION_GROUP_PAD)
+    return pygame.Rect(
+        cell.right - COLLECTION_GROUP_MARGIN - width,
+        cell.bottom - COLLECTION_GROUP_MARGIN - COLLECTION_GROUP_H,
+        width, COLLECTION_GROUP_H)
+
+
+def draw_collection_group(game, cell, group, discovered=True):
+    """Draw a codex entry's group as a box in the family's colour, name only.
+
+    The info box's badge (see _draw_group_badge) prints what the family is for
+    under the name; a codex cell has no room for that line, so this box carries
+    the name alone — the entry's own description is right above it.
+    """
+    box = collection_group_rect(game, cell, group)
+    color = Group.color(group) if discovered else (110, 110, 120)
+    pygame.draw.rect(game.screen, shade(color, -0.72), box, border_radius=4)
+    pygame.draw.rect(game.screen, color, box, 1, border_radius=4)
+    name = game.tiny_font.render(Group.name(group).upper(), True, color)
+    game.screen.blit(name, name.get_rect(center=box.center))
 
 
 def draw_collection(game):
     """Draw the COLLECTION tab: every card, component, pack and trial the player
     can encounter. Entries are revealed only once bought (cards, components and
     packs) or beaten (trials); the rest show \"???\" with a black question-mark
-    icon. Scrollable with the mouse wheel."""
+    icon. Each cell names the entry's group in a box in its bottom corner (see
+    draw_collection_group). Scrollable with the mouse wheel."""
     game.screen.fill(BG_COLOR)
     entries = game._collection_entries()
-    cols = 5
-    # The cell is sized to its description box: COLLECTION_DESC_LINES lines of
-    # tiny text at 14 px a line (see the description loop below), then the
-    # rarity tag under them.
-    card_w, card_h = COLLECTION_CARD_W, COLLECTION_CARD_H
-    gap_x, gap_y = 14, 14
-    x0 = (SCREEN_WIDTH - (cols * card_w + (cols - 1) * gap_x)) // 2
-    y0 = 118
-    rows = (len(entries) + cols - 1) // cols
-    total_h = y0 + rows * (card_h + gap_y)
+    rows = (len(entries) + COLLECTION_COLS - 1) // COLLECTION_COLS
+    total_h = COLLECTION_TOP + rows * (COLLECTION_CARD_H + COLLECTION_GAP)
     max_scroll = max(0, total_h - (SCREEN_HEIGHT - 96))
     game.collection_scroll = max(0, min(game.collection_scroll, max_scroll))
     for i, (kind, value, name, desc, has_icon, discovered) in enumerate(entries):
-        col = i % cols
-        row = i // cols
-        x = x0 + col * (card_w + gap_x)
-        y = y0 + row * (card_h + gap_y) - game.collection_scroll
-        rect = pygame.Rect(x, y, card_w, card_h)
+        rect = collection_entry_rect(i)
+        rect.y -= game.collection_scroll
         if rect.bottom < 96 or rect.top > SCREEN_HEIGHT - 90:
             continue
         if discovered:
@@ -4467,12 +5482,17 @@ def draw_collection(game):
             tag = game.tiny_font.render(
                 Rarity.name(rarity), True, Rarity.color(rarity))
             game.screen.blit(tag, (rect.left + 54, rect.top + 104))
+        # ...and, in the cell's bottom corner, the box naming its GROUP (user
+        # request). Every entry has one — a trial's box says it is a trial.
+        group = collection_entry_group(kind)
+        if group is not None:
+            draw_collection_group(game, rect, group, discovered)
     pygame.draw.rect(game.screen, BG_COLOR, (0, 0, SCREEN_WIDTH, 110))
     pygame.draw.rect(game.screen, BG_COLOR, (0, SCREEN_HEIGHT - 96, SCREEN_WIDTH, 96))
     heading = game.main_title_font.render("COLLECTION", True, (255, 215, 0))
     game.screen.blit(heading, heading.get_rect(center=(SCREEN_WIDTH // 2, 46)))
     hint = game.tiny_font.render(
-        "Buy a card/action/component/pack or beat a run with a trial to reveal it  •  scroll to browse",
+        "Buy a card/action/component/pack, open a structure, or beat a run with a trial to reveal it  •  scroll to browse",
         True, (180, 180, 180))
     game.screen.blit(hint, hint.get_rect(center=(SCREEN_WIDTH // 2, 92)))
     back = COLLECTION_BACK_BUTTON_RECT

@@ -761,23 +761,30 @@ class UiTests(GameTestCase):
         item = main.BlockItem(0, 0, main.Shape.CURVED_SLOPE, main.Effect.GRAVITY,
                               main.Scorer.CHIPS_ADD, 10, 20, "Curved Slope +Chips")
         rows = self.game._describe_item(item)
+        # ...and the group the whole item is in is named last (see components.Group).
         self.assertEqual([label for label, _ in rows],
-                         ["Shape - Curved Slope", "Effect - Gravity", "Scorer - +Chips", "Trigger"])
+                         ["Shape - Curved Slope", "Effect - Gravity", "Scorer - +Chips",
+                          "Trigger", "Group - Block"])
         self.assertIn("arc", main.shape_description(item.shape))
         self.assertIn("gravity", main.effect_description(item.effect).lower())
         self.assertIn("10", main.scorer_description(item.scorer, item.scorer_amount))
 
 
     def test_sidebar_describes_component(self):
+        # A piece's own row, then the group it belongs to (see components.Group).
         shape = main.Component.shape_component(main.Shape.SLOPE)
-        self.assertEqual([label for label, _ in self.game._describe_item(shape)], ["Shape - Slope"])
+        self.assertEqual([label for label, _ in self.game._describe_item(shape)],
+                         ["Shape - Slope", "Group - Part"])
         effect = main.Component.effect_component(main.Effect.BOUNCY)
-        self.assertEqual([label for label, _ in self.game._describe_item(effect)], ["Effect - Bouncy"])
+        self.assertEqual([label for label, _ in self.game._describe_item(effect)],
+                         ["Effect - Bouncy", "Group - Part"])
         scorer = main.Component.scorer_component(main.Scorer.MULT_MUL, amount=3)
-        self.assertEqual([label for label, _ in self.game._describe_item(scorer)], ["Scorer - xMult"])
+        self.assertEqual([label for label, _ in self.game._describe_item(scorer)],
+                         ["Scorer - xMult", "Group - Part"])
 
 
     def test_info_box_targets_hovered_shop_item_without_buying(self):
+        self._stock_shelf(3)
         # A shop offer is an item lying on the board now, so the info box finds
         # it by the square it stands on — and hovering never buys it.
         item = self.game.shop.items[0]
@@ -984,7 +991,8 @@ class UiTests(GameTestCase):
                            scorer=main.Scorer.CHIPS_ADD, scorer_amount=10)
         rows = self.game._describe_item(block)
         self.assertEqual([label for label, _ in rows],
-                         ["Shape - Curved Slope", "Effect - Gravity", "Scorer - +Chips", "Trigger"])
+                         ["Shape - Curved Slope", "Effect - Gravity", "Scorer - +Chips",
+                          "Trigger", "Group - Block"])
         self.assertIn("arc", main.shape_description(block.shape))
 
 
@@ -1369,32 +1377,22 @@ class UiTests(GameTestCase):
         self.assertIs(main.ui.font("tiny"), self.game.tiny_font)
 
 
-    def test_a_rolled_v2_action_shows_up_in_the_shop_and_in_grants(self):
+    def test_a_rolled_v2_action_shows_up_in_a_pack_and_in_grants(self):
         with mock.patch("rolling.random_action_version", return_value=2):
-            # The shelf offers an action in only about half its rerolls (a slot
-            # is an action 15% of the time), so reroll until one lands — bounded,
-            # so a shelf that never offers one still fails rather than hangs.
-            shop_actions = []
-            for _ in range(200):
-                self.game.shop.refresh()
-                shop_actions = [i for i in self.game.shop.items
-                                if i.kind == "action"]
-                if shop_actions:
-                    break
-            self.assertTrue(shop_actions)
-            self.assertTrue(all(a.version == 2 for a in shop_actions))
+            # Actions come out of action packs now (the shelf sells structures,
+            # see Shop._random_offer), so an action pack's option is the
+            # offer that has to carry the rolled version.
+            offers = [self.game.shop._offer_of(main.Pack.ACTION, 0, 0)
+                      for _ in range(20)]
+            self.assertTrue(all(o.kind == "action" for o in offers))
+            self.assertEqual({o.version for o in offers}, {2})
             self.game.actions.clear()
             self.assertTrue(self.game._grant_random_action())
             self.assertEqual(self.game.actions[-1].version, 2)
 
         with mock.patch("rolling.random_action_version", return_value=1):
-            for _ in range(200):
-                self.game.shop.refresh()
-                versions = [i.version for i in self.game.shop.items
-                            if i.kind == "action"]
-                if versions:
-                    break
-            self.assertTrue(versions)
+            versions = [self.game.shop._offer_of(main.Pack.ACTION, 0, 0).version
+                        for _ in range(20)]
             self.assertEqual(versions, [1] * len(versions))
 
 
@@ -1919,9 +1917,11 @@ class UiTests(GameTestCase):
         # The board's outer border is gold (the finish scorer color) while the
         # all-finishes trial is ACTIVE, and the normal dark gray otherwise. The
         # frame is drawn INSIDE the window's own edge (the top bar is above it),
-        # so sample just inside that edge.
+        # so sample just inside that edge — on the LEFT edge at mid-height, where
+        # no board item is laid out (items are dealt from the first free square in
+        # reading order, so they start at the top).
         border_px = (main.MARBLE_BOX_COORDS[0] + main.BORD_WIDTH // 2,
-                     main.MARBLE_BOX_COORDS[1] + main.BORD_WIDTH // 2)
+                     main.MARBLE_BOX_COORDS[1] + main.MARBLE_BOX_COORDS[3] // 2)
         self.game.trials_enabled = True
         self.game.current_trial = main.Trial.ALL_FINISHES
         self.game.draw()
@@ -2301,7 +2301,28 @@ class UiTests(GameTestCase):
             self._pixel_hash(self.game.screen.subsurface(rect).copy()), locked)
 
 
+    def test_a_structure_on_the_shelf_wears_no_padlock(self):
+        # Structures are free (user request: "make all structures free (no need
+        # to buy them for them to be used)"): a tool opens one where it lies, so
+        # the tile wears no padlock and no price — unlike a pack, which is still
+        # for sale (see test_an_unbought_shop_offer_wears_a_lock_and_chain).
+        structure = main.StructureItem(main.Structure.PIT, 0)
+        self.game.shop.items = [structure]
+        self.game.ensure_board_cells()
+        rect = self.game._board_item_rect(*self._item_cell(structure))
+
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
+            self.game.screen.fill(main.BLACK)
+            self.game.draw()
+
+        body = {tuple(self.game.screen.get_at((x, y)))[:3]
+                for x in range(rect.centerx - 8, rect.centerx + 8)
+                for y in range(rect.centery, rect.centery + 5)}
+        self.assertNotIn((255, 215, 0), body)      # no padlock
+        self.assertIn("Free", self.game._action_hint(structure, "shop"))
+
     def test_a_held_shop_offer_says_it_is_held(self):
+        self._stock_shelf(3)
         # Hoard's held offer is the one the next refresh leaves alone. Every
         # unbought offer is padlocked, so the HELD state is what the hover hint
         # adds (see Game._action_hint).

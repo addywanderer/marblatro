@@ -80,16 +80,15 @@ class GateTests(GameTestCase):
         # open lock").
         self._own()
         key, lock = self._pair()
-        self.game.score_chips = 0
         collector = self._card_fire(key)
-        self.game.score_chips = 0
+        collector.chips = 0
         other = self._card_fire(lock)         # a fresh marble, no key
         self.assertIsNot(other, collector)
         self.assertNotIn(7, other.collected_keys)
-        self.assertEqual(self.game.score_chips, 0)
+        self.assertEqual(other.chips, 0)
         # ...while the collector still is.
         self._card_fire(lock, collector)
-        self.assertEqual(self.game.score_chips, main.GATE_PASS_CHIPS)
+        self.assertEqual(collector.chips, main.GATE_PASS_CHIPS)
 
     def test_a_still_locked_lock_pays_nothing(self):
         # No key has been collected, so the lock is a solid door. (The contact

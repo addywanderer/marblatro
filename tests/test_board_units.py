@@ -79,6 +79,15 @@ class BoardTests(unittest.TestCase):
         return ((main.GRID_WIDTH - main.BOARD_START_WIDTH) // 2,
                 (main.GRID_HEIGHT - main.BOARD_START_HEIGHT) // 2)
 
+    def _level_region(self, level):
+        """The board squares a level opens (its own shape, offset from centre)."""
+        cells = set()
+        for dx, dy in level.cells:
+            cell = (main.GRID_WIDTH // 2 + dx, main.GRID_HEIGHT // 2 + dy)
+            if 0 <= cell[0] < main.GRID_WIDTH and 0 <= cell[1] < main.GRID_HEIGHT:
+                cells.add(cell)
+        return cells
+
     def _far_corner(self):
         """The board's bottom-right square (always locked at the start)."""
         return (main.GRID_WIDTH - 1, main.GRID_HEIGHT - 1)
@@ -94,14 +103,6 @@ class BoardTests(unittest.TestCase):
         self.assertIsNotNone(cell, f"{item!r} has no board square")
         return self._cell_center(*cell)
 
-    def _right_click(self, pos):
-        event = mock.Mock()
-        event.type = main.pygame.MOUSEBUTTONDOWN
-        event.button = 3
-        with mock.patch("main.pygame.mouse.get_pos", return_value=pos), \
-             mock.patch("main.pygame.event.get", return_value=[event]):
-            self.game.handle_events()
-
     def test_default_game_starts_with_full_board_unlocked(self):
         g = self.game  # a plain Game() (tests construct one directly)
         self.assertEqual(len(g.unlocked_cells), main.GRID_WIDTH * main.GRID_HEIGHT)
@@ -115,7 +116,13 @@ class BoardTests(unittest.TestCase):
         # buy open with Board Units.
         self.assertLess(main.BOARD_START_WIDTH, main.GRID_WIDTH)
         self.assertLess(main.BOARD_START_HEIGHT, main.GRID_HEIGHT)
-        self.assertEqual(g.unlocked_cells, self._start_region())
+        # A new game opens its start region AND the squares of the level its
+        # first run plays: the level is loaded before the first frame, not when
+        # the run starts (see Game._reset_board_to_start / _begin_level).
+        self.assertTrue(self._start_region() <= g.unlocked_cells)
+        self.assertEqual(
+            g.unlocked_cells,
+            self._start_region() | self._level_region(g.current_level()))
         self.assertTrue(g.board_locked())
         self.assertEqual(g.board_units, 0)
         # Every square of the region is playable, and the squares all around it
@@ -178,58 +185,37 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.cash, 3)
         self.assertEqual(g.board_units, 2)
 
-    def test_the_board_unit_offer_is_always_buyable(self):
+    def test_the_board_unit_button_is_always_buyable(self):
         g = self._start_locked_game()
         g.cash = 60
-        # The Board Unit is an offer like any other: a locked item on the board,
-        # unlocked by right-clicking it (user request).
-        tile = g.shop.items[-1]
-        self.assertEqual(getattr(tile, "kind", None), "unit")
-        self._right_click(self._item_pos(tile))
+        # The Board Unit is a BUTTON in the top bar (user request: "make board
+        # slots a button in the top bar instead of a shop item"), so it is not on
+        # the shelf at all and can be bought as often as the cash allows.
+        self.assertFalse([i for i in g.shop.items
+                          if getattr(i, "kind", None) == "unit"])
+        self._click(main.BOARD_UNIT_BUTTON_RECT.center)
         self.assertEqual(g.board_units, 1)
         self.assertEqual(g.cash, 52)
-        # It survives a shop refresh (it is always offered, not a random slot),
-        # and stays on the board after being bought.
+        self.assertIn("x1", main.ui.board_unit_button_label(g))
+        # It survives a shop refresh (it is not part of the shelf), and the
+        # button is still there to be pressed again.
         g._refresh_shop()  # costs $20, so top the cash back up first
         g.cash = 60
-        self.assertIn(tile, g.shop.items)
-        self._right_click(self._item_pos(tile))
+        self._click(main.BOARD_UNIT_BUTTON_RECT.center)
         self.assertEqual(g.board_units, 2)
         self.assertEqual(g.cash, 52)
 
-    def test_shop_layout_items_and_packs_share_the_offer_row(self):
+    def test_the_board_unit_button_says_its_price_and_refuses_without_cash(self):
         g = self._start_locked_game()
-        g.shop.refresh()
-        shelf = [i for i in g.shop.items
-                 if getattr(i, "kind", None) != "unit"]
-        # The offer row is the shelf's "any item" slots: five of them, from the
-        # second column, each one offer of a drawn kind (see Pack.SHELF_WEIGHTS).
-        items = [i for i in shelf if getattr(i, "kind", None) != "pack"]
-        self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
-        self.assertEqual([i.row for i in items], [main.SHOP_ITEM_ROW] * 5)
-        self.assertTrue(all(
-            getattr(i, "kind", None) in (main.Component.SHAPE,
-                                          main.Component.EFFECT,
-                                          main.Component.SCORER,
-                                          "block", "card", "action")
-            for i in items))
-        # The three packs sit on the same row, to the right of the items and
-        # left of the Board Unit (the shelf has room for one row of tiles).
-        packs = [i for i in shelf if getattr(i, "kind", None) == "pack"]
-        self.assertEqual([i.col for i in packs],
-                         [main.SHOP_PACK_COL + n
-                          for n in range(main.SHOP_PACK_SLOTS)])
-        self.assertEqual([i.row for i in packs], [main.SHOP_PACK_ROW] * 3)
-        # The row under the offers carries the prices, and stays empty of stock.
-        self.assertEqual([i for i in g.shop.items
-                          if i.row == main.SHOP_ITEM_ROW + 1], [])
-        # The Board Unit shares the offer row, right of the packs.
-        unit = g.shop.items[-1]
-        self.assertEqual((unit.col, unit.row),
-                         (main.BOARD_UNIT_COL, main.BOARD_UNIT_ROW))
-        self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
-        self.assertEqual(main.BOARD_UNIT_COL,
-                         main.SHOP_PACK_COL + main.SHOP_PACK_SLOTS)
+        g.cash = 3
+        self.assertIn(f"${g._board_unit_price()}",
+                      main.ui.board_unit_button_label(g))
+
+        self._click(main.BOARD_UNIT_BUTTON_RECT.center)
+
+        self.assertEqual(g.board_units, 0)
+        self.assertIn("Need $", g.shop_message)
+
 
     def test_clicking_locked_square_spends_a_board_unit(self):
         g = self._start_locked_game()
@@ -269,35 +255,6 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.board_units, 0)
         self.assertNotIn((0, 0), g.grid)  # nothing was put down
 
-    def test_a_bought_offer_is_laid_out_on_the_board_not_on_its_shop_cell(self):
-        # An offer keeps the SHOP cell it was drawn in (its col/row) after it is
-        # bought, so laying items out from those numbers would drop a purchase
-        # onto whatever board square its price tag hung over — the board's locked
-        # top-left corner, for a block built at (0, 0). A bought item is unlocked
-        # on the board instead, on a square of its own (see
-        # Game._unlock_purchase), never on a locked one.
-        g = self._start_locked_game()
-        g.cash = 9999
-        bought = 0
-        for _ in range(3):
-            for offer in list(g.shop.items):
-                if getattr(offer, "kind", None) == "pack":
-                    continue
-                before = {id(item) for item in g.owned_items()}
-                g._buy_shop_item(offer)
-                for owned in g.owned_items():
-                    if id(owned) in before:
-                        continue          # the shelf's own offer, not the player's
-                    cell = g.item_cell(owned)
-                    self.assertIsNotNone(cell, owned)
-                    self.assertFalse(g.is_cell_locked(*cell), owned)
-                bought += 1
-            g.shop.refresh()
-        self.assertGreater(bought, 0)
-        # Every item the player owns stands on a square of its own (or waits in
-        # the deck, which no purchase leaves anything in on its own).
-        cells = [g.item_cell(item) for item in g.hand_items()]
-        self.assertEqual(len(cells), len(set(cells)))
 
     def test_cannot_place_block_on_locked_square(self):
         g = self._start_locked_game()
@@ -324,15 +281,18 @@ class BoardTests(unittest.TestCase):
 
     def test_locked_board_resets_each_new_game(self):
         g = self._start_locked_game()
+        opened = set(g.unlocked_cells)
         g._unlock_cell(0, 0)
         g._unlock_cell(*self._far_corner())
         g.board_units = 3
-        self.assertEqual(len(g.unlocked_cells), len(self._start_region()) + 2)
-        # Starting a NEW game returns the board to its starting region (units
-        # and expansions reset here; they only persist when the game is saved
-        # and its slot loaded).
+        self.assertEqual(len(g.unlocked_cells), len(opened) + 2)
+        # Starting a NEW game returns the board to its opening state ? the start
+        # region plus the level the first run plays, which is loaded with the
+        # game rather than when the run starts (see Game._reset_board_to_start).
         save_system.start_new_game_in_slot(g, 1)
-        self.assertEqual(g.unlocked_cells, self._start_region())
+        self.assertEqual(
+            g.unlocked_cells,
+            self._start_region() | self._level_region(g.current_level()))
         self.assertEqual(g.board_units, 0)
         self.assertNotIn((0, 0), g.unlocked_cells)
 
@@ -431,7 +391,11 @@ class BoardTests(unittest.TestCase):
         g.cards.append(main.CardItem(main.Card.CONQUISTADOR, 56))
         g.run_complete = True
         g.awaiting_after_run = True
-        with mock.patch("main.random.random", return_value=0.9):
+        # The next LEVEL also opens its own squares when CONTINUE makes it
+        # current (see Game._begin_level); this test measures the run's own
+        # rewards, so the level is left out of it.
+        with mock.patch.object(main.Game, "_begin_level"), \
+                mock.patch("main.random.random", return_value=0.9):
             g._continue_run()
         self.assertEqual(len(g.unlocked_cells) - before, 2 + 4)
         self.assertEqual(g.drill_run_units, 0)
@@ -530,7 +494,10 @@ class BoardTests(unittest.TestCase):
 
         g.run_complete = True
         g.awaiting_after_run = True
-        with mock.patch("main.random.shuffle", side_effect=nearest_first), \
+        # (The next level opens its own squares on CONTINUE; this test is about
+        # what the bomb and the drill add on top, so the level is left out.)
+        with mock.patch.object(main.Game, "_begin_level"), \
+                mock.patch("main.random.shuffle", side_effect=nearest_first), \
                 mock.patch("main.random.random", return_value=0.9):
             g._continue_run()
 

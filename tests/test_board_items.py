@@ -399,7 +399,11 @@ class BoardItemTests(GameTestCase):
 
         self.assertIsNone(self.game.item_at_cell(home))
         self.assertFalse(self.game.selection)
-        self.assertEqual(sorted(self.game.grid), [(6, 6)])
+        # (The board's enemies are not blocks the player built; only the moved
+        # block should be left standing.)
+        built = [cell for cell, block in self.game.grid.items()
+                 if not getattr(block, "is_enemy", False)]
+        self.assertEqual(sorted(built), [(6, 6)])
 
 
     def test_a_board_item_rides_through_a_save(self):

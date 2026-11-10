@@ -115,10 +115,21 @@ class InputMixin:
                 # button, the DECK button again, or anywhere on the panel) and so
                 # does Esc. Nothing underneath it takes the click (user request:
                 # the button only SHOWS the deck).
-                if ((event.type == pygame.MOUSEBUTTONDOWN and event.button == 1)
-                        or (event.type == pygame.KEYDOWN
-                            and event.key in (pygame.K_ESCAPE, pygame.K_d))):
-                    self.deck_shown = False
+                #
+                # ...except while an EYEBALL pick is armed (see
+                # Game.arm_deck_pick): then the overlay is a picker, a click on a
+                # card draws it, and Esc keeps the action for later.
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    if self.deck_pick_armed():
+                        self._click_deck_pick(event.pos)
+                    else:
+                        self.deck_shown = False
+                elif (event.type == pygame.KEYDOWN
+                        and event.key in (pygame.K_ESCAPE, pygame.K_d)):
+                    if self.deck_pick_armed():
+                        self.cancel_deck_pick()
+                    else:
+                        self.deck_shown = False
                 continue
             elif self.title_screen:
                 # The title screen only accepts clicks on a save slot, the
@@ -281,10 +292,12 @@ class InputMixin:
                 elif event.key == pygame.K_SPACE:
                     self.paused = not self.paused
                 elif event.key == pygame.K_r:
-                    # Restart the current run, keeping its trial.
+                    # Restart the current run, keeping its trial. A restart is
+                    # a reset, so the run's marble goes with it (see
+                    # _discard_run): the build phase has no marble in it.
                     if self.reset_run():
                         sounds.play_reset()
-                    self.run_active = False
+                    self._discard_run()
                 elif event.key == pygame.K_t:
                     # Start a fresh run: exactly one new trial is chosen.
                     if self.reset_run():
@@ -295,7 +308,9 @@ class InputMixin:
                     # as a block lying on its own square). The items that are not
                     # blocks are left where the player laid them out.
                     for cell, item in list(self.grid.items()):
-                        if isinstance(item, Block):
+                        if (isinstance(item, Block)
+                                and not getattr(item, "is_enemy", False)
+                                and not getattr(item, "is_level_prop", False)):
                             self._erase_block_at(*cell)
                     self.marbles = []
                     self.run_active = False
@@ -309,34 +324,36 @@ class InputMixin:
                     # run (it comes back, and pays, after the run is continued).
                     self._bank_selected_item()
                 elif event.key == pygame.K_s:
-                    # S: apply the selected action to its subject, assemble the
-                    # assigned toolbox parts into a block (missing parts default
-                    # to the free Rect shape / no effect / no scorer), disassemble
-                    # a selected block, or — with nothing selected at all — build
-                    # the plain default wall.
-                    #
-                    # COMMENTED OUT with the conditions: S also used to split a
-                    # selected splittable card into its halves, and to build a
-                    # card from an assigned condition + scorer.
-                    if self.selected_action is not None:
-                        self._apply_action()
-                    # elif (getattr(self.selected_toolbox_item, "kind", None) == "card"):
-                    #     self._disassemble_card()
-                    # elif self.card_condition is not None:
-                    #     self._build_card()
-                    elif self.has_assigned_parts():
-                        self._assemble_block()
-                    elif isinstance(self.selected_toolbox_item, (Block, BlockItem)):
-                        self._disassemble_block()
-                    elif self.selected_toolbox_item is None:
-                        self._assemble_block()
-                    else:
-                        self._disassemble_block()
+                    # S is the context action, and it fires the selected item's
+                    # ABILITY first (see components.Ability / Game._use_ability):
+                    # an action on its targets, a tool on a structure, a pack
+                    # opened, a Wasteful block thrown away with another item.
+                    # With no ability to fire, S keeps its board-building
+                    # meanings: assemble the assigned parts into a block (missing
+                    # parts default to the free Rect shape / no effect / no
+                    # scorer), disassemble a selected block, or -- with nothing
+                    # selected at all -- build the plain default wall.
+                    if not self._use_ability():
+                        if self.has_assigned_parts():
+                            self._assemble_block()
+                        elif isinstance(self.selected_toolbox_item,
+                                        (Block, BlockItem)):
+                            self._disassemble_block()
+                        elif self.selected_toolbox_item is None:
+                            self._assemble_block()
+                        else:
+                            self._disassemble_block()
                 elif event.key == pygame.K_d:
                     # U: pay cash to raise the selected block's trigger limit.
                     self._upgrade_trigger_limit()
                 elif event.key == pygame.K_y:
-                    self._continue_run()
+                    # Y moves on: past a finished level it continues the game,
+                    # and DURING a level it gives up on it, which counts the
+                    # level as lost (see _give_up_level).
+                    if self.run_active and not self.awaiting_after_run:
+                        self._give_up_level()
+                    else:
+                        self._continue_run()
                 elif event.key == pygame.K_p:
                     # Save the current game to the active save slot.
                     self._retry_run()
@@ -374,6 +391,13 @@ class InputMixin:
                             # item the player owns (see Game.toggle_deck).
                             self.toggle_deck()
                             continue
+                        if BOARD_UNIT_BUTTON_RECT.collidepoint(mouse_pos):
+                            # The BOARD UNIT button buys one unit (user request:
+                            # "make board slots a button in the top bar instead
+                            # of a shop item"), which a click on a locked square
+                            # then spends.
+                            self._buy_board_unit()
+                            continue
                         if self.open_pack is not None:
                             # An OPEN PACK owns the click: its overlay is what
                             # the player is looking at, so every click goes to
@@ -388,6 +412,12 @@ class InputMixin:
                         # by the square it lies on.
                         cell = (grid_x, grid_y) if inside_grid else None
                         board_item = self.item_at_cell(cell) if cell else None
+                        # An ENEMY or a level PROP is not an item: clicking one
+                        # selects nothing (it counts as empty board, so it
+                        # clears the selection like any other non-item square).
+                        if (getattr(board_item, "is_enemy", False)
+                                or getattr(board_item, "is_level_prop", False)):
+                            board_item = None
                         # A press on board space that holds no item starts a
                         # PAN: with the board infinitely large, dragging empty
                         # space is how the player travels across it (user
@@ -432,9 +462,10 @@ class InputMixin:
                                     f"({self.board_units} unit(s) left)")
                                 sounds.play_mech()
                                 # Unlocking edits the board like placing a block:
-                                # any active run is reset back to build state.
+                                # any active run is reset back to build state,
+                                # marble and all (see _discard_run).
                                 self.reset_run(False)
-                                self.run_active = False
+                                self._discard_run()
                             else:
                                 self._set_shop_message(
                                     f"Locked square — buy a Board Unit "
@@ -512,6 +543,8 @@ class InputMixin:
                     and not self.is_cell_locked(grid_x, grid_y)):
                 self._place_block_at(grid_x, grid_y)
             if self.drawing:
-                # Building/editing the board keeps the current run's trial.
+                # Building/editing the board keeps the current run's trial, and
+                # throws the run (and its marble) away ? the build phase is for
+                # building (see _discard_run).
                 self.reset_run(False)
-                self.run_active = False
+                self._discard_run()

@@ -32,6 +32,7 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Quality,
     Rarity,
     Scorer,
     Shape,
@@ -44,6 +45,8 @@ from components import (
     effect_description,
     effect_magnitude_floor,
     magnitude_precision,
+    Modifiable,
+    Modifier,
     magnitude_step,
     match_group_card,
     match_group_card_meta,
@@ -63,13 +66,13 @@ from config import *
 
 
 
-class Block:
+class Block(Modifiable):
     """A block composed of a Shape, an Effect, and a Scorer."""
 
     def __init__(self, x, y, shape=Shape.RECT, effect=Effect.NONE,
                  scorer=Scorer.NONE, scorer_amount=None, angle=0, origin=None,
                  portal_number=0, key_number=0, trigger_limit=1, trigger_paid=0,
-                 effects=None, effect_amounts=None):
+                 effects=None, effect_amounts=None, quality=Quality.NORMAL):
         self.x = x
         self.y = y
         self.shape = shape
@@ -90,6 +93,9 @@ class Block:
         self.locked = shape == Shape.LOCK
         self.scorer = scorer
         self.scorer_amount = scorer_amount if scorer_amount is not None else Scorer.DEFAULT_AMOUNT.get(scorer, 0)
+        # The tier the player's item was at when this block was built (see
+        # components.Quality): a golden block is drawn golden.
+        self.quality = quality
         origin_x, origin_y = origin if origin is not None else (MARBLE_BOX_COORDS[0], MARBLE_BOX_COORDS[1])
         self.rect = pygame.Rect(
             x * GRID_SIZE + origin_x,
@@ -200,6 +206,42 @@ class Block:
         average.
         """
         return self.effect_amounts.get(effect) or Effect.MAGNITUDE.get(effect, 0)
+
+    @property
+    def amount(self):
+        """The block's single AMOUNT: its scorer's magnitude.
+
+        Every item carries one (see Game._item_magnitudes); for a block that is
+        the number its scorer pays with. Each effect keeps its own strength
+        alongside it (see effect_amounts), because a block can carry several
+        magnitudes at once -- this is the scorer's.
+        """
+        return self.scorer_amount
+
+    @amount.setter
+    def amount(self, value):
+        """Setting it sets the scorer's magnitude, so the two never disagree."""
+        self.scorer_amount = value
+
+    @property
+    def is_token(self):
+        """True when this block is a kept copy that fires every run.
+
+        A token IS a block carrying the ``token`` modifier (user request:
+        "tokens are just blocks with the 'token' modifier"), so the flag the
+        drawing and firing paths read is a view over its stacks rather than a
+        field of its own. A permanent (v2) token carries
+        ``Modifier.PERMANENT``, which is non-zero, so it reads as a token too.
+        """
+        return Modifier.stacks(self, Modifier.TOKEN) != 0
+
+    @is_token.setter
+    def is_token(self, value):
+        """Marking a block as a token gives it one run of coverage."""
+        if value and not self.is_token:
+            Modifier.set_stacks(self, Modifier.TOKEN, 1)
+        elif not value:
+            Modifier.set_stacks(self, Modifier.TOKEN, 0)
 
     def advance_spin(self, dt):
         """Advance the continuous rotation of a rotating-effect block (per frame)."""

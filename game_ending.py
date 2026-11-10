@@ -41,9 +41,12 @@ from components import (
     Effect,
     MarbleType,
     Pack,
+    Passive,
     Rarity,
     Scorer,
     Shape,
+    Structure,
+    Tool,
     Trial,
     block_price_for,
     card_description,
@@ -166,6 +169,30 @@ class EndingMixin:
         bonus[Scorer.MULT_MUL] *= run_gain[Scorer.MULT_MUL]
         self._reset_wrecking_run_gain()
 
+    def _give_up_level(self):
+        """Y during a level: abandon it, which counts as a lost level.
+
+        A level is never lost by PLAY -- it can only become impossible (an enemy
+        survives, or every marble has been eaten) -- so the player moves on by
+        pressing Y at any time and the level is recorded as a loss, exactly like
+        a run that finished without clearing its enemies (user request: "the
+        player can't technically lose a level ... at any time the player can move
+        on to the next level by pressing Y, but then the level will count as
+        lost. 3 lost levels means the player loses the game"). R rewinds the
+        give-up like any other lost run (see _retry_run).
+        """
+        if not self.run_active or self.awaiting_after_run:
+            return False
+        self.marbles = []
+        self.run_active = False
+        self.run_complete = True
+        self.run_cleared = False
+        self.run_results.append(False)
+        self.failed_runs += 1
+        self.armed_quick.clear()
+        self.awaiting_after_run = True
+        return True
+
     def _continue_run(self):
         """Move on to the next run after the player clicks CONTINUE.
 
@@ -281,6 +308,10 @@ class EndingMixin:
         # Spirit tokens spend a run of coverage; Satanic and Sharp tokens obey
         # their scorer's own destruction rules (see _advance_tokens).
         self._advance_tokens()
+        # ...and the modifiers on a clock tick over: a forgotten stack wears
+        # off, and a TEMPORARY item is destroyed now that its run is over (see
+        # _age_modifiers).
+        self._age_modifiers()
         self.awaiting_after_run = False
         self.run_complete = False
         self.run_cleared = False
@@ -291,6 +322,10 @@ class EndingMixin:
         # started and restarted. The inventory slots its Packed blocks won are
         # committed the same way.
         self.free_rerolls_run_gain = 0
+        # The Reroll cards the finished run dealt are the player's now, so the
+        # ledger is cleared without taking them back (unlike a retry — see
+        # _take_back_run_rerolls).
+        self.reroll_cards_run_gain = []
         self.inventory_slots_run_gain = 0
         # A continued run leaves the board's items where the player laid them
         # out: nothing about a discard survives — the panel it acted on is gone.
@@ -367,6 +402,13 @@ class EndingMixin:
             # just finished, so it no longer owns the next run's target.
             self.target_forced = False
             self._refresh_run_target()
+            # The next run is a new LEVEL: open its squares and lay out its props
+            # and enemies now, in the build phase, so the player can plan around
+            # them (see _begin_level). Starting the run only puts that same
+            # layout back — it never re-decides it (user request: "load the level
+            # beforehand ... so that the level does not appear to change
+            # randomly").
+            self._begin_level()
 
     def _begin_endless_play(self):
         """Keep playing after the game-over screen: set the next run up.
@@ -389,6 +431,11 @@ class EndingMixin:
         # (it does that before it decides win or loss), so the hand this run was
         # built from is the one that is on the board: cycling again here would
         # throw it away and deal a different one behind the player's back.
+        #
+        # The level is laid out NOW, in the build phase, like every other level
+        # (see _begin_level): the player plans around the board they are given
+        # and starting the run only puts that same board back.
+        self._begin_level()
 
     def _refresh_run_target(self):
         """Re-derive this run's required score: the schedule's number, scaled by
@@ -506,6 +553,13 @@ class EndingMixin:
             # un-spent — the count just can't go below zero.)
             self.free_rerolls = max(0, self.free_rerolls - self.free_rerolls_run_gain)
         self.free_rerolls_run_gain = 0
+        # The Reroll cards the retried run dealt go back with it (see
+        # _spawn_reroll_cards); any other path through here keeps them, because
+        # a run that was CONTINUE'd earned them.
+        if retrying:
+            self._take_back_run_rerolls()
+        else:
+            self.reroll_cards_run_gain = []
         # The inventory slots the retried run's Packed blocks won go back too
         # (see reset_run), so only slots a kept run earned stay won.
         self.inventory_slots_won = max(0, self.inventory_slots_won
@@ -529,9 +583,10 @@ class EndingMixin:
         self.awaiting_after_run = False
         self.run_complete = False
         self.run_cleared = False
-        # Redoing the run re-applies the same trial.
+        # Redoing the run re-applies the same trial, back in the build phase:
+        # the run that was undone takes its marble with it (see _discard_run).
         self.reset_run(False)
-        self.run_active = False
+        self._discard_run()
 
     def upgrade_card_rect(self, index):
         """The screen rect for an upgrade card (index 0..2) on the UPGRADES tab."""
@@ -645,6 +700,25 @@ class EndingMixin:
             entries.append(("scorer", value, Scorer.name(value) if d else "???",
                             scorer_description(value, Scorer.DEFAULT_AMOUNT.get(value, 0))
                             if d else "???", True, d))
+        # The three kinds that are ITEMS in their own right (user request: "make
+        # sure all items are in the collection"): the tools (the verbs a
+        # structure is opened with), the UNPLAYABLE passives, and the structures
+        # a level stands on the board. A starter tool is always known, like the
+        # Start and Finish scorers, because every game deals all four.
+        for value in Tool.ORDER:
+            d = collection.is_tool_discovered(value)
+            entries.append(("tool", value, Tool.name(value) if d else "???",
+                            Tool.description(value) if d else "???", True, d))
+        for value in Passive.ORDER:
+            d = collection.is_passive_discovered(value)
+            entries.append(("passive", value, Passive.name(value) if d else "???",
+                            Passive.description(value) if d else "???", True, d))
+        for value in Structure.ORDER:
+            d = collection.is_structure_discovered(value)
+            entries.append(("structure", value,
+                            Structure.name(value) if d else "???",
+                            Structure.codex_description(value) if d else "???",
+                            True, d))
         # The pack types the shelf can deal, one entry each: a pack is revealed
         # by buying one of its type, and its SIZE is not part of the entry (a
         # big card pack and a giga card pack) — see collection.discover_pack.

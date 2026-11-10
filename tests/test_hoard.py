@@ -53,25 +53,8 @@ class HoardCardTests(GameTestCase):
         self.assertEqual(self.game.shop_lock_cap(), 2)
 
 
-    def test_middle_clicking_an_offer_holds_it_through_a_reroll(self):
-        self._own_hoard()
-        held = self._offer(0)
-        slot = self.game.shop.slot_key(held)
-        count_before = len(self.game.shop.items)
-        self.assertTrue(self.game._toggle_shop_lock(self._cell_pos(held)))
-        self.assertEqual(self.game.shop.locked, [slot])
-        self.assertIn("Holding", self.game.shop_message)
-
-        self.game._refresh_shop()
-
-        # The pinned cell holds the very same offer (not a re-rolled one that
-        # merely looks the same), and the row is still a full row.
-        self.assertIs(self._offer_at(held), held)
-        self.assertEqual(len(self.game.shop.items), count_before)
-        self.assertEqual(self.game.shop.locked, [slot])
-
-
     def test_middle_clicking_a_held_offer_again_releases_it(self):
+        self._stock_shelf(3)
         self._own_hoard()
         held = self._offer(0)
         self.game._toggle_shop_lock(self._cell_pos(held))
@@ -85,6 +68,7 @@ class HoardCardTests(GameTestCase):
 
 
     def test_a_second_hold_needs_a_second_copy_of_the_card(self):
+        self._stock_shelf(3)
         self._own_hoard()
         first, second = self._offer(0), self._offer(1)
         self.game._toggle_shop_lock(self._cell_pos(first))
@@ -100,6 +84,7 @@ class HoardCardTests(GameTestCase):
 
 
     def test_without_the_card_a_middle_click_holds_nothing(self):
+        self._stock_shelf(3)
         held = self._offer(0)
         self.assertTrue(self.game._toggle_shop_lock(self._cell_pos(held)))
         self.assertEqual(self.game.shop.locked, [])
@@ -116,6 +101,7 @@ class HoardCardTests(GameTestCase):
 
 
     def test_a_hold_the_card_can_no_longer_pay_for_is_released(self):
+        self._stock_shelf(3)
         # Selling the card drops the cap, and the offer pinned LAST gives way
         # first — what the player pinned first is what stays held.
         self._own_hoard(2)
@@ -136,6 +122,7 @@ class HoardCardTests(GameTestCase):
 
 
     def test_a_card_cutter_hoard_holds_nothing(self):
+        self._stock_shelf(3)
         # The cut card applies no effect, so its hold is released with it.
         hoard = main.CardItem(main.Card.HOARD, 36)
         self.game.cards = [hoard]
@@ -150,21 +137,8 @@ class HoardCardTests(GameTestCase):
         self.assertIsNot(self._offer_at(held), held)
 
 
-    def test_a_held_offer_survives_the_slim_pickings_trim(self):
-        # Slim pickings removes two options right after every reroll — the very
-        # moment a held offer would otherwise vanish.
-        self._own_hoard()
-        held = self._offer(0)
-        self.game._toggle_shop_lock(self._cell_pos(held))
-        self.game.trials_enabled = True
-        self.game.current_trial = main.Trial.SLIM_PICKINGS
-
-        self.game._trim_shop_for_trial()
-
-        self.assertIn(held, self.game.shop.items)
-
-
     def test_middle_clicking_a_shop_offer_never_erases_the_board(self):
+        self._stock_shelf(3)
         # End to end through the real event handler: the middle button is the
         # Hoard card's, so the board is untouched.
         self._own_hoard()
@@ -177,6 +151,7 @@ class HoardCardTests(GameTestCase):
 
 
     def test_right_clicking_a_shop_offer_buys_it_instead_of_holding_it(self):
+        self._stock_shelf(3)
         # Right-click is the BUY click (user request), so a Hoard player's
         # right-click unlocks the offer rather than pinning it.
         self._own_hoard()

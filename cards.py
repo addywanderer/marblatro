@@ -71,7 +71,8 @@ def apply_cards(game):
     bonus (the +3 mult a break has banked across the game), then Tesseract's
     reroll bonus, then every owned card whose effect fires at the START of a run
     (Joker's +4 mult, Pillar's fullest column, Banker's cash, Glitch's random
-    mult, Ripped Card, Cozy, Painting, Synthesizer) in card-area order,
+    mult, Ripped Card, Cozy, Painting, Synthesizer, Smelly Socks' two
+    currencies) in card-area order,
     so a card's particle pops on the card that paid. End-of-run and
     fragile-break cards fire elsewhere (see apply_cards_on_finish /
     on_fragile_broken), and an xMult a CARD pays is banked for the run's end
@@ -85,8 +86,33 @@ def apply_cards(game):
         if _card_disabled(game, card):
             continue
         value = effective_card_value(game, i)
-        if value is not None:
-            apply_card_start(game, card, value)
+        if value is None:
+            continue
+        if value == Card.SMELLY_SOCKS:
+            # A card that pays in two currencies at once is read here rather
+            # than through a measured row (see _apply_smelly_socks).
+            _apply_smelly_socks(game, card)
+            continue
+        apply_card_start(game, card, value)
+
+
+def _apply_smelly_socks(game, card):
+    """Smelly Socks pays fixed chips AND mult at the start of every run.
+
+    User request: "+15 chips and +2 mult at start of run". One measured row
+    (Card.NAMED) can only pay one scorer, so a two-currency card is a fixed
+    payoff read where its mechanic lives — the same door Gate's chips and
+    Essence's cash come through, with both numbers in MAGNITUDES so they are
+    typed once. A Blueprint beside the socks copies it (apply_cards reaches here
+    through effective_card_value) and the Card cutter trial stops it, exactly as
+    it stops every other start-of-run card.
+    """
+    chips = MAGNITUDES.SMELLY_SOCKS_CHIPS
+    mult = MAGNITUDES.SMELLY_SOCKS_MULT
+    game.score_chips += chips
+    game.score_mult += mult
+    game._spawn_card_particle(card, game._particle_amount_text(chips), GREEN)
+    game._spawn_card_particle(card, game._particle_amount_text(mult), BLUE)
 
 
 def _owns_wrecking_ball_card(game):
@@ -227,6 +253,11 @@ def _named_card_units(game, measure):
         return stencil_units(game)
     if measure == "plain_rects":
         return plain_rect_count(game)
+    if measure == "items_discarded":
+        # Counted as the run throws items away (see Game._discard_item), so a
+        # Wasteful pair is 2 and a Lantern burning out is 1. Read at the end,
+        # when the run's discarding is done.
+        return getattr(game, "discarded_items_run", 0)
     if measure == "inside_locked_no_phase":
         # Counted as the run plays, per marble, like every other second-based
         # measure: a save or a rewind never re-derives it from positions.
@@ -560,10 +591,11 @@ def _fire_flat_scorer(game, card, scorer, fx=None, fy=None, amount=None):
         game.parts_run_gain += max(1, int(amount))
         text, color = "Component", ORANGE
     elif scorer == Scorer.FRESH:
-        # Fresh cards grant their own magnitude in free shop rerolls
-        # immediately (no point system).
+        # Fresh cards deal their own magnitude in Reroll cards onto the board
+        # (see Game._spawn_reroll_cards), and the run owes them: a retry takes
+        # them back with the run it is undoing.
         rerolls = max(1, int(amount))
-        game.free_rerolls += rerolls
+        game._spawn_reroll_cards(rerolls, run_granted=True)
         text, color = f"{rerolls}", ORANGE
     elif scorer == Scorer.RANDOM:
         # Random cards pick one of three rewards; the pick is chosen BEFORE

@@ -144,6 +144,10 @@ class FrameMixin:
                 or self.upgrades_open or self.collection_open):
             return
         self._tick_autosave(DT)
+        # Enemy movement: patrols slide along their row, cowards back away from
+        # the marble (see enemies.Enemy.step). It only means anything while a run
+        # is in flight, but the tiles animate either way.
+        self._update_enemies(DT)
         # Achievement unlock conditions are checked every frame while playing.
         self._check_achievements()
         # Bottom popups (achievement unlocks, collection discoveries) animate
@@ -315,6 +319,11 @@ class FrameMixin:
         marble = Marble(start_block.rect.centerx, start_block.rect.centery)
         marble.velocity = np.array([vx, 0.0])
         marble.start_block = start_block
+        # The marble starts worth the run's base score; every block it touches
+        # from here moves ITS chips and mult, nobody else's (see
+        # Game.score_chips).
+        marble.chips = self._base_chips
+        marble.mult = self._base_mult
         # The dead-zone trial triples gravity in the box's bottom third; the
         # all-finishes trial makes the marble-box borders act as a finish.
         # Restarts keep the same trial, so these are read from the current

@@ -38,33 +38,28 @@ class ItemCopyTests(GameTestCase):
 
     # --- two copies are two items ---------------------------------------
 
-    def test_two_purchases_of_one_offer_are_two_items(self):
-        # The shelf keeps its own offer (a component slot is a repeatable buy),
-        # so the player's copies must be copies, not the shelf's object twice:
-        # one object listed twice shares a square and a switch (see
-        # items.owned_copy). Each copy is unlocked on the board at once, on a
-        # square of its own (see Game._unlock_purchase).
+    def test_buying_two_offers_of_a_kind_gives_two_items(self):
+        # The shelf sells one tile at a time — buying it deletes that tile (see
+        # Game._unlock_offer) — but a refresh can offer the same kind again, and
+        # the second purchase is a second, independent item with a square and a
+        # switch of its own.
         self.game.toolbox.items.clear()
         self.game.cash = 1000
-        offer = self.game.shop._offer_of(main.Pack.EFFECT, 1, main.SHOP_ITEM_ROW)
-        self.game.shop.items = [offer]
+        first = main.Component.effect_component(main.Effect.BOUNCY)
+        self.game.shop.items = [first]
+        self.game._buy_shop_item(first)
+        second = main.Component.effect_component(main.Effect.BOUNCY)
+        self.game.shop.items = [second]
+        self.game._buy_shop_item(second)
 
-        self.game._buy_shop_item(offer)
-        self.game._buy_shop_item(offer)
-
-        copies = [i for i in self.game.toolbox.items
-                  if i.kind == offer.kind and i.value == offer.value]
+        copies = [item for item in self.game.toolbox.items
+                  if item.kind == first.kind and item.value == first.value]
         self.assertEqual(len(copies), 2)
-        self.assertIsNot(copies[0], copies[1])
-        self.assertIsNot(copies[0], offer)
-        self.assertIsNot(copies[1], offer)
-        # Both are usable now, each on its own square — never the shelf's.
+        self.assertIs(copies[0], first)
+        self.assertIs(copies[1], second)
         self.assertNotEqual(self.game.item_cell(copies[0]),
                             self.game.item_cell(copies[1]))
-        self.assertNotEqual(self.game.item_cell(copies[0]),
-                            self.game.item_cell(offer))
-        # Both are still on the shelf's offer list to be bought again.
-        self.assertIn(offer, self.game.shop.items)
+        self.assertEqual(self.game.shop.items, [])
 
         # Each copy is its own switch: clicking one selects exactly it.
         self._click(self._grid_pos(*self.game.item_cell(copies[0])))
@@ -92,9 +87,9 @@ class ItemCopyTests(GameTestCase):
         self.assertEqual(len([i for i in self.game.board_items() if i is piece]), 1)
 
 
-    def test_a_copy_carries_the_offers_own_rolls(self):
-        # A copy is the same goods, not a re-roll: the magnitude the offer was
-        # drawn with is what the copy pays (see items.owned_copy).
+    def test_a_purchase_keeps_the_offers_own_rolls(self):
+        # What is bought is the offer itself, so the magnitude it was drawn with
+        # is exactly what the player pays (see Game._unlock_offer).
         self.game.toolbox.items.clear()
         self.game.cash = 1000
         offer = main.Component.scorer_component(main.Scorer.MULT_ADD, amount=7)
@@ -102,10 +97,22 @@ class ItemCopyTests(GameTestCase):
 
         self.game._buy_shop_item(offer)
 
-        copy = self.game.toolbox.items[0]
+        self.assertTrue(self.game.owns_item(offer))
+        self.assertEqual(offer.amount, 7)
+        self.assertEqual(offer.value, main.Scorer.MULT_ADD)
+
+
+    def test_a_copy_still_carries_the_offers_own_rolls(self):
+        # items.owned_copy makes a second, independent item with the same goods —
+        # what a REWARD that duplicates an offer uses (see the packs).
+        offer = main.Component.scorer_component(main.Scorer.MULT_ADD, amount=7)
+
+        copy = main.owned_copy(offer)
+
         self.assertEqual(copy.amount, 7)
         self.assertEqual(copy.value, main.Scorer.MULT_ADD)
         self.assertIsNot(copy, offer)
+        self.assertIsNone(getattr(copy, "board_cell", None))
 
 
     def test_one_offer_clicked_twice_is_one_purchase(self):

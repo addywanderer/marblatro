@@ -230,6 +230,11 @@ class GameTestCase(unittest.TestCase):
 
     def _add_marble(self, position=(300, 300)):
         marble = main.Marble(*position)
+        # A marble a test puts on the board starts worth the game's current
+        # score, exactly as every marble a run releases starts worth the run's
+        # base (the live score lives on the marble now — see Game.score_chips).
+        marble.chips = self.game._base_chips
+        marble.mult = self.game._base_mult
         self.game.marbles.append(marble)
         return marble
 
@@ -421,9 +426,15 @@ class GameTestCase(unittest.TestCase):
 
         The patch proves a pre-rolled outcome is being reused: if the block
         rolled now, this value would decide the reward instead.
+
+        One marble flies through every touch: the score lives on the marble
+        (see Game.score_chips), so reusing it is what lets a second touch add to
+        what the first one earned, exactly as a single marble bouncing round
+        the board does.
         """
-        self.game.marbles = []
-        marble = self._add_marble()
+        if not self.game.marbles:
+            self._add_marble()
+        marble = self.game.marbles[0]
         marble.collisions_this_tick = [block]
         self.game.run_active = True
         with mock.patch("main.random.random", return_value=random_value):
@@ -530,11 +541,11 @@ class GameTestCase(unittest.TestCase):
     def _place_shop_offer(self, kind, cell=1, predicate=None):
         """Put an offer of ``kind`` on the shelf's item row and return it.
 
-        The shelf's five slots draw their kinds at their own odds — a shape
-        offer turns up 8% of the time, an effect 12% (see
-        components.Pack.SHELF_WEIGHTS) — so a test that needs ONE particular
-        kind must place one, rather than hunt the rolled shelf for it: hunting
-        made those tests pass or fail on the roll. ``predicate`` narrows it
+        The shelf deals STRUCTURES now (see Shop._random_offer), while the goods
+        themselves come out of packs, so a test that needs ONE particular kind
+        must place one — drawn by the same roller a pack uses — rather than
+        hunt a rolled shelf for it: hunting made those tests pass or fail on the
+        roll. ``predicate`` narrows it
         further (a portal block, say, is bought as a pair).
         """
         source = _SHOP_OFFER_SOURCES[kind]
@@ -558,6 +569,40 @@ class GameTestCase(unittest.TestCase):
         self._click_button(pos, 1, mod)
 
 
+    def _stock_shelf(self, structures=3, packs=0):
+        """Put offers on the shop's shelf by hand.
+
+        The shelf deals NOTHING now (user request: "add structures as part of
+        the level. remove the remaining shop items"): structures belong to the
+        LEVEL, and the packs that used to be generated each run are gone. A test
+        that still exercises the shelf's own machinery -- buying, holding,
+        hovering an offer -- stocks it here with the same rollers a shelf used.
+        """
+        used = set()
+        for index in range(structures):
+            self.game.shop.items.append(
+                self.game.shop._random_offer(
+                    col=1 + index, row=main.SHOP_ITEM_ROW, used=used))
+        for index in range(packs):
+            self.game.shop.items.append(
+                self.game.shop._roll_pack(main.Pack.SHAPE, main.Pack.NORMAL,
+                                          col=main.SHOP_PACK_COL + index,
+                                          row=main.SHOP_PACK_ROW))
+        return self.game.shop.items
+
+    def _buy_pack(self, pack):
+        """Buy a pack from its offer and open it, the way a player does.
+
+        Buying hands over the pack ITEM (user request: "make packs a type of
+        item that open when the player selects one and presses 's'"), so opening
+        is its own step: this is the two clicks a test means by "buying a pack".
+        """
+        self.game._buy_shop_item(pack)
+        if self.game.owns_item(pack):
+            self.game._open_owned_pack(pack)
+        return pack
+
+
     def _right_click(self, pos):
         """Right-click the play screen at ``pos`` — the shop's BUY click."""
         self._click_button(pos, 3)
@@ -573,8 +618,10 @@ class GameTestCase(unittest.TestCase):
         event = mock.Mock()
         event.type = main.pygame.MOUSEBUTTONDOWN
         event.button = button
-        # A real click always carries a mod mask (0 for a plain click); the
-        # inventory reads it for ctrl/shift-click discard picks.
+        # A real click always carries its position and a mod mask (0 for a plain
+        # click); the deck overlay's pick reads the position, and the inventory
+        # reads the mask for its ctrl/shift-click discard picks.
+        event.pos = pos
         event.mod = mod
         with mock.patch("main.pygame.mouse.get_pos", return_value=pos), \
              mock.patch("main.pygame.event.get", return_value=[event]):
@@ -632,7 +679,8 @@ class GameTestCase(unittest.TestCase):
 
     def _new_effects(self):
         return (main.Effect.REPULSOR, main.Effect.CONVEYOR, main.Effect.ZIPPER,
-                main.Effect.PHASE, main.Effect.SPLITTER, main.Effect.GONDOLA)
+                main.Effect.PHASE, main.Effect.SPLITTER, main.Effect.GONDOLA,
+                main.Effect.WASTEFUL)
 
 
     # COMMENTED OUT with the conditions: assigning a condition + scorer in the
@@ -672,8 +720,14 @@ class GameTestCase(unittest.TestCase):
         return len([i for i in self.game.toolbox.items
                     if getattr(i, "kind", None) in kinds])
 
-    def _complete_run(self, score, required=1000):
-        """Finish a run with the given total score against the given target."""
+    def _complete_run(self, score, cleared=True):
+        """Finish a level with the given score, clearing it or not.
+
+        A level is won by defeating its enemies and getting every marble to the
+        Finish (see components.LEVELS), so ``cleared`` is what decides the
+        result: a run that "fails" simply leaves an enemy standing. ``score``
+        still sets what the run's total is worth (cash, the fire).
+        """
         self.game.marbles = []
         marble = self._add_marble()
         marble.finished = True
@@ -681,7 +735,15 @@ class GameTestCase(unittest.TestCase):
         self.game.run_complete = False
         self.game.score_chips = score
         self.game.score_mult = 1
-        self.game.required_score = required
+        if cleared:
+            # A level is cleared by beating its enemies, so the winning run
+            # kills them before its marble comes home.
+            for enemy in self.game.live_enemies():
+                self.game._defeat_enemy(enemy)
+        else:
+            block = main.Enemy(1, 1)
+            self.game.grid[(1, 1)] = block
+            self.addCleanup(lambda: self.game.grid.pop((1, 1), None))
         self.game._handle_block_contacts([])
 
 

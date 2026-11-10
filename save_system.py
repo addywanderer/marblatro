@@ -37,7 +37,6 @@ BG_COLOR = _save_source.BG_COLOR
 ActionItem = _save_source.ActionItem
 Block = _save_source.Block
 BlockItem = _save_source.BlockItem
-BoardUnitOffer = _save_source.BoardUnitOffer
 CardItem = _save_source.CardItem
 Component = _save_source.Component
 DEFAULT_DIFFICULTY = _save_source.DEFAULT_DIFFICULTY
@@ -45,6 +44,11 @@ Difficulty = _save_source.Difficulty
 Effect = _save_source.Effect
 GREEN = _save_source.GREEN
 ItemPack = _save_source.ItemPack
+PassiveItem = _save_source.PassiveItem
+StructureItem = _save_source.StructureItem
+ToolItem = _save_source.ToolItem
+DECK_DRAW_SIZE = _save_source.DECK_DRAW_SIZE
+MAX_ENERGY = _save_source.MAX_ENERGY
 PORTAL_MAX_ACTIVATIONS = _save_source.PORTAL_MAX_ACTIVATIONS
 REQUIRED_SCORES = _save_source.REQUIRED_SCORES
 ResourceOption = _save_source.ResourceOption
@@ -55,6 +59,8 @@ SCREEN_WIDTH = _save_source.SCREEN_WIDTH
 ScorerToken = _save_source.ScorerToken
 Scorer = _save_source.Scorer
 Shape = _save_source.Shape
+Modifier = _save_source.Modifier
+Quality = _save_source.Quality
 Trial = _save_source.Trial
 WHITE = _save_source.WHITE
 del _save_source
@@ -133,13 +139,45 @@ def _restore_random_rolls(item, data):
     return item
 
 
+def _serialize_modifiers(item):
+    """The MODIFIERS on an item, as JSON: [[modifier, stacks], ...].
+
+    One list covers them all (see components.Modifier): the golem's tiers, the
+    forgotten stacks a vodka poured, a spark's temporary, an action's v2, a
+    token's runs and a retriggerable block's extra triggers. The legacy fields
+    that describe the same state (``quality``, ``version``, ``trigger_limit``,
+    ``runs_left``) are still written, so an older build can still read the file.
+    """
+    entries = Modifier.of(item) if hasattr(item, "modifier_stacks") else []
+    return [[int(modifier), int(stacks)] for modifier, stacks in entries]
+
+
+def _restore_modifiers(item, data):
+    """Give a rebuilt item back the modifiers a save stored for it."""
+    setter = getattr(item, "set_modifier_stacks", None)
+    if setter is None:
+        return item
+    for modifier, stacks in data.get("modifiers") or ():
+        setter(int(modifier), int(stacks))
+    return item
+
+
 def _serialize_item(item):
     """Turn a toolbox/shop/grid item into a JSON-safe dict.
 
     Every owned item stands on a board square, and the square is the item's
     ``col``/``row`` (a Block keeps its own ``x``/``y``), so it rides through the
-    save with the item like every other field.
+    save with the item like every other field. Whatever MODIFIERS the item
+    carries are added to the dict last, by one helper, so a new item kind cannot
+    forget to save them.
     """
+    data = _serialize_item_fields(item)
+    data["modifiers"] = _serialize_modifiers(item)
+    return data
+
+
+def _serialize_item_fields(item):
+    """The item's own fields (see _serialize_item, which adds its modifiers)."""
     if isinstance(item, Block):
         return {
             "kind": "block",
@@ -150,6 +188,8 @@ def _serialize_item(item):
             "effect_amounts": _serialize_effect_amounts(item),
             "scorer": int(item.scorer),
             "scorer_amount": float(item.scorer_amount) if item.scorer_amount is not None else None,
+            # The tier a golem left it at (see components.Quality).
+            "quality": int(getattr(item, "quality", Quality.NORMAL)),
             "angle": int(item.angle),
             "portal_number": int(getattr(item, "portal_number", 0)),
             "key_number": int(getattr(item, "key_number", 0)),
@@ -181,6 +221,7 @@ def _serialize_item(item):
             "scorer_amount": float(item.scorer_amount) if item.scorer_amount is not None else None,
             "price": int(item.price),
             "name": item.name,
+            "quality": int(getattr(item, "quality", Quality.NORMAL)),
             "portal_number": int(getattr(item, "portal_number", 0)),
             "key_number": int(getattr(item, "key_number", 0)),
             "trigger_limit": int(getattr(item, "trigger_limit", 1)),
@@ -214,7 +255,8 @@ def _serialize_item_as_item(item):
             "price": int(item.price),
             # The card's own scorer magnitude (a composed card pays, prices and
             # describes itself with it); 0 for a whole card.
-            "amount": getattr(item, "amount", 0),
+            "amount": item.amount,
+            "quality": int(getattr(item, "quality", Quality.NORMAL)),
             "col": item.col, "row": item.row,
             "board_cell": _serialize_board_cell(item),
             "name": item.name,
@@ -227,6 +269,49 @@ def _serialize_item_as_item(item):
             "value": int(item.value),
             "price": int(item.price),
             "version": int(getattr(item, "version", 1)),
+            # The action's own magnitude (the Lantern's draws); 0 for an action
+            # that carries none.
+            "amount": item.amount,
+            "quality": int(getattr(item, "quality", Quality.NORMAL)),
+            "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
+            "name": item.name,
+        }
+    if kind == "structure":
+        # A structure on the board: what it is and where it lies. Its table
+        # (what opens it, what it gives) lives in components.Structure, so
+        # nothing else has to be saved.
+        return {
+            "kind": "structure",
+            "value": int(item.value),
+            "price": int(item.price),
+            "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
+            "name": item.name,
+        }
+    if kind == "tool":
+        return {
+            "kind": "tool",
+            "value": int(item.value),
+            # What the tool's amount shapes (a chisel's pack sizes, a gilding
+            # cloth's quality tiers): a golem can fold two of them together, so
+            # the number is the item's own.
+            "amount": float(item.amount),
+            "col": item.col, "row": item.row,
+            "board_cell": _serialize_board_cell(item),
+            "name": item.name,
+        }
+    if kind == "passive":
+        # An UNPLAYABLE item (Concrete): which one it is, the magnitude it pays
+        # with and where it lies. It reaches a save through a pack's options (a
+        # Tool Pack holds one) as well as through the hand.
+        return {
+            "kind": "passive",
+            "value": int(item.value),
+            "price": int(item.price),
+            # The chips it adds: a golem can fold two Concretes into one of 60
+            # (see Game._combine_items), so the number is the item's own.
+            "amount": float(item.amount),
             "col": item.col, "row": item.row,
             "board_cell": _serialize_board_cell(item),
             "name": item.name,
@@ -258,23 +343,20 @@ def _serialize_item_as_item(item):
             "name": item.name,
             "options": [_serialize_item(option) for option in item.options],
         }
-    if kind == "unit":
-        # The shelf's Board Unit tile: not an item, but it stands on the board
-        # like the rest of the shelf (see items.BoardUnitOffer).
-        return {
-            "kind": "unit",
-            "price": int(item.price),
-            "col": item.col, "row": item.row,
-            "board_cell": _serialize_board_cell(item),
-            "name": item.name,
-        }
-    # A Component (shape/effect/scorer piece).
+    # A save written while the Board Unit was still a shelf offer. It is a
+    # top-bar button now (see BOARD_UNIT_BUTTON_RECT), so the offer is dropped
+    # before it is restored (see _load's shop restore).
+    # A Component (shape/effect/scorer piece). EVERY item carries an `amount`
+    # (see items: a block's is its scorer magnitude, a passive's is what it
+    # pays, a structure's or a tool's is 0), so the shape below can read it
+    # without asking whether it is there.
     return {
         "kind": item.kind,
         "value": int(item.value),
         "amount": float(item.amount) if item.amount else 0,
         "price": int(item.price),
         "name": item.name,
+        "quality": int(getattr(item, "quality", Quality.NORMAL)),
         "col": item.col, "row": item.row,
         "board_cell": _serialize_board_cell(item),
     }
@@ -300,8 +382,13 @@ def _restore_board_cell(item, data):
 
 
 def _deserialize_item(data):
-    """Rebuild a toolbox/shop/grid item from a serialized dict."""
-    return _deserialize_item_kind(data)
+    """Rebuild a toolbox/shop/grid item from a serialized dict.
+
+    The modifiers go on LAST, so what the save stored wins over whatever the
+    legacy fields (a quality, a version, a trigger limit) put there while the
+    item was being built.
+    """
+    return _restore_modifiers(_deserialize_item_kind(data), data)
 
 
 def _restored_shape(data):
@@ -316,10 +403,6 @@ def _restored_shape(data):
 
 
 def _deserialize_item_kind(data):
-    if data["kind"] == "unit":
-        return _restore_board_cell(
-            BoardUnitOffer(data.get("price", 0),
-                           col=data.get("col", 0), row=data.get("row", 0)), data)
     if data["kind"] == "resource":
         return ResourceOption(data["scorer"], data.get("amount", 0),
                               data.get("points", 0))
@@ -337,12 +420,29 @@ def _deserialize_item_kind(data):
             _restore_board_cell(
                 CardItem(data["value"], data.get("price", 20),
                          col=data.get("col", 0), row=data.get("row", 0),
-                         amount=data.get("amount", 0)), data), data)
+                         amount=data.get("amount", 0),
+                         quality=data.get("quality", Quality.NORMAL)), data), data)
     if data["kind"] == "action":
         return _restore_board_cell(
             ActionItem(data["value"], data.get("price", 60),
                        version=data.get("version", 1),
-                       col=data.get("col", 0), row=data.get("row", 0)), data)
+                       col=data.get("col", 0), row=data.get("row", 0),
+                       amount=data.get("amount"),
+                       quality=data.get("quality", Quality.NORMAL)), data)
+    if data["kind"] == "structure":
+        return _restore_board_cell(
+            StructureItem(data["value"], data.get("price", 0),
+                          col=data.get("col", 0), row=data.get("row", 0)), data)
+    if data["kind"] == "tool":
+        return _restore_board_cell(
+            ToolItem(data["value"], col=data.get("col", 0),
+                     row=data.get("row", 0),
+                     amount=data.get("amount")), data)
+    if data["kind"] == "passive":
+        return _restore_board_cell(
+            PassiveItem(data["value"], data.get("price", 0),
+                        col=data.get("col", 0), row=data.get("row", 0),
+                        amount=data.get("amount")), data)
     if data["kind"] == "block":
         if data.get("placed"):
             block = Block(
@@ -358,6 +458,7 @@ def _deserialize_item_kind(data):
                 trigger_paid=data.get("trigger_paid", 0),
                 effects=data.get("effects") or [Effect.NONE],
                 effect_amounts=_deserialize_effect_amounts(data),
+                quality=data.get("quality", Quality.NORMAL),
             )
             block.spin = data.get("spin", 0.0)
             block._refresh_geometry()  # include the restored spin
@@ -381,6 +482,7 @@ def _deserialize_item_kind(data):
             effects=data.get("effects") or [Effect.NONE],
             effect_amounts=_deserialize_effect_amounts(data),
             angle=data.get("angle"),
+            quality=data.get("quality", Quality.NORMAL),
         )
         # A block refunded to the toolbox keeps what it had left (see
         # main._refund_block); a save from before this simply has none.
@@ -396,6 +498,7 @@ def _deserialize_item_kind(data):
         name=data.get("name", ""),
         col=data.get("col", 0),
         row=data.get("row", 0),
+        quality=data.get("quality", Quality.NORMAL),
     ), data)
 
 
@@ -503,8 +606,18 @@ def _save_data(game):
         # The toolbox's overflow: owned parts the board had no square for. A
         # save written before the stash existed has none.
         "toolbox_stash": [_serialize_item(i) for i in game.toolbox.stash],
-        "grid": [_serialize_item(b) for b in game.grid.values()],
-        "shop": [_serialize_item(i) for i in game.shop.items],
+        # ENEMIES are not saved: a level lays its own cast out when it becomes
+        # current — on a new game, on the CONTINUE between runs, and here, when
+        # a save is loaded — and no run is ever saved mid-flight, so a load lands
+        # in the build phase with the level already standing (see _begin_level).
+        "grid": [_serialize_item(b) for b in game.grid.values()
+                 if not getattr(b, "is_enemy", False)
+                 and not getattr(b, "is_level_prop", False)],
+        # The LEVEL's own structures are not saved either: the level being played
+        # puts them back on their own squares every time it is laid out (see
+        # Game._place_level_structures), exactly like its props and its enemies.
+        "shop": [_serialize_item(i) for i in game.shop.items
+                 if not getattr(i, "is_level_structure", False)],
         # The pack the player is choosing from, if any (it has already left the
         # shelf, so it is saved on its own — see Game.open_pack), and the action
         # an action pack armed for immediate use (see Game.pending_pack_action).
@@ -582,6 +695,25 @@ def _save_data(game):
         "unlocked_cells": [list(c) for c in game.unlocked_cells],
         # Board Units still in hand (each buys one locked square) persist too.
         "board_units": game.board_units,
+        # The energy the tools have left THIS RUN: a load is not a new run, so it
+        # must not hand back what the run has already spent (see reset_run for
+        # the refill).
+        "energy": game.energy,
+        # Which LEVEL the game is on, and how many of its enemies this level has
+        # already seen off (see components.LEVELS).
+        "level_number": game.level_number,
+        "enemies_defeated": game.enemies_defeated,
+        # The structures this level visit has already spent, as [value, x, y]:
+        # a structure the player opened stays opened through a save and load
+        # instead of being dealt again (see Game.spent_structures).
+        "spent_structures": [list(entry) for entry in
+                             sorted(getattr(game, "spent_structures", ()))],
+        # The level's plan entries the player has REROLLED, as [index, value]:
+        # the layout deals what the reroll made of a structure, so a load does
+        # not quietly undo one (see Game.structure_rerolls).
+        "structure_rerolls": [[index, value] for index, value in
+                              sorted(getattr(game, "structure_rerolls",
+                                             {}).items())],
     }
 
 
@@ -624,6 +756,10 @@ def _load_save_data(game, data, slot):
         game.unlocked_cells = {tuple(c) for c in cells}
         game._board_walls_dirty = True
     game.board_units = data.get("board_units", 0)
+    # A save written before energy existed reads as a full bar, and a corrupt
+    # count can never leave the player with more than a run's worth.
+    game.max_energy = MAX_ENERGY
+    game.energy = max(0, min(int(data.get("energy", MAX_ENERGY)), MAX_ENERGY))
     game.cash = data.get("cash", game.cash)
     game.run_number = data.get("run_number", 0)
     game.round_index = data.get("round_index", 0)
@@ -643,6 +779,18 @@ def _load_save_data(game, data, slot):
     game.continue_past_game_over = data.get("continue_past_game_over", False)
     game.score_chips = data.get("score_chips", 1)
     game.score_mult = data.get("score_mult", 1)
+    game.level_number = data.get("level_number", 1)
+    # The structures this level visit has already spent (see
+    # Game.spent_structures): restored BEFORE the level is laid out below, so
+    # the layout does not hand them out again.
+    game.spent_structures = {tuple(entry) for entry in
+                             data.get("spent_structures") or ()}
+    # What the player REROLLED into what, restored for the same reason and in
+    # the same place: the level is laid out below, and its plan must deal the
+    # structures the player turned them into.
+    game.structure_rerolls = {int(index): int(value) for index, value in
+                              data.get("structure_rerolls") or ()}
+    game.enemies_defeated = data.get("enemies_defeated", 0)
     game.last_run_cash_gained = data.get("last_run_cash_gained", 0)
     game.last_run_cash_breakdown = dict(data.get("last_run_cash_breakdown", {}))
     game.current_trial = data.get("current_trial")
@@ -751,7 +899,10 @@ def _load_save_data(game, data, slot):
     # room (see Game._return_inaccessible), and a save written before the card
     # existed banks nothing.
     game.inaccessible = [_deserialize_item(d) for d in data.get("inaccessible", [])]
-    game.shop.items = [_deserialize_item(d) for d in data.get("shop", [])]
+    # A save written while the Board Unit was still a shelf OFFER drops that
+    # offer: it is a top-bar button now (see BOARD_UNIT_BUTTON_RECT).
+    game.shop.items = [_deserialize_item(d) for d in data.get("shop", [])
+                       if d.get("kind") != "unit"]
     game.cards = [_deserialize_item(d) for d in data.get("cards", [])]
     game.actions = [_deserialize_item(d) for d in data.get("actions", [])]
     # The shelf's CELLS belong to the layout rather than to the save: re-seat the
@@ -816,11 +967,23 @@ def _load_save_data(game, data, slot):
     game.run_time = 0.0
     game.assigned_toolbox_indexes = {}
     game._clear_toolbox_selection()
+    # The level being played is laid out NOW, in the build phase (user request:
+    # "load the level beforehand ... so that the level does not appear to change
+    # randomly"): a save deliberately does not store the level's props, enemies
+    # or structures, so they are put back on their own squares here — before the
+    # items are laid out below, so nothing lands on them.
+    game._begin_level()
     # Items only ever stand on UNLOCKED squares (see ensure_board_cells), so the
     # loaded layout is re-made: a save whose board was locked down again — or one
     # whose items sat where this layout cannot put them — comes back with every
     # item on a square the player can reach.
     game.ensure_board_cells()
+    # The DECK button reports how many items this run DREW (see
+    # Game.drawn_items). A save does not record the draw itself, so the loaded
+    # board stands in for it: at most DECK_DRAW_SIZE items that are not always
+    # on the board.
+    game.deck_drawn = [item for item in game.hand_items()
+                       if not game._stays_out_of_the_deck(item)][:DECK_DRAW_SIZE]
 
 
 def wipe_slot(game, slot):

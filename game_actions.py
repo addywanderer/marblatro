@@ -21,6 +21,7 @@ import sounds
 import ui
 from ui import Popup, ScoreParticle, TrailParticle
 from components import (
+    Ability,
     CARD_SCORERS,
     COMPONENT_PRICES,
     DEFAULT_DIFFICULTY,
@@ -38,10 +39,16 @@ from components import (
     Component,
     Difficulty,
     Effect,
+    Keyword,
     MarbleType,
+    Modifier,
     Pack,
+    Quality,
     Rarity,
     Scorer,
+    Structure,
+    Tool,
+    Verb,
     Shape,
     Trial,
     block_price_for,
@@ -76,6 +83,7 @@ from items import (
     ItemPack,
     ResourceOption,
     ScorerToken,
+    ToolItem,
     CashBreakdown,
     _s,
     make_card_item,
@@ -115,18 +123,35 @@ class ActionsMixin:
         self.selected_action = action
         self.selected_action_subject = None
         if Action.needs_target(action.value):
+            what = ("structure" if Action.targets_structures(action.value)
+                    else "block/card")
             self._set_shop_message(
-                f"{action.name} (v{action.version}) — click a target block/card")
+                f"{action.name} (v{action.version}) — click a target {what}")
         else:
             # A target-free action acts on the player, not on a piece.
             self._set_shop_message(f"{action.name} (v{action.version}) — press S to use")
 
-    def is_action_target(self, item):
-        """True when ``item`` is something an active action can be aimed at."""
+    def is_action_target(self, item, action=None):
+        """True when ``item`` is something an active action can be aimed at.
+
+        A block or a card is the usual subject; a component piece counts too,
+        because Cleansing is aimed at a block, an effect or a scorer (see
+        _action_cleansing) and each action refuses the targets it cannot use.
+
+        ``action`` is the action being aimed: the kind of target it takes comes
+        from its own table (see Action.STRUCTURE_TARGET), so a Reroll can only
+        ever be pointed at a structure and every other action never is. Without
+        an action the question is the general one — what an action may be aimed
+        at — which is what the selection highlight and the tool prompt ask.
+        """
         if item is None or getattr(item, "kind", None) == "action":
             return False
+        if Action.targets_structures(getattr(action, "value", None)):
+            return self.is_structure(item)
         return (isinstance(item, Block)
-                or getattr(item, "kind", None) in ("block", "card"))
+                or getattr(item, "kind", None) in ("block", "card",
+                                                   Component.EFFECT,
+                                                   Component.SCORER))
 
     def _clear_action_selection(self, announce=True):
         """Deselect the current action and its subject.
@@ -142,7 +167,45 @@ class ActionsMixin:
         if action is not None and self.is_item_selected(action):
             self._unselect_item(action, announce=announce)
 
-    def _apply_action(self):
+    def _use_ability(self):
+        """The S key: fire the actor's ABILITY, if it has one it can use.
+
+        This is the one door S comes through (see components.Ability). The actor
+        is the first of the items S acts on -- the armed action, then the armed
+        tool, then whatever is held -- and the ability table says what it needs,
+        what it costs and which method carries it out (Ability.HANDLERS). Every
+        capability therefore shares one dispatch, one vocabulary and one hint.
+
+        Returns False when S should fall through to the board-building meanings
+        (assembling parts into a block, taking a block apart, building a plain
+        wall): that happens when the actor has no ability at all, or has one whose
+        targets are not met yet -- a Wasteful block with nothing selected beside
+        it keeps the ordinary S meanings (see _use_wasteful).
+        """
+        for actor in (self.selected_action, getattr(self, "selected_tool", None),
+                      self.selected_toolbox_item):
+            ability = Ability.of(actor)
+            if ability is None or not self._ability_is_ready(ability, actor):
+                continue
+            # The handler is looked up from the table, so an ability that exists
+            # is an ability the game can actually fire.
+            getattr(self, Ability.handler(ability))(actor)
+            return True
+        return False
+
+    def _ability_is_ready(self, ability, actor):
+        """True when the actor's ability has the targets it asks for."""
+        if ability == Ability.OPEN:
+            return getattr(self, "selected_tool", None) is not None
+        if ability == Ability.MODIFY:
+            return bool([item for item in self.selected_targets()
+                         if getattr(item, "kind", None) == "card"])
+        if ability == Ability.DISCARD:
+            return bool([item for item in self.selected_targets()
+                         if item is not actor])
+        return True
+
+    def _apply_action(self, actor=None):
         """Apply the actor action to its targets (the S key).
 
         The action is the FIRST selected item and what it acts on is everything
@@ -164,12 +227,20 @@ class ActionsMixin:
         # target item"). A packed action is not itself in the selection, so all
         # of it counts.
         targets = [t for t in self.selection
-                   if t is not action and self.is_action_target(t)]
+                   if t is not action and self.is_action_target(t, action)]
         if needed is not None and len(targets) != needed:
             # Not the right number of targets: nothing happens at all.
             self._set_shop_message(
                 f"{action.name} needs {needed} target"
                 f"{'' if needed == 1 else 's'} — {len(targets)} selected")
+            return False
+        # An action that asks for ENERGY (see Action.ENERGY) is paid for out of
+        # the run's own budget, exactly as a tool is: nothing happens — and
+        # nothing is spent — when the budget cannot cover it.
+        cost = Action.energy(getattr(action, "value", None))
+        if self.energy < cost:
+            self._set_shop_message(
+                f"Out of energy — {self.max_energy} a run, back at the next one")
             return False
         subject = targets[0] if targets else None
         self.selected_action_subject = subject
@@ -188,6 +259,14 @@ class ActionsMixin:
             applied = self._action_inaction(action)
         elif action.value == Action.FORESIGHT:
             applied = self._action_foresight(action)
+        elif action.value == Action.LANTERN:
+            applied = self._action_lantern(action)
+        elif action.value == Action.EYEBALL:
+            applied = self._action_eyeball(action)
+        elif action.value == Action.DEEP_POCKETS:
+            applied = self._action_deep_pockets(action)
+        elif action.value == Action.NASTY_COCKTAIL:
+            applied = self._action_nasty_cocktail(action)
         elif action.value == Action.DEATH:
             applied = self._action_death(action, subject)
         elif action.value == Action.RECOGNITION:
@@ -200,10 +279,20 @@ class ActionsMixin:
             applied = self._action_strength(action, subject)
         elif action.value == Action.SPIRIT:
             applied = self._action_spirit(action, subject)
+        elif action.value == Action.CLEANSING:
+            applied = self._action_cleansing(action, subject)
+        elif action.value == Action.REROLL:
+            applied = self._action_reroll(action, subject)
         else:
             self._set_shop_message("That action does nothing yet")
             return False
         if applied:
+            if getattr(self, "deck_pick_action", None) is action:
+                # Eyeball has only ARMED its pick: it is paid for when the
+                # cards are actually drawn (see _finish_deck_pick), so closing
+                # the deck costs nothing.
+                return applied
+            self.energy -= cost
             self._consume_action(action)
         return applied
 
@@ -290,25 +379,18 @@ class ActionsMixin:
         return True
 
     def _action_brainstorm(self, action):
-        """Brainstorm buys shop luck: 2 free rerolls (v1) or half-price ones (v2).
+        """Brainstorm puts Reroll cards on the board: 2 of them, or 4 upgraded.
 
-        The free rerolls go straight into the same bank Fresh fills, and they
-        are NOT counted in free_rerolls_run_gain: that counter is what a retry
-        claws back (rerolls a RUN granted), while these were bought and are the
-        player's to keep. v2 lowers the price of every future reroll for the
-        rest of the game (see refresh_cost), which is set rather than
-        multiplied so a second Brainstorm cannot stack it to free.
+        User request: "make all reroll mechanics spawn this card on the board
+        when triggered." Brainstorm used to bank free shop rerolls (and its
+        upgrade halve their price), which the shelf's rework left with nothing
+        to spend them on; what it hands over now is the reroll itself — the
+        Reroll card (see Game._spawn_reroll_cards). The cards are BOUGHT, not
+        earned by a run, so retrying the run does not take them back.
         """
-        if action.version < 2:
-            self.free_rerolls += BRAINSTORM_REROLLS
-            left = (f" ({self.free_rerolls} banked)" if self.free_rerolls
-                    else "")
-            self._set_shop_message(
-                f"{action.name} banked {BRAINSTORM_REROLLS} free rerolls{left}")
-            return True
-        self.reroll_discount = BRAINSTORM_REROLL_FACTOR
-        self._set_shop_message(
-            f"{action.name} halved the reroll price (now ${self.refresh_cost()})")
+        count = (BRAINSTORM_REROLLS_V2 if action.version >= 2
+                 else BRAINSTORM_REROLLS)
+        self._spawn_reroll_cards(count)
         return True
 
     def _action_mass_production(self, action):
@@ -421,6 +503,121 @@ class ActionsMixin:
         sounds.play_coin()
         return True
 
+    def _action_lantern(self, action):
+        """Lantern: draw its magnitude in items from the deck, then discard itself.
+
+        The action's own magnitude is the number of items it draws (see
+        MAGNITUDES.ACTIONS), so a Lantern a golem combined with another one
+        really does draw twice as many. The items come out of the deck through
+        the same door Wasteful uses (see _draw_one_item) and the first takes the
+        Lantern's own square, so the draw appears where the light was; the
+        Lantern itself is then thrown away through _discard_item, which is what
+        makes the run's discard count go up (the Trash Can card pays for it).
+        With an empty deck nothing happens and nothing is spent.
+        """
+        if not self.deck_items():
+            self._set_shop_message("The Lantern needs an item in the deck to draw")
+            return False
+        draws = max(0, int(action.amount))
+        origin = self.item_cell(action)
+        # "and discards this card": the action leaves for good, and the run
+        # counts it as one of the items it threw away.
+        self._discard_item(action)
+        drawn = []
+        for index in range(draws):
+            item = self._draw_one_item(origin if index == 0 else None)
+            if item is None:
+                break
+            drawn.append(item)
+        names = ", ".join(self._item_name(item) for item in drawn) or "nothing"
+        self._set_shop_message(f"Lantern drew {names} and burned out")
+        sounds.play_mech()
+        return True
+
+    def _action_eyeball(self, action):
+        """Eyeball: the player PICKs the cards they draw out of the deck.
+
+        User request: "pick a card from your deck to draw (1 energy)." The pick
+        is made where the deck is shown — the DECK overlay — so using this
+        action arms a pick and opens it (see Game.arm_deck_pick /
+        Game._click_deck_pick). Nothing is spent until a card is actually
+        drawn: closing the overlay keeps the action, so a look is free. The
+        action's own magnitude is how many cards it may take, so a golem-folded
+        Eyeball takes two.
+        """
+        if not self.eyeball_cards():
+            self._set_shop_message(
+                "Eyeball needs a card in the deck to draw — kept")
+            return False
+        self.arm_deck_pick(action)
+        return True
+
+    def _action_deep_pockets(self, action):
+        """Deep Pockets: a random pack, paid for with a random structure.
+
+        User request: "create a random pack, destroy a random structure (1
+        energy)." The pack comes from the shop's own roller, so it obeys the
+        same type, size and ownership rules every other pack does, and it joins
+        the player's items on the board (ready to open). The structure is taken
+        off the level for this visit — marked SPENT exactly as an opened one is
+        (see _consume_structure), so laying the level out again cannot bring it
+        back — and its square is left empty. A level with nothing left standing
+        still hands the pack over: there is simply nothing to pull down.
+        """
+        packs = max(1, int(getattr(action, "amount", 1) or 1))
+        made = []
+        for _ in range(packs):
+            pack = self.shop._roll_pack(random.choice(Pack.ORDER),
+                                        random.choice(Pack.SIZE_ORDER))
+            self._adopt_pack(pack)
+            self._on_item_gained(pack)
+            self._discover_pack(pack.pack_type)
+            made.append(pack.name)
+        destroyed = []
+        for _ in range(packs):
+            standing = self.level_structures()
+            if not standing:
+                break
+            victim = random.choice(standing)
+            destroyed.append(self._item_name(victim).lower())
+            self._consume_structure(victim, discover=False)
+        message = f"{action.name} made {', '.join(made)}"
+        if destroyed:
+            plural = "" if len(destroyed) == 1 else "s"
+            message += (f", pulling down the {', '.join(destroyed)} "
+                        f"(structure{plural} gone for this level)")
+        else:
+            message += " — no structure was left to pull down"
+        self._set_shop_message(message)
+        sounds.play_coin()
+        return True
+
+    def _action_nasty_cocktail(self, action):
+        """Nasty Cocktail: energy for every modifier riding on the card.
+
+        User request: "gain 1 energy for each unique modifier on this card (0
+        energy)". The count is the number of KINDS of modifier the card carries
+        (Modifier.of — golden, diamond, forgotten, temporary, token,
+        retriggerable, v2, flipped, disabled), however many stacks each has,
+        times the action's own magnitude, so a golem-folded cocktail pays
+        double. A plain cocktail carries none and would give nothing, so it is
+        refused and KEPT rather than wasted — an upgraded (v2) one is a drink
+        worth pouring, since v2 is a modifier too.
+        """
+        kinds = len(Modifier.of(action))
+        if not kinds:
+            self._set_shop_message(
+                f"{action.name} has no modifiers yet — it would give no "
+                f"energy, so it is kept")
+            return False
+        gained = max(1, int(getattr(action, "amount", 1) or 1)) * kinds
+        self.energy += gained
+        self._set_shop_message(
+            f"{action.name} gave {gained} energy "
+            f"({kinds} modifier{'' if kinds == 1 else 's'})")
+        sounds.play_coin()
+        return True
+
     def _action_death(self, action, subject):
         """Death sells a chosen block or card for 1.5x (v1) / 6x (v2) its price."""
         if self._unsellable(subject):
@@ -482,8 +679,11 @@ class ActionsMixin:
             if self.cash < subject.price:
                 self._set_shop_message(f"Need ${subject.price} to duplicate {subject.name}")
                 return False
-            self._adopt_card(make_card_item(
-                subject.value, amount=getattr(subject, "amount", 0)))
+            # ...and a copy of a combined card is combined too (see Quality).
+            copy = make_card_item(subject.value,
+                                  amount=getattr(subject, "amount", 0))
+            copy.quality = Quality.of(subject)
+            self._adopt_card(copy)
             self.cash -= subject.price
             self._set_shop_message(f"Recognized a copy of {subject.name} (${subject.price})")
             sounds.play_coin()
@@ -504,7 +704,8 @@ class ActionsMixin:
                              trigger_limit=getattr(subject, "trigger_limit", 1),
                              trigger_paid=getattr(subject, "trigger_paid", 0),
                              effects=subject.effects,
-                             effect_amounts=getattr(subject, "effect_amounts", None))
+                             effect_amounts=getattr(subject, "effect_amounts", None),
+                             quality=Quality.of(subject))
         else:
             if subject not in self.toolbox.items:
                 self._set_shop_message("Action target is not owned")
@@ -516,7 +717,8 @@ class ActionsMixin:
                              key_number=getattr(subject, "key_number", 0),
                              trigger_limit=getattr(subject, "trigger_limit", 1),
                              trigger_paid=getattr(subject, "trigger_paid", 0),
-                             effects=subject.effects)
+                             effects=subject.effects,
+                             quality=Quality.of(subject))
         if self.cash < price:
             self._set_shop_message(f"Need ${price} to duplicate this block")
             return False
@@ -674,6 +876,145 @@ class ActionsMixin:
         sounds.play_mech()
         return True
 
+    def _action_cleansing(self, action, subject):
+        """Cleansing multiplies a piece's MAGNITUDE by 1.5 (v1) or 2.5 (v2).
+
+        It works on any piece that HAS a magnitude the game reads: a block
+        (its scorer amount and every effect strength), an effect component or a
+        scorer component. A shape has no magnitude and is refused, and so is a
+        block whose scorer and effects are all inert — there is nothing to
+        clean.
+        """
+        if subject is None:
+            self._set_shop_message("Cleansing needs a block, effect or scorer")
+            return False
+        if isinstance(subject, Block):
+            if self.grid.get((subject.x, subject.y)) is not subject:
+                self._set_shop_message("Action target is not on the board")
+                return False
+        elif not self.owns_item(subject):
+            self._set_shop_message("Action target is not owned")
+            return False
+        kind = getattr(subject, "kind", None)
+        factor = 2.5 if action.version >= 2 else 1.5
+        if kind in (Component.EFFECT, Component.SCORER):
+            subject.amount = round(subject.amount * factor, 2)
+            self._set_shop_message(
+                f"{action.name} raised {self._item_name(subject)} to "
+                f"{self._particle_amount_text(subject.amount)}")
+            sounds.play_mech()
+            return True
+        if not (isinstance(subject, Block) or kind == "block"):
+            self._set_shop_message("Cleansing works on a block, effect or scorer")
+            return False
+        cleaned = False
+        if getattr(subject, "scorer", Scorer.NONE) not in (Scorer.NONE,
+                                                           Scorer.START,
+                                                           Scorer.FINISH):
+            subject.scorer_amount = self._clean_amount(subject.scorer_amount,
+                                                       factor)
+            cleaned = True
+        amounts = getattr(subject, "effect_amounts", None)
+        if amounts:
+            subject.effect_amounts = {k: self._clean_amount(v, factor)
+                                      for k, v in amounts.items()}
+            cleaned = True
+        if not cleaned:
+            self._set_shop_message("There is nothing on that block to clean")
+            return False
+        self._set_shop_message(f"{action.name} strengthened {self._item_name(subject)}")
+        sounds.play_mech()
+        return True
+
+    @staticmethod
+    def _clean_amount(amount, factor):
+        """One magnitude, multiplied: whole numbers stay whole, rest keep 2dp."""
+        if amount is None:
+            return amount
+        raised = amount * factor
+        return int(raised + 0.5) if isinstance(amount, int) else round(raised, 2)
+
+    def _action_reroll(self, action, subject):
+        """Reroll: the selected structure becomes another one, where it stands.
+
+        User request: "randomize a selected structure, discard this card, draw a
+        card (0 energy)". The structure keeps its square and its place in the
+        level's plan (see _reroll_structure), so the board never moves about
+        under the player and no later layout pass can undo the reroll. Then the
+        card leaves through the ordinary discard door and what it draws takes
+        the square it gave up, exactly like the Lantern.
+
+        Tesseract pays for a reroll (see Game._grow_tesseract): a reroll is this
+        card now, so using one is what the card counts.
+        """
+        if not self.is_structure(subject):
+            self._set_shop_message(
+                f"{action.name} needs a structure to reroll — kept")
+            return False
+        new_value = self._reroll_structure_value(subject)
+        if new_value is None:
+            self._set_shop_message(
+                f"There is no other structure to turn the "
+                f"{self._item_name(subject).lower()} into — kept")
+            return False
+        was = self._item_name(subject).lower()
+        self._reroll_structure(subject, new_value)
+        note = self._grow_tesseract()
+        origin = self.item_cell(action)
+        # "discards this card": it leaves for good, and the run counts it as one
+        # of the items it threw away (the Trash Can card pays for those).
+        self._discard_item(action)
+        drawn = []
+        for index in range(max(0, int(action.amount))):
+            item = self._draw_one_item(origin if index == 0 else None)
+            if item is None:
+                break
+            drawn.append(self._item_name(item))
+        drew = f", drew {', '.join(drawn)}" if drawn else ""
+        self._set_shop_message(
+            f"The {was} is now a {self._item_name(subject).lower()}{drew}{note}")
+        sounds.play_mech()
+        return True
+
+    def _reroll_structure_value(self, structure):
+        """A random structure other than this one, or None when there is none.
+
+        Every structure is in the pool — "randomize a selected structure" is the
+        whole of the card, so a level of four pits may still hand back a mirror
+        — less the one already standing there and less anything this level visit
+        OPENED on that square (see _structure_is_spent): a reroll must not deal
+        back a structure the player has already used up.
+        """
+        cell = self.item_cell(structure)
+        spent = getattr(self, "spent_structures", ())
+        options = [value for value in Structure.ORDER
+                   if value != structure.value
+                   and not (cell is not None
+                            and (value, cell[0], cell[1]) in spent)]
+        return random.choice(options) if options else None
+
+    def _reroll_structure(self, structure, new_value):
+        """Turn a structure into another one in place, and remember it.
+
+        The ITEM is the same object: the square it stands on, the modifiers
+        riding on it and the plan entry it came from are all untouched, so the
+        board has nothing to rearrange. What the level's plan remembers is the
+        ENTRY it became (see Game.structure_rerolls) — without that, the next
+        layout pass (an R, a board edit, a T) would deal the structure the level
+        authored all over again and quietly undo the reroll.
+
+        Its switch goes off: the structure the player was pointing at is not the
+        one standing there any more, so it must not be left selected for the
+        next tool to fire at by accident.
+        """
+        structure.value = new_value
+        structure.name = Structure.name(new_value)
+        structure.price = Structure.PRICES.get(new_value, 0)
+        index = getattr(structure, "plan_index", None)
+        if index is not None:
+            self.structure_rerolls[index] = new_value
+        self._forget_item(structure)
+
     def _action_strength(self, action, subject):
         """Strength raises a block's scorer amount: +50% (v1) or x3 (v2).
 
@@ -787,3 +1128,586 @@ class ActionsMixin:
             f"{action.name} kept {Scorer.name(token.scorer)} from {name} {left}")
         sounds.play_mech()
         return True
+
+    # -----------------------------------------------------------------------
+    # Tools and structures: a structure is opened by using a tool on it.
+    # -----------------------------------------------------------------------
+    def _select_tool(self, tool):
+        """Arm a tool as the actor: it is used on a structure with S.
+
+        A tool works exactly like an action (user request: "Similarly to
+        actions, items that can do these can be used on structures to turn them
+        into something useful"): select the tool first, then the structure, and
+        press S. Tools are never spent, so nothing is removed when one is used.
+        """
+        self._clear_active_selection()
+        self.selected_toolbox_item = tool
+        self.selected_toolbox_index = self._shown_index_of(tool)
+        self.selected_tool = tool
+        verbs = tuple(getattr(tool, "verbs", None) or (tool.verb,))
+        self._set_shop_message(
+            f"{tool.name} ({Keyword.line(tool)}) — click a structure to "
+            f"{' or '.join(Verb.name(verb) for verb in verbs)}"
+            f" ({getattr(tool, 'energy', 1)} energy, {self.energy} left)")
+
+    def _clear_tool_selection(self, announce=True):
+        """Deselect the armed tool, if any (its switches go off with it)."""
+        tool = getattr(self, "selected_tool", None)
+        self.selected_tool = None
+        if tool is not None and self.is_item_selected(tool):
+            self._unselect_item(tool, announce=announce)
+
+    def is_structure(self, item):
+        """True when ``item`` is a structure a tool can be used on.
+
+        Kind only: a shelf offer is a structure too, and _apply_tool refuses
+        one by name so the player is told to buy it rather than told there is
+        nothing selected.
+        """
+        return getattr(item, "kind", None) == "structure"
+
+    def level_structures(self):
+        """The level's structures still standing, in board order.
+
+        A structure belongs to the LEVEL (see Game._place_level_structures): it
+        is one of the shop's free offers, flagged is_level_structure, and it is
+        what a tool opens. This is the list "a random structure" is drawn from
+        (Deep Pockets pulls one down) and the list a level's offer of four is
+        counted against.
+        """
+        return [item for item in self.shop.items
+                if getattr(item, "is_level_structure", False)]
+
+    def _apply_tool(self, actor=None):
+        """Use the armed tool on the selected structure (the S key).
+
+        The tool is the actor and the structure is everything selected behind
+        it, exactly like an action and its target: the tool needs exactly one
+        structure, and if it has not got one NOTHING happens.
+
+        A tool applies its VERBS in the order its table lists them and uses the
+        first one its structure answers to, so a brick (break, dig) digs a pit
+        and breaks a mirror, while a shovel only ever digs. A structure that
+        answers to none of them is left alone and says so.
+
+        An opening spends the TOOL's energy -- 1 for the four the player starts
+        with, 0 for a brick -- and a refused one costs nothing at all. A tool
+        whose keywords say CONSUME is destroyed by the opening, after the reward
+        is in hand, and one that says DRAW deals its items on the way out (see
+        _use_up_tool).
+
+        Structures are FREE (user request): one the shelf is showing is opened
+        where it lies, with nothing to buy first.
+        """
+        tool = getattr(self, "selected_tool", None)
+        if tool is None or not self.owns_item(tool):
+            self._set_shop_message("Select a tool first")
+            return False
+        targets = [t for t in self.selection
+                   if t is not tool and self.is_structure(t)]
+        if len(targets) != 1:
+            self._set_shop_message(
+                f"{tool.name} needs 1 structure — {len(targets)} selected")
+            return False
+        structure = targets[0]
+        verbs = tuple(getattr(tool, "verbs", None) or (Tool.verb(tool.value),))
+        verb = next((candidate for candidate in verbs
+                     if Structure.result(structure.value, candidate) is not None),
+                    None)
+        if verb is None:
+            self._set_shop_message(
+                f"The {self._item_name(structure).lower()} cannot be "
+                f"{' or '.join(Verb.done(candidate) for candidate in verbs)}")
+            return False
+        result = Structure.result(structure.value, verb)
+        # Using a tool costs its own ENERGY (user request: "using any of
+        # flashlight, screwdriver, shovel, or hammer consumes 1 energy"), and a
+        # run only has MAX_ENERGY of it (see reset_run). A brick costs nothing,
+        # which is exactly what makes a 0-energy opening possible. A use that is
+        # refused above costs nothing: nothing happened, so nothing is spent.
+        cost = getattr(tool, "energy", 1)
+        if self.energy < cost:
+            self._set_shop_message(
+                f"Out of energy — {self.max_energy} a run, back at the next one")
+            return False
+        kind, value = result
+        origin = self.item_cell(structure)
+        if kind == "merge":
+            # A golem does not hold a reward: it combines what the player brings
+            # it (user request: "combine 2 of the same items to create 1 new item
+            # with double the magnitude"). Everything is checked BEFORE the
+            # energy is spent, so a refused combine costs nothing, and the
+            # combined item keeps the square the golem gives up.
+            pair = self._golem_pair(tool, structure, value)
+            if pair is None:
+                return False
+            keep, absorb = pair
+            self.energy -= cost
+            self._consume_structure(structure)
+            self._combine_items(keep, absorb)
+            if origin is not None:
+                self.set_item_cell(keep, origin)
+            made = self._item_name(keep)
+            swept = []
+        else:
+            made = Pack.name(value) if kind == "pack" else Action.name(value)
+            # The reward REPLACES the structure (user request: "remove the
+            # structure and put the reward in its place", the same way a bought
+            # offer keeps the tile it was bought from -- see _unlock_offer): it
+            # is built first, seated on the square the structure gives up, and
+            # only then adopted, so the square is claimed before gaining an item
+            # can deal it another (see _on_item_gained). The tool shapes what
+            # comes out (see _structure_reward: a chisel's pack sizes, a gilding
+            # cloth's tiers).
+            # The neighbours a SWEEPING tool (the wrecking bar) also opens are
+            # found BEFORE the target is spent: the squares are read from where
+            # the target stands, and _consume_structure takes it off the board.
+            sweep_targets = self._sweep_targets(tool, structure)
+            reward = self._structure_reward(kind, value, tool)
+            self.energy -= cost
+            self._consume_structure(structure)
+            if origin is not None:
+                self.set_item_cell(reward, origin)
+            self._adopt_reward(reward)
+            # ...and they are opened for the one swing already paid for.
+            swept = self._sweep_structures(tool, sweep_targets)
+        message = (f"The {self._item_name(structure).lower()} is "
+                   f"{Verb.done(verb)} — {made}")
+        if swept:
+            message += f", and with it {', '.join(swept)}"
+        # What the tool leaves behind (a drill's dirt, a pickaxe's spark) joins
+        # the deck, and "consume" destroys the one-shot tools that say so.
+        message += self._make_tool_leftovers(tool)
+        message += self._use_up_tool(tool)
+        self._set_shop_message(message)
+        sounds.play_mech()
+        return True
+
+    def _apply_modifier_tool(self, actor=None):
+        """Use a tool that pours MODIFIERS onto one card (the vodka).
+
+        User request: "add a tool, 'vodka': (select 1 card to give 3 stacks of
+        'forgotten', consume. costs 1 energy)". The tool is the actor and the
+        card is everything selected behind it: exactly one CARD, its own energy,
+        the stacks its table names (Tool.MODIFIES), and then the tool is drunk
+        (see _use_up_tool). A refused pour costs nothing at all.
+        """
+        tool = getattr(self, "selected_tool", None)
+        if tool is None or not self.owns_item(tool):
+            self._set_shop_message("Select a tool first")
+            return False
+        pour = Tool.modifies(tool.value)
+        if pour is None:
+            self._set_shop_message(f"{self._item_name(tool)} has nothing to pour")
+            return False
+        cards = [item for item in self.selection
+                 if item is not tool and getattr(item, "kind", None) == "card"]
+        if len(cards) != 1:
+            self._set_shop_message(
+                f"{self._item_name(tool)} needs 1 card — {len(cards)} selected")
+            return False
+        cost = getattr(tool, "energy", 1)
+        if self.energy < cost:
+            self._set_shop_message(
+                f"Out of energy — {self.max_energy} a run, back at the next one")
+            return False
+        modifier, stacks = pour
+        card = cards[0]
+        self.energy -= cost
+        Modifier.add(card, modifier, stacks)
+        held = Modifier.stacks(card, modifier)
+        message = (f"{self._item_name(card)} now has "
+                   f"{Modifier.name(modifier)} ({held} "
+                   f"stack{'' if held == 1 else 's'})")
+        message += self._use_up_tool(tool)
+        self._set_shop_message(message)
+        sounds.play_mech()
+        return True
+
+    def _make_tool_leftovers(self, tool):
+        """Leave what a tool MAKES in the player's DECK, and say so.
+
+        User request: "add a tool, 'drill': (break, fix, dig, or reveal, but add
+        'dirt' to your deck. costs 0 energy)" and "add a tool, 'pickaxe': (dig,
+        make spark)". The by-product is built through the ordinary item door and
+        put straight into the DECK (see _to_deck): it is not the opening's
+        reward, it is what the tool carries with it, and it is revealed in the
+        collection the first time one arrives.
+        """
+        made = Tool.makes(tool.value)
+        if made is None:
+            return ""
+        (_kind, value), count = made
+        names = []
+        for _ in range(count):
+            item = ToolItem(value)
+            self.toolbox.add(item)
+            self._to_deck(item)
+            self._discover_tool_or_passive(item)
+            names.append(self._item_name(item))
+        return (f" (the {self._item_name(tool).lower()} left "
+                f"{', '.join(names)} in your deck)")
+
+    def _use_up_tool(self, tool):
+        """Spend a tool whose keywords say consume: destroy it, then draw.
+
+        Returns the note the opening's message ends with ("" for a tool that is
+        never spent, which is the four the player starts with). The tool leaves
+        through the ordinary discard door, so the run counts it as an item it
+        threw away (the Trash Can card pays for those), and what it draws lands
+        on the square it gave up -- the same courtesy a structure's reward gets.
+        """
+        if not getattr(tool, "consumes", False) or not self.owns_item(tool):
+            return ""
+        name = self._item_name(tool)
+        home = self.item_cell(tool)
+        self._discard_item(tool)
+        drawn = []
+        for index in range(getattr(tool, "draws", 0)):
+            item = self._draw_one_item(home if index == 0 else None)
+            if item is None:
+                break
+            drawn.append(self._item_name(item))
+        note = f" (the {name.lower()} is used up"
+        if drawn:
+            note += f", drew {', '.join(drawn)}"
+        return note + ")"
+
+
+    def _consume_structure(self, structure, discover=True):
+        """The structure is spent when it opens: it leaves the board for good.
+
+        A shelf structure is one of the shop's FREE offers, so it leaves the shelf
+        with it: nothing of it may be left for the next layout pass to deal a new
+        square to, and the next refresh deals new structures anyway.
+
+        The square it was spent on is REMEMBERED for the level visit (see
+        Game.spent_structures): laying the level out again — a board edit, an R, a
+        T — must not put it back (user report: "if the player unlocks a structure
+        using a tool, and then moves the tool, the structure will revert itself
+        back into a locked state").
+
+        ``discover`` is what opening a structure also does (see
+        Game._discover_structure): a structure the player OPENED reveals its
+        codex entry. A structure that was DESTROYED instead (Deep Pockets pulls
+        one down without opening it) teaches nothing, so it passes False.
+        """
+        cell = self.item_cell(structure)
+        if cell is not None:
+            self.spent_structures.add((structure.value, cell[0], cell[1]))
+        # Opening one is what reveals it in the collection (see
+        # Game._discover_structure): the entry describes what the opening hands
+        # over, so a player learns it by opening one.
+        if discover:
+            self._discover_structure(structure.value)
+        self._forget_item(structure)
+        if self.toolbox.contains(structure):
+            self.toolbox.remove(structure)
+        if structure in self.shop.items:
+            self.shop.items.remove(structure)
+            slot = self.shop.slot_key(structure)
+            if slot in self.shop.locked:
+                self.shop.locked.remove(slot)
+        if cell is not None:
+            self.set_item_cell(structure, None)
+        self.assigned_toolbox_indexes.pop(structure, None)
+
+    def _structure_reward(self, kind, value, tool=None):
+        """The item a structure holds, built and NOT yet the player's.
+
+        A pit hands over a pack of parts at a randomly rolled size (like any pack
+        the shop sells, so a pit can be a small handful or a big one); a crystal
+        pool and a mirror hand over the action their table names.
+
+        The TOOL that opened it can shape what comes out (see Tool.AMOUNT_EFFECT):
+        a chisel pushes the pack's size up the ladder, and a gilding cloth hands
+        the reward over a QUALITY tier higher, so what the player keeps is worth
+        more than the door usually gives.
+        """
+        if kind == "pack":
+            size = random.choice(Pack.SIZE_ORDER)
+            if Tool.amount_effect(getattr(tool, "value", None)) == "pack_size":
+                size = Tool.bigger_pack_size(size, tool.amount)
+            reward = self.shop._roll_pack(value, size)
+        else:
+            reward = ActionItem(value, Action.PRICES.get(value, 24))
+        self._shape_reward_quality(reward, tool)
+        return reward
+
+    def _shape_reward_quality(self, reward, tool):
+        """Tier a reward up when the opening tool says so (the gilding cloth).
+
+        A pack's OPTIONS are what the player can keep, so each of them is what
+        the cloth touches; a single-item reward (an action) is touched itself.
+        """
+        if Tool.amount_effect(getattr(tool, "value", None)) != "quality":
+            return
+        steps = getattr(tool, "amount", 0)
+        for item in (list(getattr(reward, "options", ())) or [reward]):
+            self._set_quality(item, Tool.better_quality(Quality.of(item), steps))
+
+    def _sweep_structures(self, tool, targets):
+        """Open the structures next to a sweeping tool's target; name what came out.
+
+        The neighbours are opened exactly like the target was -- each reward takes
+        the square its structure gave up and is adopted, each structure is spent
+        for the level visit (see _consume_structure) and revealed in the
+        collection -- and none of them costs energy: one swing is one price. The
+        targets are found by _sweep_targets BEFORE the first structure is spent.
+        """
+        names = []
+        for other, (kind, value) in targets:
+            cell = self.item_cell(other)
+            reward = self._structure_reward(kind, value, tool)
+            self._consume_structure(other)
+            if cell is not None:
+                self.set_item_cell(reward, cell)
+            self._adopt_reward(reward)
+            names.append(Pack.name(value) if kind == "pack" else Action.name(value))
+        return names
+
+    def _sweep_targets(self, tool, structure):
+        """The structures a sweeping tool opens alongside the one it was used on.
+
+        A wrecking bar takes the whole neighbourhood with it (user request): every
+        structure in the four squares around its target that answers one of the
+        tool's verbs. A golem is skipped -- its opening is a MERGE of the
+        player's own items, not a reward it can hand over unasked.
+        """
+        if not Tool.sweeps(getattr(tool, "value", None)):
+            return []
+        cell = self.item_cell(structure)
+        if cell is None:
+            return []
+        verbs = tuple(getattr(tool, "verbs", None) or (Tool.verb(tool.value),))
+        found = []
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            other = self.item_at_cell((cell[0] + dx, cell[1] + dy))
+            if not self.is_structure(other):
+                continue
+            result = next((Structure.result(other.value, verb) for verb in verbs
+                           if Structure.result(other.value, verb) is not None),
+                          None)
+            if result is None or result[0] == "merge":
+                continue
+            found.append((other, result))
+        return found
+
+    def _golem_pair(self, tool, structure, count):
+        """The item a golem keeps and the ones it folds into it, or None.
+
+        A golem's opening is the one structure result that is not a fixed
+        reward: ``count`` (Structure.merge_count) of the player's OWN items are
+        what it works on, so everything selected besides the tool and the golem
+        is checked before anything is spent -- there must be that many, they must
+        be the same item, they must be at the same TIER (see Quality: a golden
+        item never folds with a plain one, and a diamond folds with nothing), and
+        they must carry a magnitude, because a magnitude is the only thing the
+        golem's answer is made of (two plain Rects would buy nothing). Returns
+        (keep, absorb) or None, with the refusal said.
+        """
+        items = [item for item in self.selection
+                 if item is not tool and item is not structure]
+        if len(items) != count:
+            self._set_shop_message(
+                f"The golem combines {count} of the same item — "
+                f"{len(items)} selected")
+            return None
+        keep, absorb = items[0], items[1:]
+        for item in [keep] + absorb:
+            if not (isinstance(item, Block) or self.owns_item(item)):
+                self._set_shop_message("The golem combines your own items")
+                return None
+        for item in absorb:
+            if not self._same_item(keep, item):
+                self._set_shop_message(
+                    f"The golem combines two of the SAME item — "
+                    f"{self._item_name(keep)} and {self._item_name(item)} differ")
+                return None
+        # A golem's work is a TIER, not just a number (see Quality): two plain
+        # items make a golden one and two golden items make a diamond (user
+        # request: "combine two golden items into a diamond item"). So the pair
+        # has to be in the same tier, and a diamond is final -- nothing is
+        # combined out of it.
+        quality = Quality.of(keep)
+        for item in absorb:
+            if Quality.of(item) != quality:
+                self._set_shop_message(
+                    f"The golem combines two items of the same quality — "
+                    f"{self._item_name(keep)} and {self._item_name(item)} differ")
+                return None
+        made = Quality.combines_into(quality)
+        if made is None:
+            self._set_shop_message(
+                f"{self._item_name(keep)} is a "
+                f"{Quality.name(quality).lower()} item and cannot be combined "
+                f"again")
+            return None
+        magnitudes = self._item_magnitudes(keep)
+        if not magnitudes or not any(value for value in magnitudes.values()):
+            self._set_shop_message(
+                f"{self._item_name(keep)} has no magnitude to double")
+            return None
+        return keep, absorb
+
+    def _same_item(self, first, second):
+        """True when two items are the SAME item, so a golem may combine them.
+
+        The kind and the value are the whole test for a component, an action or
+        a card (two Lanterns, two +30 chip scorers); two blocks also have to be
+        built the same way (shape, effects and scorer), and two actions have to
+        be at the same version.
+        """
+        if first is second:
+            return False
+        if getattr(first, "kind", None) != getattr(second, "kind", None):
+            return False
+        if isinstance(first, Block) or isinstance(second, Block):
+            if not (isinstance(first, Block) and isinstance(second, Block)):
+                return False
+            return (first.shape == second.shape
+                    and tuple(first.effects) == tuple(second.effects)
+                    and first.scorer == second.scorer)
+        if getattr(first, "value", None) != getattr(second, "value", None):
+            return False
+        if getattr(first, "kind", None) == "action":
+            return (getattr(first, "version", 1) == getattr(second, "version", 1))
+        return True
+
+    def _item_magnitudes(self, item):
+        """Every magnitude an item carries, keyed by where it lives.
+
+        ("scorer",) is a block's scorer amount, ("effect", value) one of its
+        effect strengths, and ("amount",) the single number every other item
+        carries -- the Lantern's draws, a +30 chip scorer's 30, a Concrete's 30
+        chips (EVERY item has an amount; those with no magnitude of their own,
+        a structure or a tool, carry 0 and so have nothing for a golem to
+        double).
+        """
+        kind = getattr(item, "kind", None)
+        if isinstance(item, Block) or kind == "block":
+            values = {}
+            scorer = getattr(item, "scorer", Scorer.NONE)
+            if scorer not in (Scorer.NONE, Scorer.START, Scorer.FINISH):
+                values[("scorer",)] = item.scorer_amount
+            for effect in (getattr(item, "effects", ()) or ()):
+                if Effect.MAGNITUDE.get(effect, 0):
+                    values[("effect", effect)] = item.effect_magnitude(effect)
+            return values
+        amount = item.amount
+        return {("amount",): amount} if amount else {}
+
+    def _add_item_magnitudes(self, item, extra):
+        """Add a magnitude map (see _item_magnitudes) to what ``item`` carries."""
+        kind = getattr(item, "kind", None)
+        if isinstance(item, Block) or kind == "block":
+            for key, amount in extra.items():
+                if key == ("scorer",):
+                    item.scorer_amount = self._clean_amount(
+                        item.scorer_amount + amount, 1.0)
+                    continue
+                effect = key[1]
+                amounts = dict(getattr(item, "effect_amounts", None) or {})
+                current = amounts.get(effect, Effect.MAGNITUDE.get(effect, 0))
+                amounts[effect] = self._clean_amount(current + amount, 1.0)
+                item.effect_amounts = amounts
+            return
+        item.amount = self._clean_amount(item.amount + extra.get(("amount",), 0),
+                                        1.0)
+
+    def _combine_items(self, keep, absorb):
+        """Fold other items' magnitudes into one, then throw the others away.
+
+        The golem's whole payoff: ``keep`` carries every item's numbers now (so
+        two Lanterns make a Lantern of 4, two +30 chip scorers a +60 one), and
+        what it was combined with leaves the game through the ordinary discard
+        door. What is left is also a TIER higher (see Quality): the first fold
+        makes it golden, the second a diamond — and because one fold doubles, a
+        diamond ends up carrying 4x what the plain item did, exactly as the
+        request asked ("combine two golden items into a diamond item, with 4x
+        the magnitude of the original item").
+        """
+        for item in absorb:
+            self._add_item_magnitudes(keep, self._item_magnitudes(item))
+            self._discard_item(item)
+        self._set_quality(keep, Quality.combines_into(Quality.of(keep)))
+
+    def _set_quality(self, item, quality):
+        """Mark an item with the tier a golem left it at, wherever it lives.
+
+        A placed block and the inventory item it was built from are one
+        existence (see _place_block_at), so the mark is written on both: a
+        combine done on the board shows on the item when it is taken up again,
+        and one done in hand shows on the block the item puts down.
+        """
+        if quality is None:
+            return
+        item.quality = quality
+        source = getattr(item, "source_item", None)  # a block -> its item
+        if source is not None:
+            source.quality = quality
+        cell = getattr(item, "placed_cell", None)    # an item -> its block
+        if cell is not None:
+            block = self.grid.get(cell)
+            if block is not None and getattr(block, "source_item", None) is item:
+                block.quality = quality
+
+    def is_wasteful(self, item):
+        """True when ``item`` is a block wearing the WASTEFUL effect.
+
+        Wasteful is the one effect the PLAYER uses: it does nothing to the marble
+        and everything to the build (see _use_wasteful).
+        """
+        has = getattr(item, "has_effect", None)
+        return bool(has is not None and has(Effect.WASTEFUL))
+
+    def _use_wasteful(self, actor=None):
+        """Wasteful: throw this block and one other item away, draw a fresh item.
+
+        User request: "add an effect, 'wasteful': can use this block to discard
+        this block and a different item, and draw a new item." The block is the
+        actor and ONE other selected item is what it takes with it: both leave the
+        game for good (see _discard_item — no cash, no components back) and one
+        random item is drawn from the deck onto the block's square, so the effect
+        is a gamble on the deck rather than a free reroll. With the wrong number
+        of items selected, or nothing left in the deck to draw, NOTHING happens
+        and nothing is spent.
+        """
+        actor = self.selected_toolbox_item
+        if not self.is_wasteful(actor):
+            return False
+        targets = [item for item in self.selected_targets() if item is not actor]
+        if len(targets) != 1:
+            self._set_shop_message(
+                f"Wasteful throws away 1 other item — {len(targets)} selected")
+            return False
+        target = targets[0]
+        if not self.owns_item(target) and not isinstance(target, Block):
+            self._set_shop_message("Wasteful needs one of your own items to throw away")
+            return False
+        if not self.deck_items():
+            self._set_shop_message("Wasteful needs an item in the deck to draw")
+            return False
+        origin = self.item_cell(actor)
+        actor_name = self._item_name(actor)
+        target_name = self._item_name(target)
+        self._discard_item(target)
+        self._discard_item(actor)
+        drawn = self._draw_one_item(origin)
+        self._set_shop_message(
+            f"Wasteful threw away {actor_name} and {target_name} — drew "
+            f"{self._item_name(drawn) if drawn is not None else 'nothing'}")
+        sounds.play_mech()
+        return True
+
+    def _adopt_reward(self, item):
+        """Take ownership of a structure's reward, which already holds its square.
+
+        Cards and actions join their own lists and everything else the toolbox
+        (the same doors a purchase uses, see _unlock_offer); an item that already
+        stands on a square keeps it (see _on_item_gained).
+        """
+        if getattr(item, "kind", None) == "pack":
+            self._adopt_pack(item)
+        else:
+            self._adopt_action(item)

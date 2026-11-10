@@ -270,13 +270,13 @@ class TrialsTests(GameTestCase):
         # A game over in defeat awards dice = (run number - 3)^2. A defeat on
         # run 4 (the 3rd loss) gives (4 - 3)^2 = 1 die.
         self.assertEqual(metagame.dice(), 0)
-        self._complete_run(1000000, required=1)
+        self._complete_run(1000000)
         self.game._continue_run()
-        self._complete_run(100, required=1000)
+        self._complete_run(100, cleared=False)
         self.game._continue_run()
-        self._complete_run(100, required=1000)
+        self._complete_run(100, cleared=False)
         self.game._continue_run()
-        self._complete_run(100, required=1000)
+        self._complete_run(100, cleared=False)
         self.game._continue_run()
         self.assertTrue(self.game.game_over)
         self.assertEqual(metagame.dice(), (4 - 3) ** 2)
@@ -287,7 +287,7 @@ class TrialsTests(GameTestCase):
         # Winning all 24 runs ends in a perfect win; no dice are awarded.
         self.assertEqual(metagame.dice(), 0)
         for _ in range(main.TOTAL_RUNS):
-            self._complete_run(1000000, required=1)
+            self._complete_run(1000000)
             self.game._continue_run()
         self.assertTrue(self.game.game_over)
         self.assertTrue(self.game.game_won)
@@ -635,22 +635,6 @@ class TrialsTests(GameTestCase):
                         self.assertIsNone(trial, f"run {run + 1} is trial-free")
 
 
-    def test_slim_pickings_trims_the_shop_of_the_games_first_run(self):
-        # The game's opening run draws its trial as the Game is built, and the
-        # shop is built BEFORE that draw: an opening Slim pickings run has to
-        # shed its two options after the fact (see reset_game), or the very
-        # first trial of a game would do nothing at all.
-        full = len(self.game.shop.items)  # the setUp game's untrimmed shop
-        self.game.trials_enabled = True
-        with mock.patch("main.random.choice",
-                        side_effect=lambda seq: (main.Trial.SLIM_PICKINGS
-                                                 if seq is main.Trial.ORDER
-                                                 else seq[0])):
-            self.game.reset_game()
-        self.assertEqual(self.game.current_trial, main.Trial.SLIM_PICKINGS)
-        self.assertEqual(len(self.game.shop.items), full - 2)
-
-
     def test_any_other_trial_leaves_the_games_first_shop_full(self):
         full = len(self.game.shop.items)
         self.game.trials_enabled = True
@@ -660,37 +644,6 @@ class TrialsTests(GameTestCase):
                                                  else seq[0])):
             self.game.reset_game()
         self.assertEqual(self.game.current_trial, main.Trial.HANDS_TIED)
-        self.assertEqual(len(self.game.shop.items), full)
-
-
-    def test_buying_slim_pickings_trims_the_shop_on_screen(self):
-        # The trial display's left half buys a different trial onto the shop
-        # the player is already looking at, so landing on Slim pickings must
-        # bite THAT shop rather than wait for the next reroll.
-        self.game.trials_enabled = True
-        self.game.current_trial = main.Trial.HANDS_TIED
-        self.game.cash = 1000
-        full = len(self.game.shop.items)
-        left = (main.TRIAL_BOX_RECT.left + 5, main.TRIAL_BOX_RECT.centery)
-        with mock.patch.object(main.Game, "_random_other_trial",
-                               return_value=main.Trial.SLIM_PICKINGS):
-            self.assertTrue(self.game._click_trial_display(left))
-        self.assertEqual(self.game.cash, 1000 - main.TRIAL_CHANGE_COST)
-        self.assertEqual(len(self.game.shop.items), full - 2)
-
-
-    def test_a_slim_run_rerolls_the_shop_two_options_short(self):
-        # Every shop a Slim pickings run rerolls into is two options lighter,
-        # and nothing is trimmed at all while the trial system is switched off.
-        self.game.trials_enabled = True
-        self.game.current_trial = main.Trial.SLIM_PICKINGS
-        self.game.cash = 1000
-        full = len(self.game.shop.items)
-        self.game._refresh_shop()
-        self.assertEqual(len(self.game.shop.items), full - 2)
-        self.game.trials_enabled = False
-        self.game.shop.refresh()
-        self.game._trim_shop_for_trial()
         self.assertEqual(len(self.game.shop.items), full)
 
 
@@ -923,13 +876,13 @@ class TrialsTests(GameTestCase):
         # boss run — so nothing about it is special except that it is last.
         for run in range(main.TOTAL_RUNS - 1):
             if run == 5:
-                self._complete_run(100, required=1000)  # 1 prior loss
+                self._complete_run(100, cleared=False)  # 1 prior loss
             else:
-                self._complete_run(1000000, required=1)
+                self._complete_run(1000000)
             self.game._continue_run()
         self.assertFalse(self.game.game_over)
 
-        self._complete_run(100, required=1000)  # fail the 24th (last) run
+        self._complete_run(100, cleared=False)  # fail the 24th (last) run
         self.game._continue_run()
 
         self.assertTrue(self.game.game_over)
@@ -970,7 +923,7 @@ class TrialsTests(GameTestCase):
 
         with mock.patch("main.random.choice", side_effect=fake_choice):
             for _ in range(main.TOTAL_RUNS - 1):
-                self._complete_run(1000000, required=1)
+                self._complete_run(1000000)
                 self.game._continue_run()
         self.assertEqual(self.game.run_number, main.TOTAL_RUNS - 1)
         self.assertEqual(self.game.current_trial, main.Trial.SKY_HIGH)
@@ -1044,7 +997,7 @@ class TrialsTests(GameTestCase):
 
         # Advancing to the next run hands the target back to the schedule: the
         # forced target belonged to the run it was used on.
-        self._complete_run(1, required=0)
+        self._complete_run(1)
         self.game._continue_run()
         self.assertFalse(self.game.target_forced)
         self.assertGreater(self.game.required_score, 0)
@@ -1056,7 +1009,7 @@ class TrialsTests(GameTestCase):
         # leave anything behind any more).
         self.game.trials_enabled = True
         for _ in range(main.TOTAL_RUNS):
-            self._complete_run(1000000, required=1)
+            self._complete_run(1000000)
             self.game.continue_past_game_over = True  # the player keeps playing
             self.game._continue_run()
 
@@ -1069,11 +1022,11 @@ class TrialsTests(GameTestCase):
         # The two halves of the trial display work again once the boss run is
         # behind the player.
         for _ in range(main.TOTAL_RUNS - 1):
-            self._complete_run(1000000, required=1)
+            self._complete_run(1000000)
             self.game._continue_run()
         self.game.trials_enabled = True
         self.game.continue_past_game_over = True
-        self._complete_run(1000000, required=1)
+        self._complete_run(1000000)
         self.game._continue_run()
         self.assertTrue(self.game.trial_options_available())
 
@@ -1109,7 +1062,7 @@ class TrialsTests(GameTestCase):
                                before + main.SINGULARITY_MASS_GROWTH, places=2)
 
         # The next run plays a different trial, so nothing grows any more.
-        self._complete_run(1000000, required=1)
+        self._complete_run(1000000)
         self.game._continue_run()
         self.game.current_trial = main.Trial.DEAD_ZONE
         self.game._apply_trial()
@@ -1154,7 +1107,10 @@ class TrialsTests(GameTestCase):
                 self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
                 self.assertTrue(self.game.reset_run())
                 self.game.marbles[0].finished = True
-                self.game.required_score = 1
+                # A level clears once its enemies are down and the marble is
+                # home (see components.LEVELS).
+                for enemy in self.game.live_enemies():
+                    self.game._defeat_enemy(enemy)
                 self.game.score_chips = 1
                 self.game.score_mult = 1
                 self.game._handle_block_contacts([])

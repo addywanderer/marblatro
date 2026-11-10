@@ -23,22 +23,23 @@ class PackDataTests(GameTestCase):
     """The pack and size tables, and what they say."""
 
     def test_every_pack_type_is_defined(self):
-        self.assertEqual(len(main.Pack.ORDER), 9)
+        self.assertEqual(len(main.Pack.ORDER), 10)
         expected = ["Shape Pack", "Effect Pack", "Scorer Pack", "Part Pack",
                     "Block Pack", "Card Pack", "Action Pack", "Resource Pack",
-                    "Random Pack"]
+                    "Random Pack", "Tool Pack"]
         self.assertEqual([main.Pack.name(t) for t in main.Pack.ORDER], expected)
         for pack_type in main.Pack.ORDER:
             with self.subTest(pack=main.Pack.name(pack_type)):
                 self.assertTrue(main.Pack.description(pack_type))
                 self.assertIn(pack_type, main.Pack.COLORS)
                 self.assertIn(pack_type, main.Pack.GLYPHS)
-        # The nine types are one constant each, numbered from zero.
+        # The ten types are one constant each, numbered from zero.
         self.assertEqual(sorted({main.Pack.SHAPE, main.Pack.EFFECT,
                                  main.Pack.SCORER, main.Pack.PART,
                                  main.Pack.BLOCK, main.Pack.CARD,
                                  main.Pack.ACTION, main.Pack.RESOURCE,
-                                 main.Pack.RANDOM}), list(range(9)))
+                                 main.Pack.RANDOM, main.Pack.TOOL}),
+                         list(range(10)))
 
     def test_the_five_sizes_deal_and_keep_what_the_user_asked_for(self):
         # normal (choose 1 of 3), big (1 of 4), jumbo (1 of 5), mega (2 of 5),
@@ -300,7 +301,7 @@ class PackRollTests(GameTestCase):
         # blocks, cards, actions and resource points.
         self.assertEqual(kinds, {main.Component.SHAPE, main.Component.EFFECT,
                                  main.Component.SCORER, "block", "card",
-                                 "action", "resource"})
+                                 "action", "resource", "tool", "passive"})
 
     def test_a_pack_never_deals_the_same_option_twice(self):
         # The options are deduped like the shelf's slots (see OFFER_DUPLICATE_TRIES),
@@ -323,86 +324,89 @@ class PackShopTests(GameTestCase):
         self.game.cash = 100000
         return pack
 
-    def test_the_shelf_holds_five_item_slots_and_three_packs(self):
-        shelf = [i for i in self.game.shop.items
-                 if getattr(i, "kind", None) != "unit"]
-        items = [i for i in shelf if getattr(i, "kind", None) != "pack"]
-        packs = [i for i in shelf if getattr(i, "kind", None) == "pack"]
-        self.assertEqual([i.col for i in items], [1, 2, 3, 4, 5])
-        self.assertEqual([i.col for i in packs],
-                         [main.SHOP_PACK_COL + n
-                          for n in range(main.SHOP_PACK_SLOTS)])
-        self.assertTrue(all(i.kind == "pack" for i in packs))
-        # The Board Unit is an offer of its own now — a locked item on the board
-        # bought by right-click (see items.BoardUnitOffer) — and it takes the
-        # slot right of the packs.
-        units = [i for i in self.game.shop.items
-                 if getattr(i, "kind", None) == "unit"]
-        self.assertEqual(len(units), 1)
-        self.assertEqual(main.BOARD_UNIT_ROW, main.SHOP_PACK_ROW)
-        self.assertEqual(main.BOARD_UNIT_COL,
-                         main.SHOP_PACK_COL + main.SHOP_PACK_SLOTS)
-        self.assertEqual((units[0].col, units[0].row),
-                         (main.BOARD_UNIT_COL, main.BOARD_UNIT_ROW))
 
-    def test_right_clicking_a_pack_buys_and_opens_it(self):
+    def test_right_clicking_a_pack_buys_it_and_s_opens_it(self):
+        # Buying hands over the pack ITEM, and opening it is S on the selected
+        # pack (user request: "make packs a type of item that open when the
+        # player selects one and presses 's'").
         pack = self._place_pack(main.Pack.SHAPE, main.Pack.JUMBO)
         cash_before = self.game.cash
         self._right_click(self._item_pos(pack))
-        self.assertIs(self.game.open_pack, pack)
+        self.assertIsNone(self.game.open_pack)         # not opened yet
         self.assertEqual(self.game.cash, cash_before - pack.price)
-        self.assertNotIn(pack, self.game.shop.items)  # bought off the shelf
+        self.assertNotIn(pack, self.game.shop.items)   # bought off the shelf
+        self.assertTrue(self.game.owns_item(pack))
+        self.assertIn("press S to open", self.game.shop_message)
+
+        self._click(self._item_pos(pack))              # select it
+        self._press(main.pygame.K_s)                   # ...and open it
+
+        self.assertIs(self.game.open_pack, pack)
         self.assertIn("keep 1 of 5", self.game.shop_message)
 
     def test_a_pack_cannot_be_bought_without_the_cash(self):
         pack = self._place_pack(main.Pack.BLOCK, main.Pack.MEGA)
         self.game.cash = pack.price - 1
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         self.assertIsNone(self.game.open_pack)
         self.assertEqual(self.game.cash, pack.price - 1)
         self.assertIn("Need $", self.game.shop_message)
 
-    def test_a_shelf_slot_offers_its_kind_at_the_asked_for_odds(self):
-        # The user's odds for a non-pack shop option: 23% card, 15% action,
-        # 8% shape, 12% effect, 22% scorer, 20% block (see
-        # components.Pack.SHELF_WEIGHTS — the one place the odds are set).
-        self.assertEqual(sum(main.Pack.SHELF_WEIGHTS.values()), 100)
-        self.assertEqual(
-            main.Pack.SHELF_WEIGHTS,
-            {main.Pack.CARD: 23, main.Pack.ACTION: 15, main.Pack.SHAPE: 8,
-             main.Pack.EFFECT: 12, main.Pack.SCORER: 22, main.Pack.BLOCK: 20})
-        # Every kind a shelf slot may deal has odds of its own, so none of them
-        # is drawn as a side effect of a missing weight.
-        self.assertTrue(all(main.Pack.shelf_weight(t) > 0
-                            for t in main.SHELF_OFFER_TYPES))
-        # A long run of rolls lands on those odds: what a roll DEALS is checked
-        # elsewhere, so this watches the kind drawn (an undeduped roll, which
-        # is the thing the odds belong to — see _roll_random_offer).
-        for kinds, wanted in ((main.SHELF_OFFER_TYPES, main.Pack.SHELF_WEIGHTS),
-                              # The odds are relative, so a shelf cut down to
-                              # two kinds (as some tests do) still splits those
-                              # two by their own weights: 23 : 8.
-                              ((main.Pack.CARD, main.Pack.SHAPE),
-                               {main.Pack.CARD: 23, main.Pack.SHAPE: 8})):
-            with self.subTest(kinds=[main.Pack.name(t) for t in kinds]):
-                sources = []
-                roll = main.Shop._offer_of
+    def test_the_shelf_odds_live_with_the_structure_data(self):
+        # The one place the shelf's odds are set is Structure.OFFER_WEIGHTS
+        # (user request: "assign all effect, scorer, and card magnitudes to one
+        # place" is the same rule, applied to the odds).
+        self.assertEqual(sum(main.Structure.OFFER_WEIGHTS.values()), 100)
+        self.assertEqual(sorted(main.Structure.OFFER_WEIGHTS),
+                         sorted(main.Structure.ORDER))
+        self.assertTrue(all(main.Structure.weight(structure) > 0
+                            for structure in main.Structure.ORDER))
+        # The weights are read per kind, so removing one cannot silently leave a
+        # kind dealt as a side effect of a missing entry.
+        for structure in main.Structure.ORDER:
+            self.assertGreater(main.Structure.weight(structure), 0)
 
-                def spy(shop, source, col, row, parts_only=False):
-                    sources.append(source)
-                    return roll(shop, source, col, row, parts_only=parts_only)
+    def test_a_random_pack_option_is_drawn_from_every_source_it_may_deal(self):
+        # A RANDOM pack draws its source evenly from RANDOM_SOURCES (see
+        # Shop._roll_pack_option), so every kind it may deal turns up, and no
+        # kind outside that list ever does.
+        sources = []
+        roll = main.Shop._offer_of
 
-                shop = main.Shop(main.SHOP_COORDS)
-                with mock.patch("shop.SHELF_OFFER_TYPES", tuple(kinds)):
-                    with mock.patch.object(main.Shop, "_offer_of", spy):
-                        for _ in range(20000):
-                            shop._roll_random_offer(0, 0)
-                total = sum(wanted.values())
-                self.assertEqual(len(sources), 20000)
-                for pack_type, weight in wanted.items():
-                    share = sources.count(pack_type) / len(sources)
-                    self.assertAlmostEqual(share, weight / total,
-                                           delta=0.01, msg=main.Pack.name(pack_type))
+        def spy(shop, source, col, row, parts_only=False):
+            sources.append(source)
+            return roll(shop, source, col, row, parts_only=parts_only)
+
+        resource_roll = main.Shop._roll_resource_option
+
+        def spy_resource(shop, used=None):
+            # Resource points are not an item: the roller deals them itself, so
+            # the spy has to cover that branch too.
+            sources.append(main.Pack.RESOURCE)
+            return resource_roll(shop, used)
+
+        tool_roll = main.Shop._roll_tool_option
+
+        def spy_tool(shop, used=None):
+            # ...and so does a TOOL pack, whose options are one-shot tools and
+            # passive items (see components.tool_pack_options).
+            sources.append(main.Pack.TOOL)
+            return tool_roll(shop, used)
+
+        shop = main.Shop(main.SHOP_COORDS)
+        with mock.patch.object(main.Shop, "_offer_of", spy), \
+                mock.patch.object(main.Shop, "_roll_resource_option",
+                                  spy_resource), \
+                mock.patch.object(main.Shop, "_roll_tool_option", spy_tool):
+            for _ in range(2000):
+                shop._roll_pack_option(main.Pack.RANDOM, set())
+        self.assertTrue(sources)
+        self.assertEqual(set(sources) - set(main.Pack.RANDOM_SOURCES), set())
+        expected = 1 / len(main.Pack.RANDOM_SOURCES)
+        for source in main.Pack.RANDOM_SOURCES:
+            share = sources.count(source) / len(sources)
+            self.assertAlmostEqual(share, expected, delta=0.03,
+                                   msg=main.Pack.name(source))
 
     def test_buying_a_pack_reveals_its_type_in_the_collection(self):
         # A pack is revealed by BUYING one, by type: the size is not part of
@@ -410,7 +414,7 @@ class PackShopTests(GameTestCase):
         # giga card pack reveal the same one Card Pack.
         pack = self._place_pack(main.Pack.CARD, main.Pack.BIG)
         self.assertFalse(collection.is_pack_discovered(main.Pack.CARD))
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         self.assertTrue(collection.is_pack_discovered(main.Pack.CARD))
         self.assertTrue(any(p.title == "New pack"
                             and p.description == "Card Pack"
@@ -421,8 +425,7 @@ class PackShopTests(GameTestCase):
                              if t != main.Pack.CARD))
         # A second copy of it, at another size, is nothing new.
         self.game.popups = []
-        self.game._buy_shop_item(self._place_pack(main.Pack.CARD,
-                                                  main.Pack.GIGA))
+        self._buy_pack(self._place_pack(main.Pack.CARD, main.Pack.GIGA))
         self.assertFalse(any(p.title == "New pack" for p in self.game.popups))
         # An unaffordable pack is not bought, so it reveals nothing.
         unaffordable = self._place_pack(main.Pack.RANDOM, main.Pack.NORMAL)
@@ -434,7 +437,7 @@ class PackShopTests(GameTestCase):
         # Discoveries live in the profile's collection.json, so a bought pack
         # type is still revealed after the cache is dropped (a reload).
         pack = self._place_pack(main.Pack.PART, main.Pack.NORMAL)
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         collection.reset()
         self.assertTrue(collection.is_pack_discovered(main.Pack.PART))
 
@@ -473,7 +476,7 @@ class PackShopTests(GameTestCase):
 
     def test_the_overlay_lists_one_cell_per_option(self):
         pack = self._place_pack(main.Pack.CARD, main.Pack.GIGA)
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         rects = main.ui.pack_option_rects(self.game)
         self.assertEqual(len(rects), len(pack.options))
         panel = main.ui.pack_panel_rect(self.game)
@@ -490,7 +493,7 @@ class PackShopTests(GameTestCase):
 
     def test_clicking_an_option_keeps_it_and_closes_a_finished_pack(self):
         pack = self._place_pack(main.Pack.SHAPE, main.Pack.JUMBO)
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         option = pack.options[0]
         self.game._click_pack(main.ui.pack_option_rects(self.game)[0].center)
         self.assertIn(option, self.game.toolbox.items)
@@ -502,7 +505,7 @@ class PackShopTests(GameTestCase):
         # count is measured against what was there before.)
         before = len(self.game.toolbox.items)
         pack = self._place_pack(main.Pack.SHAPE, main.Pack.MEGA)
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         self.game._keep_pack_option(0)
         self.assertIs(self.game.open_pack, pack)
         self.assertEqual(pack.remaining, 1)
@@ -514,7 +517,7 @@ class PackShopTests(GameTestCase):
 
     def test_skipping_leaves_the_rest_of_the_pack(self):
         pack = self._place_pack(main.Pack.SHAPE, main.Pack.JUMBO)
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         before = len(self.game.toolbox.items)
         self.game._click_pack(main.ui.pack_skip_rect(self.game).center)
         self.assertIsNone(self.game.open_pack)
@@ -522,14 +525,14 @@ class PackShopTests(GameTestCase):
         self.assertIn("left", self.game.shop_message)
         # A right-click anywhere leaves the pack too (see handle_events).
         pack2 = self._place_pack(main.Pack.SHAPE, main.Pack.JUMBO)
-        self.game._buy_shop_item(pack2)
+        self._buy_pack(pack2)
         self.assertTrue(pack2.options)  # nothing was taken
         self.game._close_pack()
         self.assertIsNone(self.game.open_pack)
 
     def test_an_open_pack_owns_the_click_and_the_hover(self):
         pack = self._place_pack(main.Pack.SHAPE, main.Pack.JUMBO)
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         option = pack.options[2]
         rect = main.ui.pack_option_rects(self.game)[2]
         target, source = self.game._info_target_at(rect.center)
@@ -548,7 +551,7 @@ class PackKeepTests(GameTestCase):
         pack = _pack(pack_type, main.Pack.NORMAL, options)
         self.game.cash = 100000
         self.game.shop.items = [pack]
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         return pack
 
     def test_keeping_a_component_puts_it_in_the_inventory(self):
@@ -645,7 +648,7 @@ class PackActionRuleTests(GameTestCase):
         pack = _pack(pack_type, main.Pack.NORMAL, options)
         self.game.cash = 100000
         self.game.shop.items = [pack]
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         return pack
 
     def test_a_target_free_action_is_used_at_once(self):
@@ -722,7 +725,7 @@ class ResourcePackTests(GameTestCase):
         pack = _pack(main.Pack.RESOURCE, main.Pack.NORMAL, [option])
         self.game.cash = 100000
         self.game.shop.items = [pack]
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
 
     def test_the_points_are_banked_and_converted_immediately(self):
         # One whole option point buys a permanent shop slot at once — not at the
@@ -789,7 +792,7 @@ class PackSaveTests(GameTestCase):
                                          main.SHOP_PACK_ROW)
         self.game.cash = 100000
         self.game.shop.items = [pack]
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         self.game._keep_pack_option(0)
         self.assertEqual(pack.kept, 1)
         left = len(pack.options)
@@ -819,13 +822,56 @@ class PackSaveTests(GameTestCase):
         self.assertAlmostEqual(loaded.amount, 1.25)
         self.assertAlmostEqual(loaded.points, 1.25)
 
+    def test_a_pack_holding_a_passive_saves_and_loads(self):
+        # User report: the autosave crashed on "AttributeError: PassiveItem
+        # object has no attribute 'amount'" while the player was looking inside
+        # a Tool Pack that held a Concrete. A passive has no such field, and its
+        # kind had no branch of its own in the serializer (see save_system).
+        passive = main.PassiveItem(main.Passive.CONCRETE,
+                                   main.Passive.PRICES[main.Passive.CONCRETE])
+        pack = _pack(main.Pack.TOOL, main.Pack.NORMAL,
+                     [passive, main.ToolItem(main.Tool.BRICK)])
+        self.game.cash = 100000
+        self.game.shop.items = [pack]
+        self._buy_pack(pack)
+
+        data = save_system._save_data(self.game)        # must not raise
+        fresh = main.Game()
+        save_system._load_save_data(fresh, data, 1)
+
+        options = fresh.open_pack.options
+        self.assertEqual(len(options), 2)
+        concrete = next(o for o in options if getattr(o, "kind", None) == "passive")
+        self.assertIsInstance(concrete, main.PassiveItem)
+        self.assertEqual(concrete.value, main.Passive.CONCRETE)
+        self.assertEqual(concrete.price, passive.price)
+
+    def test_keeping_the_passive_of_a_reloaded_pack_puts_it_in_the_hand(self):
+        passive = main.PassiveItem(main.Passive.CONCRETE,
+                                   main.Passive.PRICES[main.Passive.CONCRETE])
+        pack = _pack(main.Pack.TOOL, main.Pack.NORMAL, [passive])
+        self.game.cash = 100000
+        self.game.shop.items = [pack]
+        self._buy_pack(pack)
+        fresh = main.Game()
+        save_system._load_save_data(fresh, save_system._save_data(self.game), 1)
+        fresh.cash = 100000
+
+        fresh._keep_pack_option(0)
+
+        kept = [item for item in fresh.hand_items()
+                if getattr(item, "kind", None) == "passive"]
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].value, main.Passive.CONCRETE)
+        self.assertIsNotNone(fresh.item_cell(kept[0]))
+
     def test_an_armed_pack_action_comes_back_armed(self):
         action = main.ActionItem(main.Action.DEJA_VU, main.Action.PRICES[main.Action.DEJA_VU],
                                  version=1)
         pack = _pack(main.Pack.ACTION, main.Pack.NORMAL, [action])
         self.game.cash = 100000
         self.game.shop.items = [pack]
-        self.game._buy_shop_item(pack)
+        self._buy_pack(pack)
         self.game._keep_pack_option(0)
         self.assertIsNotNone(self.game.pending_pack_action)
         fresh = main.Game()

@@ -2534,9 +2534,8 @@ class CardsTests(GameTestCase):
         self.game.cards.append(main.CardItem(
             _shape_card_value(main.Shape.PIPE, components.Card.SCORE_CHIPS), 12))
         block = main.Block(1, 1, shape=main.Shape.PIPE, scorer=main.Scorer.NONE)
-        marble = main.Marble(300, 300)
+        marble = self._add_marble()
         marble.collisions_this_tick = [block]
-        self.game.marbles.append(marble)
         self.game.run_active = True
         before = self.game.score_chips
         self.game._handle_block_contacts([block])
@@ -2751,7 +2750,7 @@ class CardsTests(GameTestCase):
         self.game.run_active = True
         self.game._on_fragile_broken(block)
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 3)
-        self._complete_run(10000, required=100)
+        self._complete_run(10000)
         self.game._retry_run()
         self.assertEqual(self.game.wrecking_bonus[main.Scorer.MULT_ADD], 0)
         self.assertEqual(self.game.wrecking_run_gain[main.Scorer.MULT_ADD], 0)

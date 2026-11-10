@@ -128,6 +128,67 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(loaded_card.value, card.value)
         self.assertEqual(loaded_card.price, card.price)
 
+    def test_every_kind_of_item_round_trips(self):
+        # One guard for the whole item zoo: a kind that the serializer does not
+        # know falls through to the Component shape, which reads fields the new
+        # kind may not have (a Passive has no `amount`, and that took the
+        # autosave down -- user report). Every kind the game can offer must come
+        # back as itself.
+        items = [
+            main.BlockItem(0, 0, main.Shape.PIPE, main.Effect.BOUNCY,
+                           main.Scorer.CHIPS_ADD, 30, 50, "Pipe +Chips"),
+            main.Block(1, 2, shape=main.Shape.CIRCLE, scorer=main.Scorer.MULT_ADD,
+                       scorer_amount=2),
+            _card_item(main.match_group_for_shape(main.Shape.PIPE),
+                       main.Scorer.MULT_ADD),
+            main.ActionItem(main.Action.DEJA_VU,
+                            main.Action.PRICES[main.Action.DEJA_VU], version=1),
+            main.StructureItem(main.Structure.PIT, 0),
+            main.ToolItem(main.Tool.SHOVEL),
+            main.PassiveItem(main.Passive.CONCRETE,
+                             main.Passive.PRICES[main.Passive.CONCRETE]),
+            main.ResourceOption(main.Scorer.CHIPS_ADD, 1.5, 1.5),
+            main.ItemPack(main.Pack.TOOL, 2,
+                          [main.PassiveItem(main.Passive.CONCRETE, 16)],
+                          0),
+        ]
+        for item in items:
+            with self.subTest(kind=getattr(item, "kind", None)):
+                # EVERY item carries an amount (a magnitude), which is what the
+                # fallback shape reads without asking whether it is there.
+                self.assertTrue(hasattr(item, "amount"))
+                loaded = save_system._deserialize_item(
+                    save_system._serialize_item(item))
+                self.assertEqual(getattr(loaded, "kind", None),
+                                 getattr(item, "kind", None))
+                self.assertEqual(type(loaded).__name__, type(item).__name__)
+                self.assertEqual(getattr(loaded, "value", None),
+                                 getattr(item, "value", None))
+
+    def test_a_combined_passive_keeps_the_amount_it_carries(self):
+        # The golem can fold two Concretes into a 60-chip one, so the number is
+        # the ITEM's and has to ride through the save.
+        self.game.toolbox.add(main.PassiveItem(
+            main.Passive.CONCRETE, main.Passive.PRICES[main.Passive.CONCRETE],
+            amount=2 * main.MAGNITUDES.CONCRETE_CHIPS))
+        fresh = main.Game()
+        save_system._load_save_data(fresh, save_system._save_data(self.game), 1)
+        passives = [item for item in fresh.hand_items()
+                    if getattr(item, "kind", None) == "passive"]
+        self.assertEqual(len(passives), 1)
+        self.assertEqual(passives[0].amount,
+                         2 * main.MAGNITUDES.CONCRETE_CHIPS)
+
+    def test_a_passive_in_the_hand_survives_a_save(self):
+        self.game.toolbox.add(main.PassiveItem(
+            main.Passive.CONCRETE, main.Passive.PRICES[main.Passive.CONCRETE]))
+        fresh = main.Game()
+        save_system._load_save_data(fresh, save_system._save_data(self.game), 1)
+        passives = [item for item in fresh.hand_items()
+                    if getattr(item, "kind", None) == "passive"]
+        self.assertEqual(len(passives), 1)
+        self.assertIsNotNone(fresh.item_cell(passives[0]))
+
     def test_p_key_saves_to_active_slot(self):
         self.game.save_slot = 1
         self.game.cash = 55555
@@ -144,7 +205,7 @@ class SaveSystemTests(unittest.TestCase):
         self.assertIsNotNone(data)
         self.assertEqual(data["cash"], 55555)
         self.assertEqual(len(data["grid"]), 1)
-        self.assertEqual(len(data["toolbox"]), 3)  # start + finish + pipe
+        self.assertEqual(len(data["toolbox"]), 7)  # start + finish + 4 tools + pipe
         self.assertEqual(len(data["cards"]), 1)
         self.assertEqual(data["cards"][0]["value"], card.value)
         self.assertTrue(save_system._slot_has_save(1))
@@ -297,71 +358,6 @@ class SaveSystemTests(unittest.TestCase):
         self.assertFalse(fresh.run_active)
 
 
-    def test_loading_a_shelf_from_an_older_layout_puts_every_offer_back_in_its_cell(self):
-        # The shelf's CELLS belong to the layout, not to the save: a save whose
-        # offers all sit in one row — the shelf an older build dealt — comes back
-        # with every offer in the cell this layout gives its kind, rather than
-        # drawn over the cash header or past the panel's right edge (see
-        # Shop.reseat).
-        self.game.shop.refresh()
-        for index, item in enumerate(self.game.shop.items):
-            item.col, item.row = index, 0
-        self.game.save_slot = 5
-        save_system.save_game(self.game)
-
-        fresh = main.Game()
-        fresh.title_screen = False
-        fresh.trials_enabled = False
-        save_system.load_slot(fresh, 5)
-
-        offers = [i for i in fresh.shop.items
-                  if getattr(i, "kind", None) not in ("pack", "unit")]
-        packs = [i for i in fresh.shop.items if getattr(i, "kind", None) == "pack"]
-        self.assertEqual(len(offers), main.SHOP_ITEM_SLOTS)
-        self.assertEqual(len(packs), main.SHOP_PACK_SLOTS)
-        self.assertEqual([(i.col, i.row) for i in offers],
-                         [(1 + n, main.SHOP_ITEM_ROW)
-                          for n in range(main.SHOP_ITEM_SLOTS)])
-        self.assertEqual([(i.col, i.row) for i in packs],
-                         [(main.SHOP_PACK_COL + n, main.SHOP_PACK_ROW)
-                          for n in range(main.SHOP_PACK_SLOTS)])
-        # The Board Unit is always on the shelf, in the slot right of the packs.
-        units = [i for i in fresh.shop.items
-                 if getattr(i, "kind", None) == "unit"]
-        self.assertEqual([(u.col, u.row) for u in units],
-                         [(main.BOARD_UNIT_COL, main.BOARD_UNIT_ROW)])
-        # Every offer stands on a board square of its own, and the square it
-        # stands on is the square the hit test finds it in.
-        fresh.ensure_board_cells()
-        for item in fresh.shop.items:
-            cell = fresh.item_cell(item)
-            self.assertIsNotNone(cell, item)
-            self.assertIs(fresh.shop.offer_at_cell(cell), item)
-
-
-    def test_a_held_offer_follows_its_offer_to_the_cell_it_is_re_seated_in(self):
-        # The Hoard card's held cells are cells too, so re-seating a restored
-        # shelf moves a hold to wherever the offer it holds now sits: the reroll
-        # it was pinned against still finds it.
-        self.game.shop.refresh()
-        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
-        for index, item in enumerate(self.game.shop.items):
-            item.col, item.row = index, 0
-        held = self.game.shop.items[2]
-        self.game.shop.locked = [(2, 0)]
-        self.game.save_slot = 6
-        save_system.save_game(self.game)
-
-        fresh = main.Game()
-        fresh.title_screen = False
-        fresh.trials_enabled = False
-        save_system.load_slot(fresh, 6)
-
-        reseated = [i for i in fresh.shop.items if i.name == held.name]
-        self.assertEqual(len(reseated), 1)
-        self.assertIn(fresh.shop.slot_key(reseated[0]), fresh.shop.locked)
-
-
     def test_random_outcomes_save_and_load(self):
         # An item's pre-rolled RANDOM/LUCKY reward is part of the save, so
         # loading a save is never a chance to reroll a block or a card the
@@ -388,10 +384,12 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(fresh.grid[(1, 1)].random_rolls["reward"], 1)
         self.assertEqual(fresh.cards[0].random_rolls["cash"], True)
         # And the reloaded block really does pay what the run had chosen, even
-        # though a 0.9 draw would pay xMult if it rolled now.
-        fresh.score_mult = 1
+        # though a 0.9 draw would pay xMult if it rolled now. The score is per
+        # marble, so the marble starts from the mult this test measures.
         fresh.run_active = True
         fresh.marbles = [main.Marble(300, 300)]
+        fresh.marbles[0].chips = 0
+        fresh.marbles[0].mult = 1
         fresh.marbles[0].collisions_this_tick = [fresh.grid[(1, 1)]]
         with mock.patch("main.random.random", return_value=0.9):
             fresh._handle_block_contacts([fresh.grid[(1, 1)]])
@@ -579,23 +577,29 @@ class SaveSystemTests(unittest.TestCase):
         self.game.cash = 5000
         self.game.actions.append(main.ActionItem(main.Action.DEATH, 60))
         self.game.actions.append(main.ActionItem(main.Action.RECOGNITION, 60, version=2))
+        # An action that carries a MAGNITUDE keeps it too: a Lantern a golem
+        # merged must still draw what it was made to draw (see
+        # MAGNITUDES.ACTIONS).
+        self.game.actions.append(main.ActionItem(main.Action.LANTERN, 26, amount=4))
         save_system.save_game(self.game)
         data = save_system._read_slot(3)
-        self.assertEqual(len(data["actions"]), 2)
+        self.assertEqual(len(data["actions"]), 3)
         self.assertEqual(data["actions"][0]["value"], main.Action.DEATH)
         self.assertEqual(data["actions"][0]["version"], 1)
         self.assertEqual(data["actions"][1]["value"], main.Action.RECOGNITION)
         self.assertEqual(data["actions"][1]["version"], 2)
+        self.assertEqual(data["actions"][2]["amount"], 4)
 
         fresh = main.Game()
         fresh.title_screen = False
         fresh.trials_enabled = False
         save_system.load_slot(fresh, 3)
-        self.assertEqual(len(fresh.actions), 2)
+        self.assertEqual(len(fresh.actions), 3)
         self.assertEqual(fresh.actions[0].value, main.Action.DEATH)
         self.assertEqual(fresh.actions[0].version, 1)
         self.assertEqual(fresh.actions[1].value, main.Action.RECOGNITION)
         self.assertEqual(fresh.actions[1].version, 2)
+        self.assertEqual(fresh.actions[2].amount, 4)
 
     def test_resource_points_save_and_load(self):
         # Shreds/Rubble/Ideas/Picky points persist with the save, along with
@@ -1204,7 +1208,15 @@ class SaveSystemTests(unittest.TestCase):
         fresh.trials_enabled = False
         save_system.load_slot(fresh, 1)
         self.assertEqual(fresh.cash, 432)
-        self.assertEqual(len(fresh.grid), 1)
+        # The player's own block is back where it was; the level's cast stands
+        # beside it, because a load lays the level out too (see _load_save_data /
+        # _begin_level) — the level is on the board in the build phase, not
+        # waiting for the next run to start.
+        self.assertEqual(fresh.grid[(2, 2)].scorer, main.Scorer.CHIPS_ADD)
+        level_blocks = [block for block in fresh.grid.values()
+                        if getattr(block, "is_enemy", False)
+                        or getattr(block, "is_level_prop", False)]
+        self.assertEqual(len(fresh.grid) - len(level_blocks), 1)
         self.assertEqual(len(fresh.cards), 1)
 
     def test_game_over_menu_button_autosaves(self):
@@ -1444,18 +1456,21 @@ class SaveSystemTests(unittest.TestCase):
 
     def test_undiscovered_entries_show_question_marks(self):
         # Locked collection entries show "???" for name and description. Only
-        # the two run-role scorers (Start/Finish) are revealed to begin with —
-        # they are reported as known without being written to the file, since
-        # every game hands the player those two blocks; everything else stays
-        # hidden on a fresh game.
+        # what every game hands the player to begin with is revealed: the two
+        # run-role scorers (Start/Finish) and the four starter TOOLS. Both are
+        # reported as known without being written to the file (every game hands
+        # the player those blocks and those tools); everything else stays hidden
+        # on a fresh game.
         entries = self.game._collection_entries()
-        self.assertTrue(entries)  # every card/component/trial is listed
+        self.assertTrue(entries)  # every card/component/tool/trial is listed
         self.assertTrue(all(name == "???" and desc == "???"
                             for _, _, name, desc, _, d in entries if not d))
         self.assertTrue(any(not d for _, _, _, _, _, d in entries))  # most are hidden
         revealed = [(kind, value) for kind, value, _, _, _, d in entries if d]
         self.assertEqual(revealed,
-                         [("scorer", main.Scorer.START), ("scorer", main.Scorer.FINISH)])
+                         [("scorer", main.Scorer.START),
+                          ("scorer", main.Scorer.FINISH)]
+                         + [("tool", value) for value in main.Tool.STARTERS])
 
     def test_trial_discovered_on_cleared_run(self):
         # Beating a run with a trial reveals it in the collection.
@@ -1463,7 +1478,10 @@ class SaveSystemTests(unittest.TestCase):
         self.game.grid[(1, 1)] = main.Block(1, 1, scorer=main.Scorer.START)
         self.assertTrue(self.game.reset_run())
         self.game.marbles[0].finished = True
-        self.game.required_score = 1
+        # A level clears once its enemies are down and the marble is home (see
+        # components.LEVELS).
+        for enemy in self.game.live_enemies():
+            self.game._defeat_enemy(enemy)
         self.game.score_chips = 1
         self.game.score_mult = 1
         self.game._handle_block_contacts([])
@@ -1979,48 +1997,6 @@ class ProfileTests(unittest.TestCase):
         self.game.profile_renaming = False
         self.game.draw()
 
-    def test_a_hoard_hold_survives_a_save_and_load(self):
-        # The hold is saved as the CELL it was pinned in (see Shop.slot_key), so
-        # the loaded shop comes back with the same offer still held — and the
-        # hold is clipped against the cards the load restored, so it can never
-        # outlive the Hoard that pays for it.
-        self.game.save_slot = 2
-        self.game.cards.append(main.CardItem(main.Card.HOARD, 36))
-        held = self.game.shop.items[0]
-        slot = self.game.shop.slot_key(held)
-        self.game.shop.locked = [slot]
-        save_system.save_game(self.game)
-
-        fresh = main.Game()
-        fresh.title_screen = False
-        fresh.trials_enabled = False
-        save_system.load_slot(fresh, 2)
-
-        self.assertEqual(fresh.shop.locked, [slot])
-        self.assertEqual(fresh.shop_lock_cap(), 1)
-        fresh._refresh_shop()
-        self.assertEqual(fresh.shop.locked, [slot])
-        fresh.ensure_board_cells()
-        held_now = next(i for i in fresh.shop.items
-                        if fresh.shop.slot_key(i) == slot)
-        self.assertEqual(held_now.name, held.name)
-        self.assertIs(fresh.shop.offer_at_cell(fresh.item_cell(held_now)),
-                      held_now)
-
-    def test_a_saved_hold_without_its_card_is_clipped_on_load(self):
-        # A hold cannot outlive the card: loading clips the saved holds against
-        # the cards just restored, so a save whose Hoard is gone holds nothing.
-        self.game.save_slot = 4
-        self.game.shop.locked = [self.game.shop.slot_key(self.game.shop.items[0])]
-        save_system.save_game(self.game)
-
-        fresh = main.Game()
-        fresh.title_screen = False
-        fresh.trials_enabled = False
-        save_system.load_slot(fresh, 4)
-
-        self.assertEqual(fresh.shop_lock_cap(), 0)
-        self.assertEqual(fresh.shop.locked, [])
 
     def test_the_gained_slots_survive_a_save_and_load(self):
         # Inaction's banked uses and handed-over slots and Foresight's action
