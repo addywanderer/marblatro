@@ -81,7 +81,8 @@ class RerollCardTests(GameTestCase):
         self.assertTrue(main.Action.needs_target(main.Action.REROLL))
         self.assertTrue(main.Action.targets_structures(main.Action.REROLL))
         for value in main.Action.ORDER:
-            if value == main.Action.REROLL:
+            if value in (main.Action.REROLL, main.Action.DYNAMITE,
+                         main.Action.STORMCLOUD):
                 continue
             self.assertFalse(main.Action.targets_structures(value),
                              main.Action.name(value))

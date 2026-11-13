@@ -42,11 +42,13 @@ class AbilityTableTests(GameTestCase):
         # dangling "Needs .").
         self.assertEqual(main.Ability.contract(main.Ability.OPEN_PACK),
                          "Costs nothing.")
-        # An action's own count is what the grammar prints.
+        # An action's own count is what the grammar prints. What a used card
+        # spends of ITSELF is its own keyword now ("consume"), so the contract
+        # names no cost of its own (user request: "make all cards homogenous").
         self.assertEqual(main.Ability.contract(main.Ability.APPLY, 2),
-                         "Needs 2 targets. Costs the action itself.")
+                         "Needs 2 targets. Costs nothing.")
         self.assertEqual(main.Ability.contract(main.Ability.APPLY, 1),
-                         "Needs 1 target. Costs the action itself.")
+                         "Needs 1 target. Costs nothing.")
 
     def test_every_ability_is_reachable_from_some_item(self):
         # A row nothing can fire would be dead data: the derivation must reach

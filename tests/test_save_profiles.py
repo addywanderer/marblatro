@@ -603,15 +603,16 @@ class SaveSystemTests(unittest.TestCase):
 
     def test_resource_points_save_and_load(self):
         # Shreds/Rubble/Ideas/Picky points persist with the save, along with
-        # free rerolls (granted by Fresh) and bonus shop slots. Parts and
-        # Fresh grant immediately, so they save no point banks.
+        # free rerolls (granted by Fresh) and the structures Picky's points
+        # bought. Parts and Fresh grant immediately, so they save no point
+        # banks.
         self.game.save_slot = 3
         self.game.shred_points = 2
         self.game.rubble_points = 3
         self.game.idea_points = 4
         self.game.free_rerolls = 2
         self.game.option_points = 1
-        self.game.bonus_slots = 3
+        self.game.bonus_structures = 3
         save_system.save_game(self.game)
         data = save_system._read_slot(3)
         self.assertEqual(data["shred_points"], 2)
@@ -619,7 +620,7 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(data["idea_points"], 4)
         self.assertEqual(data["free_rerolls"], 2)
         self.assertEqual(data["option_points"], 1)
-        self.assertEqual(data["bonus_slots"], 3)
+        self.assertEqual(data["bonus_structures"], 3)
         self.assertNotIn("part_points", data)
         self.assertNotIn("fresh_points", data)
 
@@ -632,9 +633,13 @@ class SaveSystemTests(unittest.TestCase):
         self.assertEqual(fresh.idea_points, 4)
         self.assertEqual(fresh.free_rerolls, 2)
         self.assertEqual(fresh.option_points, 1)
-        self.assertEqual(fresh.bonus_slots, 3)
-        # The shop is synced to show the banked bonus slots on refresh.
-        self.assertEqual(fresh.shop.bonus_slots, 3)
+        self.assertEqual(fresh.bonus_structures, 3)
+        # ...and the three structures stand on the board the load laid out.
+        extra = [item for item in fresh.shop.items
+                 if getattr(item, "is_bonus_structure", False)]
+        self.assertEqual(len(extra), 3)
+        self.assertTrue(all(fresh.item_cell(item) is not None
+                            for item in extra))
 
     @unittest.skipUnless(hasattr(main, "Condition"), CONDITIONS_COMMENTED_OUT)
     def test_condition_component_and_built_card_save_and_load(self):

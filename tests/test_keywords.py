@@ -68,7 +68,10 @@ class ItemKeywordTests(GameTestCase):
         return main.ToolItem(value, main.Tool.PRICES[value])
 
     def test_a_tools_keywords_are_its_rules(self):
-        self.assertEqual(main.Keyword.line(self._tool(main.Tool.SHOVEL)), "dig")
+        # Every tool says whether using it throws it away: "consume" for a
+        # one-shot, "reusable" for the ones that stay (see test_reusable).
+        self.assertEqual(main.Keyword.line(self._tool(main.Tool.SHOVEL)),
+                         "dig, reusable")
         self.assertEqual(main.Keyword.line(self._tool(main.Tool.BRICK)),
                          "break, dig, consume")
         self.assertEqual(main.Keyword.line(self._tool(main.Tool.MATCH)),
@@ -89,11 +92,19 @@ class ItemKeywordTests(GameTestCase):
                     tuple(main.Keyword.for_verb(verb)
                           for verb in main.Structure.verbs(structure)))
 
-    def test_a_block_or_a_card_has_no_keywords(self):
-        # Their behaviour is their own text (a shape, a scorer, a card effect).
+    def test_a_block_has_no_keywords_but_a_card_does(self):
+        # A block's behaviour is its own text (a shape, a scorer), so it has no
+        # words. Every CARD does have them (user request: "make all cards
+        # homogenous, and treat them the same way"): a whole card is unplayable
+        # because it pays on its own, and an action is consumed when used.
         self.assertEqual(main.Keyword.of(main.Block(0, 0)), ())
-        self.assertEqual(main.Keyword.of(main.CardItem(main.Card.JOKER, 24)), ())
         self.assertEqual(main.Keyword.of(None), ())
+        self.assertEqual(main.Keyword.of(main.CardItem(main.Card.JOKER, 24)),
+                         (main.Keyword.UNPLAYABLE,))
+        self.assertEqual(
+            main.Keyword.of(main.ActionItem(main.Action.DEATH,
+                                            main.Action.PRICES[main.Action.DEATH])),
+            (main.Keyword.CONSUME,))
 
     def test_the_sidebar_prints_the_keywords(self):
         rows = dict(self.game._describe_item(self._tool(main.Tool.BRICK)))

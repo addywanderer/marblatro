@@ -290,10 +290,10 @@ class UiTests(GameTestCase):
         self.assertEqual(self.game._resource_display(), [])
 
 
-    def test_picky_resource_display_shows_slot_when_owned(self):
+    def test_picky_resource_display_shows_its_structure_when_owned(self):
         self.game.toolbox.add(main.Component.scorer_component(main.Scorer.PICKY, amount=1))
         self.game.option_points = 1
-        self.assertEqual(self.game._resource_display(), [(1, "slot")])
+        self.assertEqual(self.game._resource_display(), [(1, "structure")])
 
 
     def test_resource_display_shows_when_scorer_owned(self):
@@ -761,26 +761,28 @@ class UiTests(GameTestCase):
         item = main.BlockItem(0, 0, main.Shape.CURVED_SLOPE, main.Effect.GRAVITY,
                               main.Scorer.CHIPS_ADD, 10, 20, "Curved Slope +Chips")
         rows = self.game._describe_item(item)
-        # ...and the group the whole item is in is named last (see components.Group).
+        # ...then how rare it is, and the group the whole item is in last (see
+        # components.Rarity and components.Group).
         self.assertEqual([label for label, _ in rows],
                          ["Shape - Curved Slope", "Effect - Gravity", "Scorer - +Chips",
-                          "Trigger", "Group - Block"])
+                          "Trigger", "Rarity", "Group - Block"])
         self.assertIn("arc", main.shape_description(item.shape))
         self.assertIn("gravity", main.effect_description(item.effect).lower())
         self.assertIn("10", main.scorer_description(item.scorer, item.scorer_amount))
 
 
     def test_sidebar_describes_component(self):
-        # A piece's own row, then the group it belongs to (see components.Group).
+        # A piece's own row, then its rarity and the group it belongs to (see
+        # components.Rarity and components.Group).
         shape = main.Component.shape_component(main.Shape.SLOPE)
         self.assertEqual([label for label, _ in self.game._describe_item(shape)],
-                         ["Shape - Slope", "Group - Part"])
+                         ["Shape - Slope", "Rarity", "Group - Part"])
         effect = main.Component.effect_component(main.Effect.BOUNCY)
         self.assertEqual([label for label, _ in self.game._describe_item(effect)],
-                         ["Effect - Bouncy", "Group - Part"])
+                         ["Effect - Bouncy", "Rarity", "Group - Part"])
         scorer = main.Component.scorer_component(main.Scorer.MULT_MUL, amount=3)
         self.assertEqual([label for label, _ in self.game._describe_item(scorer)],
-                         ["Scorer - xMult", "Group - Part"])
+                         ["Scorer - xMult", "Rarity", "Group - Part"])
 
 
     def test_info_box_targets_hovered_shop_item_without_buying(self):
@@ -992,7 +994,7 @@ class UiTests(GameTestCase):
         rows = self.game._describe_item(block)
         self.assertEqual([label for label, _ in rows],
                          ["Shape - Curved Slope", "Effect - Gravity", "Scorer - +Chips",
-                          "Trigger", "Group - Block"])
+                           "Trigger", "Rarity", "Group - Block"])
         self.assertIn("arc", main.shape_description(block.shape))
 
 

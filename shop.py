@@ -61,9 +61,6 @@ class Shop:
         self.cols = rect[2] // GRID_SIZE
         self.rows = rect[3] // GRID_SIZE
         self.items = []
-        # Extra offers added by the Picky scorer (one per banked slot). The
-        # Game keeps the persistent count and sets this before refreshing.
-        self.bonus_slots = 0
         # The cells the Hoard whole card is holding (see Game._toggle_shop_lock):
         # a held cell keeps the offer it holds through every reroll. A list, so
         # the ORDER the player pinned things in survives and the last one pinned
@@ -133,10 +130,11 @@ class Shop:
     def _bonus_cells(self):
         """The cells an offer may take past the two standard rows, in order.
 
-        Picky's extra offers fill them left to right, row by row (see refresh),
-        and they stop at the panel's own edges: an offer in a cell the panel does
-        not have — past its bottom row, or in the column past its right edge —
-        could be neither drawn nor clicked, so a shelf simply holds fewer.
+        A save from before the shelf was emptied may hold more offers than the
+        two standard rows take, so the rows below them are still addressed; they
+        stop at the panel's own edges: an offer in a cell the panel does not have
+        — past its bottom row, or in the column past its right edge — could be
+        neither drawn nor clicked, so a shelf simply holds fewer.
         """
         return [(col, row) for row in range(SHOP_BONUS_ROW, self.rows)
                 for col in range(1, self.cols)]
@@ -150,7 +148,7 @@ class Shop:
         right edge. The offer's kind and its place in the row are what decide its
         cell (the same rule refresh deals by): the packs take the pack row, every
         other offer (a structure) the offer row, and anything past those two rows
-        is a Picky bonus slot, which fills the rows below both. An offer the panel
+        fills the rows below both. An offer the panel
         has no cell left for is DROPPED: a save written under an older shelf can
         hold more offers than this layout has places to put them, and one that
         cannot be seen or clicked is not worth keeping in the shelf.
@@ -280,9 +278,9 @@ class Shop:
         magnitudes are rolled here, once, exactly as a component's are, so
         Earthquake raises them (see _quake_scorer / _quake_effect_amounts).
 
-        The ONE roller for a random block: the shelf's offers, a Picky bonus
-        slot and a block pack all deal the same blocks (see _random_offer and
-        _roll_pack), so they can never drift apart.
+        The ONE roller for a random block: the shelf's offers, a generated
+        structure and a block pack all deal the same blocks (see _random_offer
+        and _roll_pack), so they can never drift apart.
         """
         shape_weights = [component_weight(Component.SHAPE, s) for s in Shape.ORDER]
         scorer_weights = [component_weight(Component.SCORER, s)
@@ -347,7 +345,8 @@ class Shop:
 
         ``source`` is a components.Pack type (Pack.SHAPE, Pack.BLOCK, ...), NOT
         one of the Component kind strings: the one roller behind a shelf slot,
-        a Picky bonus slot and every pack option, so a shape pack, a part pack
+        every generated structure and every pack option, so a shape pack, a part
+        pack
         and a random pack all deal exactly the shape a shelf slot would deal
         (see _random_offer and _roll_pack_option). A resource option is not a
         shelf item — points are not an item — so it is only ever dealt inside a
@@ -421,7 +420,7 @@ class Shop:
         scorer banks, and the scorer's own magnitude is rolled here as it would
         be for a component (so Earthquake raises it — see _quake_scorer), which
         is what the player's "randomized just like their scorer" asks for: a
-        Picky option at the default magnitude is worth 2 x 0.5 = one option
+        Picky points at the default magnitude are worth 2 x 0.5 = one structure
         point, and a well-rolled one is worth more.
 
         ``used`` is what the pack has dealt so far: a scorer the pack has not

@@ -381,12 +381,16 @@ class BoardTests(unittest.TestCase):
                 g._unlock_cell(x, y)
         self.assertEqual(g._grant_locked_units(6), 0)
 
-    def test_continue_grants_drill_and_conquistador_locked_units(self):
-        # Drill-scorer touches bank drill_run_units that only unlock after a
-        # run; the Conquistador card adds 4 more after each run. (Board stays
-        # locked, so the grants expand the frontier.)
+    def test_continue_hands_over_drill_and_conquistador_board_units(self):
+        # User request: "make the drill scorer give 2x board square" and "make
+        # conquistador give 4x board square" — the Drill-scorer touches bank
+        # drill_run_units that only pay out after a run, and the Conquistador
+        # card adds 4 more after every run. Both hand over BOARD UNITS now
+        # rather than unlocking squares themselves (user request: "make all
+        # items that unlock random board squares give board squares instead").
         g = self._start_locked_game()
-        before = len(g.unlocked_cells)  # the start region
+        before_squares = len(g.unlocked_cells)  # the start region
+        before_units = g.board_units
         g.drill_run_units = 2
         g.cards.append(main.CardItem(main.Card.CONQUISTADOR, 56))
         g.run_complete = True
@@ -397,8 +401,13 @@ class BoardTests(unittest.TestCase):
         with mock.patch.object(main.Game, "_begin_level"), \
                 mock.patch("main.random.random", return_value=0.9):
             g._continue_run()
-        self.assertEqual(len(g.unlocked_cells) - before, 2 + 4)
+        self.assertEqual(g.board_units, before_units + 2 + 4)
+        self.assertEqual(len(g.unlocked_cells), before_squares,
+                         "the run's rewards unlocked squares themselves")
         self.assertEqual(g.drill_run_units, 0)
+        self.assertIn("Board Unit", g.shop_message)
+        self.assertIn("from the drill", g.shop_message)
+        self.assertIn("from Conquistador", g.shop_message)
 
     def test_retry_discards_pending_drill_units(self):
         # Retrying a run throws away the Drill-scorer unlocks banked for it.
@@ -470,14 +479,11 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.bomb_cells, set())
         self.assertEqual(len(g.unlocked_cells), before)  # nothing unlocked
 
-    def test_a_bomb_blasts_before_the_drill_picks_its_squares(self):
-        # The drill picks its squares off the locked frontier, so a Bomb's blast
-        # has to resolve FIRST: blasted afterwards, it unlocks the radius the
-        # drill's squares can sit in, the board grows by fewer squares than the
-        # drill promised, and the block reads as broken whenever the two fire in
-        # the same run. The frontier is ordered here so the drill would pick the
-        # squares nearest the bomb first — exactly the overlap the ordering
-        # avoids.
+    def test_a_bomb_still_blasts_its_own_radius_beside_a_drill(self):
+        # A Bomb is one of the things that still unlocks squares itself ("unless
+        # otherwise stated"): it opens the radius around it, while the drill's
+        # touches hand over Board Units instead (see _grant_board_units). The
+        # blast still resolves first, so its message survives.
         g = self._start_locked_game()
         before = set(g.unlocked_cells)
         # A square on the edge of the start region, so the blast has locked
@@ -487,31 +493,25 @@ class BoardTests(unittest.TestCase):
         g.bomb_cells = {bomb}
         g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
         g.drill_run_units = 2
-
-        def nearest_first(candidates):
-            candidates.sort(key=lambda cell: abs(cell[0] - bomb[0])
-                            + abs(cell[1] - bomb[1]))
+        before_units = g.board_units
 
         g.run_complete = True
         g.awaiting_after_run = True
         # (The next level opens its own squares on CONTINUE; this test is about
         # what the bomb and the drill add on top, so the level is left out.)
         with mock.patch.object(main.Game, "_begin_level"), \
-                mock.patch("main.random.shuffle", side_effect=nearest_first), \
                 mock.patch("main.random.random", return_value=0.9):
             g._continue_run()
 
         radius = {(bomb[0] + dx, bomb[1] + dy)
                   for dx in (-1, 0, 1) for dy in (-1, 0, 1)}
         gained = g.unlocked_cells - before
-        # The whole radius the bomb could open is open...
-        self.assertEqual(gained & radius,
+        # The whole radius the bomb could open is open, and nothing else...
+        self.assertEqual(gained,
                          {cell for cell in radius if cell not in before})
-        # ...and the drill's two squares are new ones ON TOP of it, none of them
-        # inside what the blast was going to cover anyway.
-        self.assertEqual(len(gained - radius), 2)
-        self.assertEqual(len(gained), len(gained & radius) + 2)
         self.assertEqual(g.bomb_cells, set())
+        # ...while the drill paid in units instead of squares.
+        self.assertEqual(g.board_units, before_units + 2)
         self.assertIn("from the bomb blast", g.shop_message)
         self.assertIn("from the drill", g.shop_message)
 
@@ -530,13 +530,13 @@ class BoardTests(unittest.TestCase):
         g.drill_run_units = 2
         run_end(g)
         self.assertEqual(g.shop_message,
-                         "Board expanded 2 squares (2 from the drill)")
+                         "Board expanded by 2 Board Units (2 from the drill)")
 
         g = self._start_locked_game()
         g.cards.append(main.CardItem(main.Card.CONQUISTADOR, 56))
         run_end(g)
         self.assertEqual(g.shop_message,
-                         "Board expanded 4 squares (4 from Conquistador)")
+                         "Board expanded by 4 Board Units (4 from Conquistador)")
 
         # The bomb's blast (Chebyshev radius 1, so diagonals count) opens the
         # locked squares around it — however many of the eight are still
@@ -553,10 +553,10 @@ class BoardTests(unittest.TestCase):
             and g.is_cell_locked(bomb[0] + dx, bomb[1] + dy))
         run_end(g)
         self.assertEqual(g.shop_message,
-                         f"Board expanded {blasted} squares "
+                         f"Board expanded by {blasted} squares "
                          f"({blasted} from the bomb blast)")
 
-        # Both at once: the counts are listed side by side.
+        # Both at once: squares and units are reported side by side.
         g = self._start_locked_game()
         g.bomb_cells = {bomb}
         g.grid[bomb] = main.Block(bomb[0], bomb[1], scorer=main.Scorer.BOMB)
@@ -564,7 +564,7 @@ class BoardTests(unittest.TestCase):
         run_end(g)
         self.assertEqual(
             g.shop_message,
-            f"Board expanded {blasted + 2} squares "
+            f"Board expanded by {blasted} squares and 2 Board Units "
             f"({blasted} from the bomb blast, 2 from the drill)")
 
         # Nothing unlocked by the run end leaves the message alone, and one
@@ -575,10 +575,10 @@ class BoardTests(unittest.TestCase):
         self.assertEqual(g.shop_message, "")
         g._announce_board_expansion(1, 0, 0)
         self.assertEqual(g.shop_message,
-                         "Board expanded 1 square (1 from the bomb blast)")
+                         "Board expanded by 1 square (1 from the bomb blast)")
         g._announce_board_expansion(0, 0, 2)
         self.assertEqual(g.shop_message,
-                         "Board expanded 2 squares (2 from Conquistador)")
+                         "Board expanded by 2 Board Units (2 from Conquistador)")
 
     def test_draw_board_paints_locked_squares_as_background_without_a_trial(self):
         g = self._start_locked_game()

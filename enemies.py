@@ -2,8 +2,10 @@
 
 An enemy is a Block (so the physics engine collides with it for free) that
 never scores. When a marble touches one the marble DEALS ITS SCORE as damage —
-``chips * mult`` at that moment — and its own chips and mult are wiped back to
-zero, so a marble has to build its score up again before its next hit. An enemy
+``chips * mult`` at that moment — and both its chips and its mult are then
+HALVED (user request: "make the score halve chips and halve score on collision
+with an enemy instead of setting both to 0"), so the marble keeps half of what it
+built but its next blow lands for a quarter of this one. An enemy
 whose HP reaches zero is defeated and leaves the board; the level is won when no
 enemies are left and every marble has reached the Finish (see
 Game._handle_block_contacts).

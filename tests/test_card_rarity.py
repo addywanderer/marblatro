@@ -169,11 +169,14 @@ class CardRarityTests(GameTestCase):
         legendary = main.CardItem(main.Card.INFERNO, main.Card.PRICES[main.Card.INFERNO])
         rows = dict(self.game._describe_item(legendary))
         self.assertEqual(rows["Rarity"], "Legendary")
-        # The tier row sits between what the card does and its flavour line, and
-        # the card's GROUP is named last (see components.Group).
+        # Every item states its tier in the one common row, right before its
+        # GROUP (see components.Rarity.of): the card's own text, its keywords
+        # and when it fires come first, then how rare it is, then the family it
+        # is in.
         labels = [label for label, _ in self.game._describe_item(legendary)]
         self.assertEqual(labels, [f"Card - {main.Card.name(main.Card.INFERNO)}",
-                                  "Rarity", "Comment", "Group - Cards"])
+                                  "Keywords", "Passive", "Timing", "Comment",
+                                  "Rarity", "Group - Cards"])
 
     def test_the_card_border_is_the_tier_colour(self):
         # Every card is FRAMED in its tier's colour (draw_card), so the tier is

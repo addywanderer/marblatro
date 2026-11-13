@@ -255,3 +255,98 @@ class TopBarTests(GameTestCase):
         behind = g.screen.get_at(self._cell_centre(0, 0))[:3]
         main.ui.draw_board(g)
         self.assertEqual(g.screen.get_at(self._cell_centre(0, 0))[:3], behind)
+
+
+class CompactTopBarTests(GameTestCase):
+    """The bar is COMPACT (user request: "make the top bar more compact by moving
+    the energy bar, board square and deck buttons, and main menu button up and
+    making the top bar's height smaller")."""
+
+    def _pieces(self):
+        """The bar's laid-out pieces, name -> rect."""
+        x0, y0 = main.RUN_DOT_GRID
+        dots = main.pygame.Rect(
+            x0 - main.RUN_DOT_RADIUS, y0 - main.RUN_DOT_RADIUS,
+            7 * main.RUN_DOT_DX + 2 * main.RUN_DOT_RADIUS,
+            2 * main.RUN_DOT_DY + 2 * main.RUN_DOT_RADIUS)
+        return {"energy": main.ENERGY_BAR_RECT,
+                "deck": main.DECK_BUTTON_RECT,
+                "board unit": main.BOARD_UNIT_BUTTON_RECT,
+                "main menu": main.RETURN_TO_MENU_BUTTON_RECT,
+                "trial": main.TRIAL_BOX_RECT,
+                "upgrade": main.ACTION_UPGRADE_RECT,
+                "run dots": dots}
+
+    def test_the_bar_is_short(self):
+        # Smaller than it was (200), and the board takes everything freed.
+        self.assertLessEqual(main.TOP_BAR_HEIGHT, 170)
+        self.assertEqual(main.MARBLE_BOX_COORDS[1], main.TOP_BAR_HEIGHT)
+        self.assertEqual(self.game.board_viewport().top, main.TOP_BAR_HEIGHT)
+
+    def test_every_piece_is_up_off_the_bars_bottom_edge(self):
+        # "Move them up": every piece except the score panel (which is defined to
+        # fill the bar) ends with room to spare above the board.
+        for name, rect in self._pieces().items():
+            with self.subTest(piece=name):
+                self.assertLessEqual(rect.bottom, main.TOP_BAR_HEIGHT - 8, rect)
+        self.assertLessEqual(main.SCORE_PANEL_RECT.bottom, main.TOP_BAR_HEIGHT)
+
+    def test_no_two_pieces_overlap(self):
+        pieces = self._pieces()
+        for name, rect in pieces.items():
+            for other, rect2 in pieces.items():
+                if other == name:
+                    continue
+                with self.subTest(piece=name, other=other):
+                    self.assertFalse(rect.colliderect(rect2), (name, other))
+
+    def test_the_buttons_share_the_bars_lower_row(self):
+        # The DECK and BOARD UNIT buttons stack in their own column, and the
+        # MAIN MENU button lines up with the lower one across the bar.
+        deck, unit = main.DECK_BUTTON_RECT, main.BOARD_UNIT_BUTTON_RECT
+        menu = main.RETURN_TO_MENU_BUTTON_RECT
+        self.assertGreaterEqual(unit.top, deck.bottom)
+        self.assertEqual(unit.bottom, menu.bottom)
+        # ...and they sit under the run/round display, which is above them.
+        self.assertLessEqual(main.RUN_DOT_GRID[1] + 2 * main.RUN_DOT_DY
+                             + main.RUN_DOT_RADIUS, deck.top)
+
+    def test_the_energy_bar_sits_under_the_readouts_in_the_bars_left_column(self):
+        energy = main.ENERGY_BAR_RECT
+        self.assertGreater(energy.y, main.ui.last_run_cash_rect(self.game).bottom)
+        self.assertLessEqual(energy.bottom, main.TOP_BAR_HEIGHT - 8)
+        # A two-line message still clears the bar's caption above the pips.
+        lines, rect = main.ui.shop_message_layout(self.game, "x " * 120)
+        self.assertEqual(len(lines), 2)
+        self.assertLess(rect.bottom, energy.y - 16)
+
+    def test_the_run_round_display_is_actually_drawn(self):
+        # The display was painted BEFORE the bar's backplate, which then covered
+        # it: the dots, their caption and the round/run count were invisible.
+        # A drawn frame shows the dots on the bar.
+        with mock.patch("main.pygame.mouse.get_pos", return_value=(5, 5)):
+            self.game.draw()
+        x0, y0 = main.RUN_DOT_GRID
+        self.assertEqual(tuple(self.game.screen.get_at((x0, y0)))[:3], main.GRAY)
+        # ...and the caption sits above them, inside the bar.
+        heading_top = y0 - self.game.tiny_font.get_height() - 6
+        self.assertGreaterEqual(heading_top, 0)
+        self.assertLess(heading_top, y0)
+
+    def test_the_score_readout_fits_the_shorter_bar(self):
+        # Its five lines were pulled together to fit, and the resource-point
+        # lines still have room for three rows under them (their own ink, not
+        # their 16px line boxes, is what has to clear the bar's bottom edge).
+        region = main.SCORE_PANEL_RECT
+        self.assertLessEqual(region.bottom, main.TOP_BAR_HEIGHT)
+        resource_start = region.top + 100
+        ink_bottom = self.game.tiny_font.render(
+            "0.5 shred point to next card", True, main.WHITE).get_bounding_rect().bottom
+        third_row_ink = resource_start + 2 * 16 + ink_bottom
+        self.assertLessEqual(third_row_ink, main.TOP_BAR_HEIGHT - 4)
+
+    def test_the_bar_keeps_its_slot_grid(self):
+        # The shelf's logical grid is a slot count, not the bar's height: the
+        # bar got shorter, the number of slots a shelf deals into did not.
+        self.assertEqual(main.SHOP_GRID_ROWS, 5)
+        self.assertEqual(main.SHOP_GRID_COLS, 10)

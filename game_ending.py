@@ -78,8 +78,11 @@ from items import (
     BlockItem,
     CardItem,
     ItemPack,
+    PassiveItem,
     ResourceOption,
     ScorerToken,
+    StructureItem,
+    ToolItem,
     CashBreakdown,
     _s,
     make_card_item,
@@ -272,25 +275,23 @@ class EndingMixin:
                 break
         # Bomb blocks touched this run detonate after a run: each unlocks its
         # 1-cell radius (diagonals included) and destroys itself. The blast goes
-        # FIRST, before the Drill and Conquistador grants below, because it is a
-        # fixed shape while those grants PICK squares off the locked frontier
-        # (see _grant_locked_units): a drill granted first can have its squares
-        # land inside the radius the bomb was about to unlock anyway and be
-        # swallowed by it, so the board grows by fewer squares than the drill
-        # promised — and with the blast announced last its message buried the
-        # drill's, making the block look like it had done nothing at all.
+        # FIRST so its message is not lost behind the Board Unit report below;
+        # and a bomb is one of the few things that still opens squares itself,
+        # because that is what it says it does (see _grant_board_units).
         blasted = self._detonate_bombs(announce=False)
-        # Drill-scorer blocks touched this run unlock their locked board
-        # squares after a run (retrying discards the pending
-        # drills); the Conquistador card unlocks 4 more after every run. The
-        # squares only land after a run, so retrying can't farm
-        # board expansions.
+        # Drill-scorer blocks touched this run hand over their Board Units after
+        # a run (retrying discards the pending drills) — user request: "make the
+        # drill scorer give 2x board square", i.e. units the player spends on
+        # the squares they choose — and the Conquistador card hands over 4 more
+        # after every run ("make conquistador give 4x board square"). The units
+        # only land after a run, so retrying can't farm board expansions.
         drilled = 0
         if self.drill_run_units:
-            drilled = self._grant_locked_units(self.drill_run_units,
-                                               announce=False)
+            drilled = self._grant_board_units(self.drill_run_units,
+                                              announce=False)
             self.drill_run_units = 0
-        conquered = (self._grant_locked_units(4, announce=False)
+        conquered = (self._grant_board_units(
+                         MAGNITUDES.BOARD_UNITS_PER_CONQUISTADOR, announce=False)
                      if self._has_card(Card.CONQUISTADOR) else 0)
         self._announce_board_expansion(blasted, drilled, conquered)
         # 1000-handed: after every run, its thousand hands fetch one random
@@ -731,6 +732,77 @@ class EndingMixin:
             entries.append(("trial", value, Trial.name(value) if d else "???",
                             Trial.description(value) if d else "???", True, d))
         return entries
+
+    def collection_entry_at(self, pos):
+        """The codex entry under a screen position, or None.
+
+        User request: "when hovering over an item in the collection, show the
+        same pop-up info box as when the player hovers over the same item in a
+        real game." The cells are laid out by ui.collection_entry_rect and
+        scrolled by ``collection_scroll`` (see ui.draw_collection), so the hit
+        test walks the same list with the same offsets; the two bands the page
+        paints over its top and bottom (its heading and its button row) are not
+        cells, so a cursor over them reads nothing.
+        """
+        if pos[1] < ui.COLLECTION_HOVER_TOP:
+            return None
+        if pos[1] > SCREEN_HEIGHT - ui.COLLECTION_HOVER_BOTTOM:
+            return None
+        for index, entry in enumerate(self._collection_entries()):
+            rect = ui.collection_entry_rect(index)
+            rect.y -= self.collection_scroll
+            if rect.collidepoint(pos):
+                return entry
+        return None
+
+    def _collection_entry_item(self, entry):
+        """The ITEM a codex entry stands for, so the codex can describe it.
+
+        The info box is the same one a game shows (see Game._describe_item), and
+        it describes an ITEM rather than a table row, so a codex cell is turned
+        into the item it lists: a card, an action, a tool, a passive, a
+        structure, a pack or a part, each built the way the codex's own tables
+        price it. Two entries are not items in their own right, and both are
+        turned into the closest thing that is:
+
+        * a MATCH GROUP stands for every card built on it, so it reads as one of
+          them (its first card scorer — every group has one, see
+          match_group_card), described at the average magnitude a fresh one has;
+        * a TRIAL is a way to play a run rather than an item, so it has no info
+          box: the cell's own name and text are the whole of it.
+
+        Returns None for a trial (and for an entry kind this build does not
+        know).
+        """
+        kind, value = entry[0], entry[1]
+        if kind == "card":
+            return CardItem(value, Card.PRICES.get(value, 20))
+        if kind == "match_group":
+            group = MATCH_GROUPS[value]
+            card = match_group_card(group, CARD_SCORERS[0])
+            if card is None:
+                return None
+            return CardItem(card, Card.PRICES.get(card, 20))
+        if kind == "action":
+            return ActionItem(value, Action.PRICES.get(value, 24))
+        if kind == "tool":
+            return ToolItem(value, Tool.PRICES.get(value, 0))
+        if kind == "passive":
+            return PassiveItem(value, Passive.PRICES.get(value, 16))
+        if kind == "structure":
+            # A structure is free: it is scenery a tool opens (see Structure).
+            return StructureItem(value, 0)
+        if kind == "pack":
+            # A pack is priced by its TYPE and SIZE, which is what its codex
+            # entry stands for (see pack_price): a normal one is the size shown.
+            return ItemPack(value, Pack.NORMAL, [],
+                            pack_price(value, Pack.NORMAL))
+        if kind in (Component.SHAPE, Component.EFFECT, Component.SCORER):
+            amount = (Scorer.DEFAULT_AMOUNT.get(value, 0)
+                      if kind == Component.SCORER else 0)
+            return Component(kind, value, amount=amount,
+                             price=COMPONENT_PRICES.get((kind, value), 0))
+        return None
 
     def _toggle_crt_filter(self):
         """F2: switch the CRT screen filter on and off, and remember it."""

@@ -541,7 +541,9 @@ class EnemyTests(LevelCase):
 
         self.assertEqual(enemy.hp, enemy.max_hp - 300)
 
-    def test_an_enemy_hit_wipes_the_marble_chips_and_mult(self):
+    def test_an_enemy_hit_halves_the_marble_chips_and_mult(self):
+        # User request: "make the score halve chips and halve score on collision
+        # with an enemy instead of setting both to 0."
         self._start_level()
         enemy = self.game.live_enemies()[0]
         marble = self.game.marbles[0]
@@ -551,7 +553,25 @@ class EnemyTests(LevelCase):
         marble.collisions_this_tick = [enemy]
         self.game._handle_block_contacts([enemy])
 
-        self.assertEqual((marble.chips, marble.mult), (0, 0))
+        self.assertEqual((marble.chips, marble.mult), (20, 1))
+        # ...so the marble keeps half of what it had built, and the NEXT blow
+        # lands for a quarter of what this one dealt.
+        self.assertGreater(marble.chips * marble.mult, 0)
+
+    def test_the_blow_is_worth_the_whole_score_it_halved(self):
+        # The damage is chips x mult BEFORE the halving, so the enemy takes
+        # exactly what the marble was worth when it hit.
+        self._start_level()
+        enemy = self.game.live_enemies()[0]
+        marble = self.game.marbles[0]
+        marble.chips = 40
+        marble.mult = 2
+        before = enemy.hp
+
+        marble.collisions_this_tick = [enemy]
+        self.game._handle_block_contacts([enemy])
+
+        self.assertAlmostEqual(enemy.hp, before - 80)
 
     def test_a_dead_enemy_leaves_the_board(self):
         self._start_level()

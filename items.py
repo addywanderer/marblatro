@@ -288,8 +288,13 @@ class ToolItem(Modifiable):
 
     @property
     def consumes(self):
-        """True when using this tool destroys it."""
-        return Tool.consumes(self.value)
+        """True when using this tool destroys it (the "consume" keyword).
+
+        Read from the item's keywords rather than from the tool table alone, so
+        a one-shot tool that has been marked REUSABLE survives its use (see
+        components.Keyword.of).
+        """
+        return components.Keyword.has(self, components.Keyword.CONSUME)
 
     @property
     def draws(self):
@@ -427,11 +432,12 @@ def resource_point_label(scorer):
     """What a resource scorer's points are called (see _resource_display).
 
     Shred points buy a card, rubble points a block, idea points an action and
-    option points a permanent shop slot, so the four are named after the
-    resource rather than after what they convert into.
+    structure points a permanent structure in every run, so the four are named
+    after the resource rather than after what they convert into.
     """
     return {Scorer.SHREDS: "shred", Scorer.RUBBLE: "rubble",
-            Scorer.IDEAS: "idea", Scorer.PICKY: "option"}.get(scorer, "resource")
+            Scorer.IDEAS: "idea", Scorer.PICKY: "structure"}.get(
+                scorer, "resource")
 
 
 def offer_key(offer):

@@ -98,7 +98,9 @@ class ActionsTests(GameTestCase):
                           main.Action.FORESIGHT, main.Action.CLEANSING,
                           main.Action.LANTERN, main.Action.EYEBALL,
                           main.Action.DEEP_POCKETS, main.Action.NASTY_COCKTAIL,
-                          main.Action.REROLL])
+                          main.Action.REROLL, main.Action.DYNAMITE,
+                          main.Action.HORSESHOE, main.Action.RECYCLING,
+                          main.Action.STORMCLOUD, main.Action.FLOOR_PLANS])
         # Deja Vu's two versions add triggers: +1, then +100.
         self.assertIn("+1 trigger", main.Action.description(main.Action.DEJA_VU, 1))
         self.assertIn("+100 triggers", main.Action.description(main.Action.DEJA_VU, 2))
@@ -106,7 +108,7 @@ class ActionsTests(GameTestCase):
     def test_the_later_actions_description_their_versions(self):
         # Each of the four later actions says what v1 does and what the upgrade
         # buys, in the shop's and collection's own words.
-        self.assertIn("4 locked board squares",
+        self.assertIn("4 Board Units",
                       main.Action.description(main.Action.EXPANSION, 1))
         self.assertIn("every locked board square",
                       main.Action.description(main.Action.EXPANSION, 2))
@@ -249,7 +251,8 @@ class ActionsTests(GameTestCase):
                           main.Action.GRACE, main.Action.INACTION,
                           main.Action.FORESIGHT, main.Action.LANTERN,
                           main.Action.EYEBALL, main.Action.DEEP_POCKETS,
-                          main.Action.NASTY_COCKTAIL})
+                         main.Action.NASTY_COCKTAIL, main.Action.HORSESHOE,
+                         main.Action.FLOOR_PLANS})
         for action in main.Action.ORDER:
             if action not in main.Action.NO_TARGET:
                 self.assertTrue(main.Action.needs_target(action),
@@ -340,19 +343,35 @@ class ActionsTests(GameTestCase):
         return [item for item in self.game.actions
                 if getattr(item, "value", None) == main.Action.REROLL]
 
-    def test_expansion_unlocks_four_squares(self):
-        # A brand-new game's board is its centered start region; the four
-        # squares come off the frontier next to it (see _grant_locked_units).
+    def test_expansion_hands_over_four_board_units(self):
+        # User request: "make all items that unlock random board squares give
+        # board squares instead, unless otherwise stated." A v1 hands over 4
+        # Board Units — the player picks the squares they open (see
+        # _grant_board_units) — and unlocks nothing itself.
         self.game._reset_board_to_start()
-        before = len(self.game.unlocked_cells)
+        before_squares = len(self.game.unlocked_cells)
+        before_units = self.game.board_units
         applied, item = self._use_action(main.Action.EXPANSION)
         self.assertTrue(applied)
-        self.assertEqual(len(self.game.unlocked_cells),
-                         before + main.EXPANSION_SQUARES)
+        self.assertEqual(self.game.board_units, before_units + main.EXPANSION_SQUARES)
+        self.assertEqual(len(self.game.unlocked_cells), before_squares,
+                         "the action picked squares itself")
         self.assertNotIn(item, self.game.actions)      # the action is spent
-        self.assertIn("Board expanded", self.game.shop_message)
+        self.assertIn("Board Unit", self.game.shop_message)
+
+    def test_a_board_unit_opens_the_square_the_player_picks(self):
+        # ...and the unit the action handed over does what the button's does.
+        self.game._reset_board_to_start()
+        applied, _item = self._use_action(main.Action.EXPANSION)
+        self.assertTrue(applied)
+        locked = self.game._locked_adjacent_cells()[0]
+        self.game.board_units -= 1
+        self.assertTrue(self.game._unlock_cell(*locked))
+        self.assertIn(locked, self.game.unlocked_cells)
 
     def test_v2_expansion_unlocks_the_whole_board(self):
+        # The UPGRADE is the "otherwise stated" exception: it says it unlocks
+        # the whole board, so it does.
         self.game._reset_board_to_start()
         applied, _item = self._use_action(main.Action.EXPANSION, version=2)
         self.assertTrue(applied)

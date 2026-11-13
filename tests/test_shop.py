@@ -201,9 +201,10 @@ class ShopTests(GameTestCase):
         self.assertEqual(main.Scorer.name(main.Scorer.PICKY), "Picky")
         self.assertEqual(main.Scorer.DEFAULT_AMOUNT[main.Scorer.PICKY], 1)
         self.assertGreater(main.COMPONENT_PRICES[(main.Component.SCORER, main.Scorer.PICKY)], 0)
-        self.assertIn("slot", main.scorer_description(main.Scorer.PICKY).lower())
+        self.assertIn("structure", main.scorer_description(
+            main.Scorer.PICKY).lower())
         # Picky is also a card scorer: every match group can offer it (a card
-        # that banks an option point when the marble collides with the block).
+        # that banks a structure point when the marble collides with the block).
         self.assertIn(main.Scorer.PICKY, components.CARD_SCORERS)
         self.assertIn(main.Scorer.PICKY, components.FLAT_CARD_SCORERS)
         group = main.match_group_for_shape(main.Shape.PIPE)

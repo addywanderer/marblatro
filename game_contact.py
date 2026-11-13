@@ -1,93 +1,22 @@
 """What a marble touching a block does: the counters, the key/lock gate, the
 split a marble takes, and the contact that scores a block."""
 
-import math
-import random
-from collections import deque
-
 import numpy as np
-import pygame
 
-import achievements
-import cards
-import collection
-import components
-import crt
-import metagame
-import profiles
-import rolling
-from rolling import *
-import save_system
 import sounds
-import ui
-from ui import Popup, ScoreParticle, TrailParticle
 from components import (
-    CARD_SCORERS,
-    COMPONENT_PRICES,
-    DEFAULT_DIFFICULTY,
-    MAGNITUDE_ATAN_LIMIT,
-    MAGNITUDE_MAX_STEPS,
-    MAGNITUDE_SCALE,
-    MAGNITUDE_STEP_DIVISOR,
-    MAGNITUDES,
-    MATCH_GROUPS,
     PIPE_GROUP_SHAPES,
-    RESOURCE_PACK_FACTOR,
-    RESOURCE_THRESHOLD,
-    Action,
     Card,
-    Component,
-    Difficulty,
     Effect,
     MarbleType,
-    Pack,
-    Rarity,
     Scorer,
     Shape,
     Trial,
-    block_price_for,
-    card_description,
-    card_price_for,
-    card_scorer,
-    effect_component_price,
-    effect_description,
-    effect_magnitude_floor,
-    magnitude_precision,
-    magnitude_step,
-    match_group_card,
-    match_group_card_meta,
-    match_group_label,
-    match_group_trigger,
-    pack_price,
-    paired_shape,
-    points_text,
-    resource_points_for,
-    scorer_component_price,
-    scorer_description,
-    scorer_magnitude_floor,
-    shape_description,
 )
 from config import *
-from blocks import Block
-from items import (
-    CASH_BREAKDOWN,
-    ActionItem,
-    BlockItem,
-    CardItem,
-    ItemPack,
-    ResourceOption,
-    ScorerToken,
-    CashBreakdown,
-    _s,
-    make_card_item,
-    offer_key,
-    resource_point_label,
-)
 from enemies import EnemyKind
-from marble import Marble, _configure_marble_type
-from physics import PhysicsEngine
-from shop import Shop
-from toolbox import Toolbox
+from marble import Marble
+from rolling import *
 
 
 class ContactMixin:
@@ -388,18 +317,20 @@ class ContactMixin:
         return copy
 
     def _damage_enemy(self, marble, enemy):
-        """Deal this marble's score to an enemy, then wipe the marble's score.
+        """Deal this marble's score to an enemy, then HALVE what it is worth.
 
         The marble pays with everything it has built: ``chips * mult`` is the
-        damage, and its chips and mult both drop back to zero (the user's "it
-        deals its score as damage, and its chips and mult are reset to 0"), so a
-        marble has to earn its score again before its next blow lands for
-        anything. An ARMOURED enemy ignores damage once its hits are used up; a
-        DEVOURER swallows the marble that touched it either way.
+        damage. A blow used to wipe the marble's chips and mult outright; it now
+        HALVES both instead (user request: "make the score halve chips and halve
+        score on collision with an enemy instead of setting both to 0"), so a
+        marble keeps half of what it had built — and the next blow lands for a
+        quarter of this one, since both factors are halved. An ARMOURED enemy
+        ignores damage once its hits are used up; a DEVOURER swallows the marble
+        that touched it either way.
         """
         damage = max(float(marble.chips) * float(marble.mult), 0.0)
-        marble.chips = 0
-        marble.mult = 0
+        marble.chips = float(marble.chips) / 2.0
+        marble.mult = float(marble.mult) / 2.0
         self._spawn_block_particle(
             enemy, self._particle_amount_text(damage), ORANGE)
         sounds.play_mech()
@@ -447,11 +378,10 @@ class ContactMixin:
                         if not getattr(b, "is_board_wall", False)]
             last_contacts = list(marble.collisions_last_tick)
             # An ENEMY is fought, not scored: the marble deals its score to the
-            # enemy as damage (chips x mult), which WIPES the marble's own chips
-            # and mult, and the enemy is dropped from this list so the scoring
-            # path below never sees it (user request: "when the marble collides
-            # with an enemy, it deals its score as damage, and its chips and
-            # mult are reset to 0").
+            # enemy as damage (chips x mult) and then has both HALVED (user
+            # request: "make the score halve chips and halve score on collision
+            # with an enemy instead of setting both to 0"), and the enemy is
+            # dropped from this list so the scoring path below never sees it.
             enemies = [b for b in contacts if getattr(b, "is_enemy", False)]
             if enemies:
                 for enemy in enemies:

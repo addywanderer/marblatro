@@ -440,9 +440,11 @@ class EconomyMixin:
         The one conversion loop, run both when a run's points are committed and
         when a resource PACK banks points mid-run (see _grant_resource_points),
         so a pack's points buy exactly what a trigger's points buy. Shreds pay
-        a card, Rubble a block, Ideas an action and Picky a permanent shop slot
-        (each slot shows an extra random offer on every refresh); a refused
-        grant leaves its points banked for next time.
+        a card, Rubble a block, Ideas an action and Picky a PERMANENT STRUCTURE
+        that every run generates afresh (user request: "make the 'picky' scorer
+        reward a permanent new random structure generated every run instead of a
+        new 'shop slot'"); a refused grant leaves its points banked for next
+        time.
         """
         cost = self._resource_cost()
         while self.shred_points >= cost and self._grant_random_card():
@@ -453,8 +455,10 @@ class EconomyMixin:
             self.idea_points -= cost
         while self.option_points >= cost:
             self.option_points -= cost
-            self.bonus_slots += 1
-        self.shop.bonus_slots = self.bonus_slots
+            self.bonus_structures += 1
+        # A structure won mid-run joins the run being played as well as every
+        # run after it (see _refresh_bonus_structures).
+        self._refresh_bonus_structures()
 
     def _grant_resource_points(self, scorer, points):
         """Bank resource points straight away, and convert what they buy.
@@ -606,7 +610,8 @@ class EconomyMixin:
             (Scorer.SHREDS, self.shred_points, self.shred_run_gain, "card"),
             (Scorer.RUBBLE, self.rubble_points, self.rubble_run_gain, "block"),
             (Scorer.IDEAS, self.idea_points, self.idea_run_gain, "action"),
-            (Scorer.PICKY, self.option_points, self.option_run_gain, "slot"),
+            (Scorer.PICKY, self.option_points, self.option_run_gain,
+             "structure"),
         ]
         threshold = self._resource_cost()
         for scorer, bank, run_gain, label in specs:

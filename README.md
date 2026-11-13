@@ -59,7 +59,8 @@ still draws.
 
 Every item says what it does in one word apiece (`components.Keyword`): **dig**,
 **reveal**, **fix** and **break** are the verbs a tool offers a structure,
-**consume** means the item is destroyed by being used, **draw N** means it refills
+**consume** means the item is destroyed by being used, **reusable** means using it
+does *not* discard it, **draw N** means it refills
 the square it left behind, **temporary** means it is destroyed at the end of the
 run it was made for, and **unplayable** means the item cannot be used at all —
 either it is passive (it works by being owned) or it simply does nothing, like a
@@ -69,6 +70,24 @@ every item, so a tool's reach and a passive's payoff read at a glance:
 (`components.Passive`), **Brick** breaks or digs for **no energy** and is
 consumed, and **Match** reveals for 1 energy, is consumed and draws an item. All
 of them arrive in a **Tool Pack**, the one a revealed pit or shed hands over.
+
+**A used card is discarded unless it says reusable** (user request: "when a card
+is used, discard it unless it has the keyword reusable"). Every "and discard
+this card" in the game goes through one door, `Game._discard_used_card`: a spent
+action (`_consume_action`), a Lantern burning out and a Reroll turning a
+structure over. The card leaves through the ordinary discard, so the run counts
+it (the Trash Can card pays for those), and a card carrying the word simply
+stays in hand — used, not used up. Every tool states which way it goes
+(`Tool.keywords`: a brick is consumed, a shovel is reusable), and any item can be
+made reusable with the `Modifier.REUSABLE` modifier, which prints the word and
+makes the rule leave it alone.
+
+Two different discards wear the same word, so they are spelled out here. A used
+card is **destroyed** (`_discard_item`: gone from the game, counted for the Trash
+Can). Anything else that is thrown away — the card Smelly Socks takes as it is
+drawn, every item a **Horseshoe** throws back — goes into the **deck**
+(`_to_deck`), where any later draw can deal it again (the user's answer on
+Smelly Socks: "the card goes back into the deck and is not destroyed").
 
 The tool catalogue is seventeen (`components.Tool`), and the thirteen beyond the
 starters are one per gap the starters leave:
@@ -81,11 +100,11 @@ starters are one per gap the starters leave:
 | **Gilding Cloth** | fix + reveal | 2 | consumed | **shapes the reward**: it arrives `amount` QUALITY tiers higher, so what is kept is worth double |
 | **Wrecking Bar** | break | 1 | consumed | **sweeps**: opens the target *and* every structure standing in the four squares around it that answers break, for one swing |
 | **Multi-Tool** | all four | 3 | no | answers any door there is — for the whole run's energy, once |
-| **Drill** | all four | 0 | no | answers any door free, and packs a lump of **Dirt** into the deck each time (`Tool.MAKES`) |
+| **Excavator** | all four | 0 | no | answers any door free, and packs a lump of **Dirt** into the deck each time (`Tool.MAKES`). The *tool* is an Excavator now; the SCORER of the same name is still the Drill |
 | **Pickaxe** | dig | 1 | no | digs, and strikes a **Spark** into the deck |
 | **Spark** | reveal | 0 | consumed | the cheapest opening there is — and **temporary**, so it is gone at the end of the run |
 | **Vodka** | — | 1 | consumed | **modifies a card**: 3 stacks of *forgotten*, so it cannot be drawn until they wear off (`Ability.MODIFY`) |
-| **Dirt** | — | — | no | does nothing at all: `unplayable`, and the price of a drill |
+| **Dirt** | — | — | no | does nothing at all: `unplayable`, and the price of the Excavator |
 
 The two that shape a reward carry an **amount** (`Tool.AMOUNTS`), so a golem can
 fold two of them together: a golden Chisel pushes two sizes, and the sidebar
@@ -157,7 +176,7 @@ a run that draws one can open structures and a run that does not cannot.
 | `config.py` | Every tunable: the colours, the layout geometry (every rect and panel coordinate), the prices, and the score scales. |
 | `rolling.py` | The rolls and prices an item is built and valued with: magnitudes, the cards and match groups the shop offers, the key/portal numbers, resale prices. |
 | `blocks.py` | `Block`: one square of the board, with its shape, effects, scorer and rolled magnitudes. |
-| `enemies.py` | `Enemy`: a `Block` that fights back instead of scoring. A marble's hit deals its `chips x mult` as damage and wipes its own chips and mult; patrollers slide along their row, cowards flee the marble, beetles only take a few hits and maws swallow the marble. The numbers live in `components.py` (`EnemyKind`, `ENEMY_HP_SHARE`, ...), and a level's enemies share out the run's old required score between them (`components.split_enemy_health`). |
+| `enemies.py` | `Enemy`: a `Block` that fights back instead of scoring. A marble's hit deals its `chips x mult` as damage and then HALVES both, so the marble keeps half of what it built and its next blow lands for a quarter; patrollers slide along their row, cowards flee the marble, beetles only take a few hits and maws swallow the marble. The numbers live in `components.py` (`EnemyKind`, `ENEMY_HP_SHARE`, ...), and a level's enemies share out the run's old required score between them (`components.split_enemy_health`). |
 | `items.py` | What the player owns: `BlockItem`, `CardItem`, `ActionItem`, `ItemPack`, `StructureItem`, `ToolItem`, `PassiveItem`, `ResourceOption`, `ScorerToken`, `CashBreakdown`. |
 | `shop.py` | The `Shop`: the offers standing on the board -- an empty shelf now, since the LEVEL owns the structures -- plus the buying/hoarding paths a save from before the change can still use. |
 | `toolbox.py` | `Toolbox`: the player's portable items (loose blocks and components). Ownership only — where an item stands is the game's business, and an item with no square is in the deck (see `game_deck.py`). |
@@ -233,6 +252,15 @@ Conventions worth knowing before editing:
   the Finish**. A level is never lost by
   playing -- it only becomes impossible -- so **Y** gives up on it at any time
   and counts it as lost, and three lost levels end the game.
+* **An enemy halves the marble that hits it.** `Game._damage_enemy` deals the
+  marble's whole `chips x mult` as damage, then halves BOTH its chips and its
+  mult (user request: "make the score halve chips and halve score on collision
+  with an enemy instead of setting both to 0"). A hit used to wipe the score, so
+  the marble was left scoring nothing; now it keeps half of what it built, which
+  means its SECOND blow lands for a quarter of the first — a fight wears a marble
+  down instead of disarming it. The enemy's own sidebar row says so ("...as
+  damage, and both are then halved"), and a devourer still eats the marble
+  whatever the arithmetic.
 * **The score lives on the marbles.** Every marble carries its own `chips`
   and `mult`, seeded from the run's base when it is released, so a block's
   scorer only moves the score of the marble that collided with it (a split
@@ -255,19 +283,41 @@ Conventions worth knowing before editing:
   MAGNITUDE, and `components.MAGNITUDES` is the one table they live in: effects,
   scorers, cards (`CARD_RATIOS`, `TRASH_CAN_CHIPS`, `SMELLY_SOCKS_CHIPS`/_MULT)
   and ACTIONS (`LANTERN_DRAWS`, `EYEBALL_DRAWS`, `DEEP_POCKETS_PACKS`,
-  `COCKTAIL_ENERGY_PER_MODIFIER`, bound onto `Action.MAGNITUDE`). An action with
+  `COCKTAIL_ENERGY_PER_MODIFIER`, `DYNAMITE_SQUARES`,
+  `HORSESHOE_EXTRA_DRAWS`, `RECYCLING_DRAWS`, `STORMCLOUD_DESTROYS`,
+  `FLOOR_PLANS_BLOCKS`, bound onto
+  `Action.MAGNITUDE`). An
+  action with
   a magnitude
   carries it on the item (`ActionItem.amount`), which is why its text, its
   sidebar row, its upgrade and a golem's doubling all read the same number: two
   Lanterns combined draw four items, and nothing in the code types "4".
+* **Every item has a RARITY, and the tier is its price.** `components.Rarity`
+  answers for any item (`Rarity.of(item)`, `Rarity.of_kind(kind, value)`): a
+  card, an action, a tool, a passive, a part (a shape, an effect, a scorer), a
+  pack and a structure all carry a tier, a block reads the tier of the parts it
+  is built from (`block_price_for`) and a Spirit token the tier of the block it
+  keeps (user request: "give all items a rarity"). The rule is `Rarity.BANDS` —
+  up to $28 Common, $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48+ Legendary
+  — which is exactly the band `Card.RARITIES` was already authored on and the
+  same number the shop already draws a part by (`component_weight` is 1/price),
+  so a tier and its odds can never disagree. The two kinds that are not priced
+  one item at a time say so themselves: a structure is free
+  (`Structure.RARITIES`) and a pack is priced by its size (`Pack.RARITIES`). The
+  tier is shown where an item is read — a "Rarity" row in the sidebar (under the
+  item's own text, before its group, written in the tier's colour) and a
+  coloured tag in its codex cell, for every kind of entry. The level's own
+  things (a foe, its furniture, a trial) and the bar's readouts are not items and
+  have no tier.
 * **An ACTION can ask for the run's energy.** Energy is the run's budget
   (`MAX_ENERGY`), which the tools spend to open structures — and the newest
   actions spend it too (`Action.ENERGY`: Eyeball and Deep Pockets 1, the Nasty
   Cocktail 0). `Game._apply_action` charges it before anything fires and spends
   nothing on a refusal, the same rule `_apply_tool` follows, and the item's
-  Ability row says so ("Costs the action itself and 1 energy"). An action that
-  only ARMS something (Eyeball's pick, below) is charged when the thing it armed
-  happens, so backing out of it costs nothing.
+  Ability row says so ("Costs 1 energy." — the card spending ITSELF is its own
+  keyword, see the card-family note below). An action that only ARMS something
+  (Eyeball's pick, below) is charged when the thing it armed happens, so backing
+  out of it costs nothing.
 * **The board is infinite, and the camera is the window onto it.** A square is
   any pair of integers, so there is no edge, no `GRID_WIDTH` bound and nothing
   to fall off: `Game.cell_to_screen` / `screen_to_cell` convert between a square
@@ -350,6 +400,71 @@ Conventions worth knowing before editing:
     where it stands, discards itself through the ordinary discard door and draws
     a card into the square it gave up (`Game._action_reroll`). Its magnitude is
     the cards it draws, so a golem-folded one draws two.
+  * **Dynamite** (an action, 2 energy) is the one card pointed at the BOARD
+    itself. With nothing selected it blows open `MAGNITUDES.DYNAMITE_SQUARES`
+    (10) random squares on the locked frontier — no unit click needed, which is
+    why it is one of the items that states squares — and with a single structure
+    selected it digs or reveals it (`Game._action_dynamite`), the reward taking
+    the structure's square exactly as a tool's would, and the card being
+    discarded through the same door. It is the first OPTIONAL_TARGET action:
+    `Action.optional_target` makes `_apply_action` accept zero targets or one
+    (two is refused), a pack that deals it leaves it ARMED rather than firing it
+    blind (`Game._keep_action_from_pack`), and its sidebar `needs` line says "no
+    target, or 1 structure" (`Ability.contract(needs=...)`). A golem and a
+    structure that answers neither dig nor reveal (a mirror) are refused and keep
+    the card and the energy.
+  * **Horseshoe** (an action, 1 energy) is the deck's own card (user request:
+    "add a card: 'horseshoe' (discard all items on the board that you own, draw
+    the same number plus 3 new items. costs 1 energy)"). It throws the HAND back
+    and deals a bigger one: everything the player owns on the board goes back
+    into the DECK, and the card then draws that many items plus
+    `MAGNITUDES.HORSESHOE_EXTRA_DRAWS` (3) — a mulligan with a bonus, never a
+    sacrifice, because a discard in this game puts an item back in the deck (the
+    answer Smelly Socks' discard gave is the rule for all of them). The sweep is
+    `Game._sweep_board_into_deck`, the very rule the end of a run uses
+    (`Game._cycle_deck`), so the two cannot drift: placed blocks come off the
+    board with their items, the START and FINISH blocks stay where the player put
+    them and a Spirit token stays for its run (see `_stays_out_of_the_deck`), and
+    the level's own props and enemies are not the player's to throw away. The
+    card sits out its own sweep, so a REUSABLE Horseshoe is used rather than
+    thrown, and it stops drawing when the deck runs out.
+  * **Recycling** (an action, 0 energy) is the same idea aimed at ONE item (user
+    request: "add a card, 'recycling' (discard selected item, draw 2 items for 0
+    energy)"). It is the first action pointed at any of the player's items —
+    `Action.ANY_TARGET` widens `Game.is_action_target` for it alone, so a tool, a
+    passive, a shape or a whole card can all be recycled, while an action still
+    never can — and the target goes back into the DECK (`Game._to_deck`, the same
+    "a discard is not a destruction" rule the Horseshoe follows) before the card
+    draws `MAGNITUDES.RECYCLING_DRAWS` (2) out of that deck
+    (`Game._action_recycling`). The first draw takes the square the recycled item
+    gave up, so the board does not shuffle; the recycled item is a deck item
+    again, so a draw may deal it straight back. A placed BLOCK is recycled as the
+    item it was built from (it comes off the board first), and the level's own
+    props and enemies and an unbought offer are refused, as is an empty deck.
+  * **Stormcloud** (an action, 1 energy) is the one ACTION with a tool's reach
+    (user request: "add a card, 'stormcloud' (break, fix, dig, or reveal, and
+    destroy 1 random structure. costs 1 energy)"). It is aimed at a structure
+    (`Action.STRUCTURE_TARGET`, like the Reroll and the Dynamite) and uses the
+    first of its four verbs that structure answers, so any door but the golem
+    opens — the golem is refused because it wants a tool and two of the player's
+    items, not weather. The reward replaces the structure on its square, exactly
+    as a tool's opening does, and then the storm brings down
+    `MAGNITUDES.STORMCLOUD_DESTROYS` (1) random structure still standing, through
+    `_consume_structure(discover=False)` like Deep Pockets — a structure is
+    revealed by OPENING it, so a wrecked one teaches nothing. The one just
+    opened is already off the board, so a card can never open and destroy the
+    same door; with nothing else standing the opening still happens and says so.
+  * **Floor plans** (an action, 1 energy) deals the BLOCKS a run is built from
+    (user request: "add a new card, 'floor plans' (draw 5 blocks. costs 1
+    energy)"). It is the Lantern's narrower cousin: where the Lantern draws any
+    item at all, this one draws only what `Game.deck_blocks` names — the
+    ready-made blocks waiting in the deck, never the parts, cards, actions or
+    tools it also holds — and it draws `MAGNITUDES.FLOOR_PLANS_BLOCKS` (5) of
+    them, so a golem-folded one deals ten. The draw goes through the ordinary
+    door with its own pool (`Game._draw_one_item(pool=...)`), so every block
+    takes an unlocked square of its own and a FORGOTTEN block stays where it is;
+    a deck with no block at all refuses the use and keeps the card and the
+    energy, and a deck with fewer than five deals what it has.
 * **Every reroll mechanic deals the Reroll card** (user request: "make all
   reroll mechanics spawn this card on the board when triggered"). Free shop
   rerolls had nothing to spend them on once the shelf stopped selling, so:
@@ -425,6 +540,25 @@ Conventions worth knowing before editing:
   is emptied only when the level number changes (`_begin_level`) or on a new game,
   so a board edit, R, a retry and T all leave the opened ones opened, and a save
   carries the set (`save_system`) so a load cannot re-deal them.
+* **Picky's reward is a PERMANENT structure, and every run rolls a new one.**
+  User request: "make the 'picky' scorer reward a permanent new random structure
+  generated every run instead of a new 'shop slot'". A whole structure point buys
+  one structure for good (`Game.bonus_structures`, converted in
+  `_convert_banked_points`), and the structure itself is re-rolled at the start of
+  every run (`_reroll_bonus_structures`, called from `reset_run` BEFORE the level
+  is laid out, so the roll is part of the board the player then builds against).
+  `bonus_structure_values` holds this run's roll and
+  `_place_bonus_structures` seats each one on a free square of the level, beside
+  the level's own four: they are marked `is_level_structure` (free, opened with a
+  tool, never refunded or sold) AND `is_bonus_structure` (so the level's plan never
+  counts them against its own four, and a re-roll can replace them). One that
+  already stands keeps its square through an unlock, a board edit, an R or a load,
+  and one the player OPENED stays gone for the level visit
+  (`Game.spent_bonus_structures`, recorded by `_consume_structure`) — the level
+  number changing is what deals them again. A point that converts mid-run tops the
+  board up at once (`_refresh_bonus_structures`). Its readout under the cash line
+  and its scorer text both say "structure point"; a save that still counts "bonus
+  shop slots" reads them as structures (`save_system`).
 * **Placing one item on another SWAPS them; nothing is ever knocked into the
   deck.** User report: "tools can sometimes disappear if the player places a
   structure on a tool". Moving an item onto an occupied square used to set the
@@ -461,8 +595,8 @@ Conventions worth knowing before editing:
   particular tool) except the rift, which answers to anything; `Structure.PRICES`
   keeps every one of them free, `OFFER_WEIGHTS` keeps their odds summing to 100,
   and the levels author them so every structure turns up in play — the last
-  level authors all fourteen, which is what lets its bonus slots deal any of
-  them (`Shop._level_structures` reads the level's AUTHORED kinds).
+  level authors all fourteen, which is what lets its plan deal any of them
+  (`Shop._level_structures` reads the level's AUTHORED kinds).
 * **The golem combines instead of paying out.** It is the one structure whose
   reward is not fixed in the table: `Structure.RESULTS[GOLEM]` says
   `("merge", 2)` for EVERY verb (it is a workbench, not a lock, so any tool
@@ -492,6 +626,19 @@ Conventions worth knowing before editing:
   stores it. The two tiers are also modifiers (`Modifier.GOLDEN`, `Modifier.DIAMOND`),
   so `item.quality` is a view over the item's modifier bag rather than a field of
   its own — one home for the state, one drawer, one save field.
+* **The top bar is a compact HUD strip.** `TOP_BAR_HEIGHT` is 160 px (user
+  request: "make the top bar more compact by moving the energy bar, board square
+  and deck buttons, and main menu button up and making the top bar's height
+  smaller"), and everything lives in it in columns: the cash/earnings readouts,
+  the message line and the energy pips on the left; the run/round dots with the
+  DECK and BOARD UNIT buttons stacked under them; the score readout; the trial
+  box with the action-upgrade button under it; and MAIN MENU in the same lower
+  row as the board-unit button. No two pieces overlap and nothing touches the
+  bar's bottom edge (`tests/test_board_camera.CompactTopBarTests`). The
+  run/round display is drawn onto the bar's own backplate — it used to be painted
+  *before* it and was covered by it, so the dots and their labels were invisible.
+  The shelf's logical grid (`SHOP_COORDS`) is a slot count for the shop to deal
+  into (8 x 5 cells, see `Shop.reseat`) and no longer follows the bar's height.
 * **Energy is the run's budget for the tools.** `MAX_ENERGY` (3) pips sit in the
   top bar (`ui.draw_energy_bar`), every opening spends the tool's own cost
   (`Tool.ENERGY`, spent in `Game._apply_tool`), and a run that starts is back to
@@ -538,25 +685,51 @@ Conventions worth knowing before editing:
   "Ability - Open: Needs 1 structure. Costs 1 energy. Press S to use it."), so
   the hint and the behaviour cannot drift, and an item with no ability simply
   prints no row and leaves `S` to assembly.
-* **One vocabulary describes every item.** `components.Keyword` holds the eight
+* **One vocabulary describes every item.** `components.Keyword` holds the nine
   words an item can carry — DIG, REVEAL, FIX, BREAK (the verbs, `VERB_KEYWORDS`),
-  CONSUME and DRAW (what happens to the item afterwards), UNPLAYABLE (it is
-  passive, `components.Passive`) and TEMPORARY (it dies with the run) — each with
+  CONSUME and REUSABLE (what happens to the item when it is used — it is thrown
+  away, or it is not), DRAW (it refills the square it left), UNPLAYABLE (it is
+  never used: it acts on its own) and TEMPORARY (it dies with the run) — each with
   a one-line meaning the sidebar reprints (`Keyword.line`), so "can a brick break
   this?" is answered by the same table that decides what pressing `S` does.
   Keywords are DERIVED, never stored
-  (`Keyword.of`: a tool reads `Tool.keywords`, a passive is unplayable, a
-  structure reads `Structure.verbs`), and a tool may offer several (`Tool.VERBS`
-  is a tuple) — `S` uses the first its structure answers, so a brick breaks a
-  mirror and digs a pit. Consuming goes through the ordinary discard
-  (`Game._discard_item`), so a spent brick counts for the Trash Can like any
-  other item.
+  (`Keyword.of`: a tool reads `Tool.keywords`, a whole card and a passive are
+  unplayable, an action is consumed, a structure reads `Structure.verbs`), and a
+  tool may offer several (`Tool.VERBS` is a tuple) — `S` uses the first its
+  structure answers, so a brick breaks a mirror and digs a pit. Consuming goes
+  through the ordinary discard (`Game._discard_item`), so a spent brick counts
+  for the Trash Can like any other item.
+  **Every card is a card, and says so with keywords** (user request: "make all
+  cards homogenous, and treat them the same way"). The Cards family's three
+  kinds are read out by ONE info box, labelled "Card - <name>" whether it is a
+  whole card, an action or a tool, and told apart by their words rather than by
+  the noun their kind carries: a whole card reads **unplayable** (it is never
+  used — Joker, Explorer, Inferno, a match-group card and a Concrete alike pay on
+  their own), an action reads **consume** (using it destroys it), a reusable card
+  reads **reusable** instead, and a tool reads its verbs plus one of those two.
+  What a used card spends of itself is therefore its keyword, so the Ability row
+  names only the energy (`Ability.COSTS[APPLY]` is "nothing"). The box states
+  everything a card does: its own text, its keywords, a row explaining each word
+  that needs one (`Consume`, `Passive`), and — for a whole card — a `Timing` row
+  saying WHEN it fires (start of the run, end of the run, on a fragile break, on
+  a matching collision, or always on; see `Game._card_timing_row`), so nothing is
+  left to the word "card" to imply.
+  **A used card is discarded unless it has the keyword reusable** (user request):
+  every "and discard this card" — a spent action, a Lantern, a Reroll — goes
+  through `Game._discard_used_card`, which throws the card away through the
+  ordinary discard (so the run counts it) unless `Keyword.has(item, REUSABLE)`,
+  in which case the card stays in hand, used but not used up. Every tool states
+  which way it goes (`Tool.keywords`: a one-shot reads consume, a permanent one
+  reads reusable, and a reusable item never also claims consume), and
+  `Modifier.REUSABLE` is the general lever: it prints the word and makes the rule
+  leave any item alone.
 * **A MODIFIER is the state riding on an item, and one table holds them all.**
-  `components.Modifier` lists the nine kinds — GOLDEN and DIAMOND (the golem's
+  `components.Modifier` lists the ten kinds — GOLDEN and DIAMOND (the golem's
   tiers), FORGOTTEN (cannot be drawn, one stack off per run), TEMPORARY
   (destroyed when its run ends), TOKEN (a kept block fires every run, once per
   stack), RETRIGGERABLE (one extra trigger per stack), V2 (the upgraded action),
-  FLIPPED and DISABLED (what a trial does to a card) — and each row is a name, a
+  FLIPPED and DISABLED (what a trial does to a card), REUSABLE (using it does not
+  discard it) — and each row is a name, a
   one-line meaning, a colour, and whether its stacks COUNT DOWN. The item side is
   one mixin, `components.Modifiable`, whose whole state is a `{modifier: stacks}`
   bag: every piece of it the game already kept in a field of its own is now a
@@ -620,6 +793,22 @@ Conventions worth knowing before editing:
   for a value with no art, so a save from an older build still draws, and
   `_scorer_art` returns None for NONE, START and FINISH on purpose: those three
   have faces of their own (a plain tile, a marble, a checkerboard).
+* **The codex shows the very info box a game shows.** User request: "when
+  hovering over an item in the collection, show the same pop-up info box as when
+  the player hovers over the same item in a real game." Hovering a revealed cell
+  draws the SAME box through the same door — `ui.draw_collection` asks
+  `Game.collection_entry_at` (the hit test, scrolled with `collection_scroll`
+  and blind to the heading and button bands) which entry is under the cursor,
+  `Game._collection_entry_item` builds the ITEM that entry lists, and
+  `Game._draw_item_info(item, "collection", pos)` draws it. Because the box is
+  the item's, it can never disagree with the game's: a card's own text, its
+  keywords and its `Timing` row, an action's version and magnitude, a tool's
+  energy, every item's price, rarity and group. Two entries are not items in
+  their own right and each is turned into the closest thing that is: a MATCH
+  GROUP reads as one of the cards built on it (its first card scorer, at the
+  average magnitude), and a TRIAL has no box at all — its cell's own name and
+  text are the whole of it. A locked cell draws nothing, so the box can never
+  leak what the codex is hiding.
 * **The level's blocks are never the player's.** Its props and enemies are
   blocks, but nothing refunds them: the end-of-run sweep skips them
   (`Game._cycle_deck`), `_unplace_block` refuses them, and a player's own
@@ -630,9 +819,37 @@ Conventions worth knowing before editing:
   the ring around it is solid wall. Clicking a locked square spends a Board Unit
   to unlock it — that click always means "unlock", whatever is in hand — and
   Board Units come from the bar's BOARD UNIT button (always buyable, `$8`, or
-  `$5` with the Mineshaft card), the Drill and Conquistador payoffs and the
-  Packed scorer. Unlocking a square re-lays the layout, so a stashed item takes
-  it.
+  `$5` with the Mineshaft card), the Drill scorer, Conquistador and Expansion.
+  Unlocking a square re-lays the layout, so a stashed item takes it.
+* **Board-square items pay in Board Units; the ones that say otherwise keep
+  opening squares** (user request: "make all items that unlock random board
+  squares give board squares instead, unless otherwise stated"). A unit is the
+  currency, not a square: it is spent on the square the PLAYER clicks, so an item
+  that pays units hands the choice over. The Drill scorer now gives its own
+  magnitude (2 at the average) in units after every run it was touched in
+  (`MAGNITUDES.SCORERS[Scorer.DRILL]`, banked per touch in `drill_run_units`),
+  Conquistador gives `MAGNITUDES.BOARD_UNITS_PER_CONQUISTADOR` (4) at the end of
+  every run, and Expansion's first version gives `EXPANSION_SQUARES` (4) — all
+  three through `Game._grant_board_units`. Expansion is the one that can be
+  refused (and kept): a board that is already whole has nothing for its units to
+  open. The ones that STATE squares keep opening squares, through
+  `Game._grant_locked_units` on the locked frontier: a Bomb's blast, Expansion's
+  v2 upgrade ("the whole board"), and Dynamite. `Game._announce_board_expansion`
+  reports both currencies together — "Board expanded by 2 squares and 6 Board
+  Units (2 from the bomb blast, 2 from the drill, 4 from Conquistador)".
+  `Packed` is the fourth reader of the old behaviour on purpose: it states
+  INVENTORY ROOM, not board, so it keeps unlocking the squares itself
+  (`Game._grant_inventory_slots`) and its retry ledger (`inventory_slots_won`)
+  can still count room rather than a currency the player may already have spent.
+  `Packed` is the fourth reader of the old behaviour on purpose: it states
+  INVENTORY ROOM, not board, so it keeps unlocking the squares itself
+  (`Game._grant_inventory_slots`) and its retry ledger (`inventory_slots_won`)
+  can still count room rather than a currency the player may already have spent.
+* **The tool called Drill is an Excavator now** (user request: "rename the
+  'drill' card to 'excavator'"). `Tool.DRILL` keeps its value, its four verbs,
+  its free use and its Dirt, but `Tool.NAMES[Tool.DRILL]` reads "Excavator" and
+  its glyph is an E, so the tool and the SCORER of the same name no longer read
+  alike. Nothing else moved: the scorer still says Drill and still pays units.
 * **The board can fill up, and nothing is lost.** `Toolbox.stash` holds the
   items the board had no room for as they were gained; they are still owned and
   still sellable, and they take a square as soon as one opens up. (An item the
@@ -646,6 +863,19 @@ Conventions worth knowing before editing:
   the block makes the same item placeable again — one item can never field two
   blocks. Anything that removes the item (selling, banking, sacrificing,
   disassembling) takes its block off the board with it.
+* **A reserved square is not a wall.** The square a placed block's item came from
+  stays free for it (so taking the block up has somewhere to put the item back —
+  see `Game._item_home`), and nothing is ever laid out there
+  (`_first_free_cell` counts it as taken, exactly as `ensure_board_cells` does).
+  But the reservation is only the inventory's MEMORY of a square: it is invisible
+  to the player, so it must never cost them an item. An item that is somehow
+  standing on one — the player moved it there, or it landed there before — STEPS
+  ASIDE to a free square; it is not knocked off the board into the deck. The deck
+  is only for a square a BLOCK really stands on (or one that is not unlocked any
+  more). User report: "when I selected the start block and a screwdriver at the
+  same time, and tried to place them into a different square, the screwdriver was
+  deleted" — it had been lying on the square the start block came from, and the
+  layout pass after the move swallowed it into the deck.
 * **Only blocks are physical.** The marble never meets anything that is not a
   `Block`: the simulation reads `Game.board_blocks()`, not `grid.values()`, so
   a card or a component lying on a square is scenery. A shop offer is scenery
@@ -706,7 +936,7 @@ Conventions worth knowing before editing:
 ## Tests
 
 ```powershell
-python -m unittest discover -s tests -q        # 1959 tests, ~100 s
+python -m unittest discover -s tests -q        # 2153 tests, ~45 s
 python -m unittest discover -s tests -k concert -q     # just one topic
 ```
 
@@ -722,13 +952,15 @@ produces.
 | `test_deck.py` | The deck, the hand drawn from it, buying into the deck and the DECK overlay. |
 | `test_structures.py` | Structures and the tools that open them (the pit, crystal pool, mirror and golem, plus the ten PACK structures: quarry, shrine, vault, workbench, depot, library, cabinet, mint, rift and shed; shovel, flashlight, screwdriver, hammer, brick, match), the wrong-verb refusals, one structure per pack handing over that pack's goods (so every item in the game is obtainable), the golem's combining and the tiers it leaves (golden, then diamond at 4x; two Lanterns make one that draws four and two Concretes one that pays 60 — every item carries an amount), a tool that is spent by being used, the run's energy bar, and the Cleansing action. |
 | `test_structure_tools.py` | The bugs the player reported, pinned down: a tool is never knocked into the deck by another item being placed on it (moving onto an occupied square swaps, building a block on a tool seats it, a load that re-places a structure under one seats it, a round of moves leaves the deck empty), an opened structure stays opened through a board edit, R, T, an unlock and a save round trip (and the next level or a new game gets its own four), pressing T leaves the level's props, structures, cast and the player's own squares exactly where they were, opening one hands the reward its square, marks that square spent and cannot be opened twice, opening every one never costs the player a tool, and every structure draws its own icon inside its tile (14 distinct tiles, art never falling back to the glyph). |
-| `test_keywords.py` | The item vocabulary (`components.Keyword`): every word has a name and a meaning, keywords are derived from what an item is rather than stored, a multi-verb tool uses the verb its structure answers, a consumed tool leaves play and draws its refill, the unplayable Concrete carries and pays its amount (30 chips, or whatever a golem folded into it) and its description reads that number out, and a revealed pit hands over a Tool Pack. |
+| `test_keywords.py` | The item vocabulary (`components.Keyword`): every word has a name and a meaning, keywords are derived from what an item is rather than stored (a whole card reads `unplayable`, an action `consume`), a multi-verb tool uses the verb its structure answers, a consumed tool leaves play and draws its refill, the unplayable Concrete carries and pays its amount (30 chips, or whatever a golem folded into it) and its description reads that number out, and a revealed pit hands over a Tool Pack. |
 | `test_groups.py` | The item groups (`components.Group`): every group is named, explained and coloured, every item kind lands in exactly one group (a card, an action and a tool in the one Cards family), a block on the board reads as a block, a foe and a prop have their own groups, every description carries the group row, the info box draws that row as a highlighted box directly under the item's name, and the deck overlay lists the collection sorted into families. |
 | `test_collection.py` | The codex and the icons: every kind of item has a section (tools, passives and structures included), every value of every table is listed once, every entry names and describes its item, and each is revealed by the thing that hands it over (a kept tool or passive, an opened structure, the always-known starters) and survives a reload; every cell says which group its entry is in — a box in the cell's corner carrying the family's name in its colour and nothing else, the one Cards family for cards, match groups, actions and tools, a family of its own for a trial; and every tool, passive, pack, scorer and structure draws a picture of its own — no two alike, none blank, with the letter only as the fallback for a value with no art. |
 | `test_tools.py` | The six tools beyond the starters: their catalogue rows (verbs, energy, whether they are spent, prices, pack options, amounts), and each one played — a glowstick opening for no energy and burning out, a pry bar digging and breaking and never being spent (and refusing at one energy), a multi-tool opening any of the four door kinds for the whole bar, a chisel pushing the reward one pack size up (two for a golem-folded one), a gilding cloth handing the reward over golden (every option of a pack), and a wrecking bar taking the breakable neighbours with it while leaving a reveal-only one standing (and spending what it sweeps for the level visit). Plus the golem folding two chisels but not two glowsticks, the sidebar's Magnitude and Sweep rows, the collection entries, the icons and the amount riding through a save. |
-| `test_modifiers.py` | The modifier system (`components.Modifier`): every kind is named, explained and coloured, stacks are counted the way they are read (a permanent one never runs out), and the states the game already had are now modifiers — a golden and a diamond item are a `Quality` seen through `Modifier`, a token's runs left are its `token` stacks (and survive a save), one `retriggerable` is one extra trigger, `v2` is the action's version, and a switched-off card is `disabled`; plus the five new tools: a drill opening any door for nothing and packing Dirt into the deck, a pickaxe digging and striking a temporary Spark, a spark revealing for nothing and burning out, a vodka putting 3 stacks of *forgotten* on a card and being spent, and the clocks — a forgotten card is not drawn until its stacks wear off, and a temporary item is destroyed when the run is committed. |
+| `test_modifiers.py` | The modifier system (`components.Modifier`): every kind is named, explained and coloured, stacks are counted the way they are read (a permanent one never runs out), and the states the game already had are now modifiers — a golden and a diamond item are a `Quality` seen through `Modifier`, a token's runs left are its `token` stacks (and survive a save), one `retriggerable` is one extra trigger, `v2` is the action's version, and a switched-off card is `disabled`; plus the five new tools: an excavator opening any door for nothing and packing Dirt into the deck, a pickaxe digging and striking a temporary Spark, a spark revealing for nothing and burning out, a vodka putting 3 stacks of *forgotten* on a card and being spent, and the clocks — a forgotten card is not drawn until its stacks wear off, and a temporary item is destroyed when the run is committed. |
 | `test_wasteful.py` | The Wasteful effect: its catalogue row, using it with one other item to throw both away for a draw from the deck, and its refusals. |
 | `test_deck_cards.py` | The four newest cards. Eyeball: its row (1 energy, one card), using it opening the deck as a PICKER (through the real keys and mouse too), the card you click being the one drawn, the action and its energy spent exactly once, a backed-out look costing nothing, its refusals (no energy, no card in the deck, a tool clicked instead of a card), and a folded one taking two picks. Deep Pockets: a pack on the board for a structure pulled down (its square marked spent, the wrecked structure NOT revealed, and no structure dealt back onto that square), a pack still made with nothing left to pull down, and out of energy refused. Nasty Cocktail: nothing for a plain one (kept, not wasted), one energy a modifier kind (stacks are not kinds, v2 counts), double for a folded one, and no energy of its own. Smelly Socks: its two-currency row, its chips and mult at the start of every run (twice for two copies, nothing when the trial cuts it), and its cost — a card drawn with it going back into the DECK rather than being destroyed, ready to be drawn again, and never taking a part or a tool. |
+| `test_item_rarity.py` | Every item's rarity (see components.Rarity): every kind of item — card, action, tool, passive, part, pack, structure, block, token — has a tier, and the tier is the price's tier (the bands reproduce `Card.RARITIES` exactly); nothing Common costs more than anything Unusual inside a kind; the two kinds that write their tier down (a free structure, a size-priced pack) cover every value and spread over several tiers; an item instantiation of each kind reports its own tier; a block wears the tier of its parts and a token its block's; the level's own things have none; every item states its tier in the sidebar (just before its group row); and the codex prints each entry's tier in the tier's colour, for every kind of entry. |
+| `test_reusable.py` | The rule "when a card is used, discard it unless it has the keyword reusable": the word itself (one word, meaning "does not discard it"), every tool saying exactly one of consume/reusable (and dirt saying neither), a used action leaving through the discard door and counting towards the Trash Can, a reusable action staying in hand, being usable again, still paying its energy, and turning the selection over; the Lantern staying lit and a Reroll being kept when reusable; a one-shot tool marked reusable surviving its use; an action a pack handed over counting as a discard, and staying armed when reusable; a reusable card surviving a save and a load; and what the sidebar says (the `Keywords` row, and an ability line that no longer claims the card itself is spent). |
 | `test_reroll.py` | The Reroll card and the mechanics that deal it: its row (0 energy, one structure, its line stating its own draw), structures being a target for it and for no other action, the structure turning over ON ITS SQUARE (keeping its plan entry and its level flag, spending nothing), the card discarding itself and drawing into the square it gave up (its magnitude doubling for a folded one, and an empty deck still rerolling), its refusals (no structure, nothing left to turn it into), the reroll being written into the level's plan so a fresh layout, an extra deal or a save round trip cannot undo it, Fresh dealing a card per hit (a block or a card), Brainstorm dealing 2 (4 upgraded), the dealt card reaching the codex, a Reroll growing the Tesseract, and the retry ledger — a retried or restarted run takes back the cards it dealt, a used one is not un-spent, and a CONTINUE (or a bought Brainstorm) keeps them. |
 | `test_abilities.py` | The `Ability` table: every row has a name, needs, cost and a real handler; an item's ability is derived from what it is; `S` dispatches through it (and falls through to assembly when nothing can fire); the sidebar prints the same contract. |
 | `test_toolbox.py` | The inventory: selection, assignment and clicks on the board. |
@@ -745,9 +977,16 @@ produces.
 | `test_collision_behaviors.py` | The physics: what the marble actually does against every shape and effect. |
 | `test_save_profiles.py` | Saving/loading and the profile + player-data-path rules: every kind of item (block, card, action, structure, tool, passive, resource, pack) round-trips as itself, a passive in the hand survives a save, and the slot, autosave and profile flows. |
 | `test_board_units.py` | Board units, locked squares and the locked-board rules. |
-| `test_board_camera.py` | The infinite board: screen/square conversion, dragging the view, squares far outside the window, and the top bar's furniture. |
-| `test_item_copies.py` | Several copies of one item: copies are items of their own, one object is never owned twice, a block and its item are one existence, and portal/key groups share their count. |
-| `test_levels.py` | The levels: their shapes, props, buried enemies, per-marble score and outcome — and the health budget, where a level's enemies add up to exactly the score its run used to require (split by kind, doubled by Sky High, zeroed by Grace v2) and every run puts out four structures. |
+| `test_board_expansion.py` | The board-square items and the cards that open the board. The Drill scorer paying in Board Units (its magnitude, 2 at the average, banked per touch and paid when the run is committed, on its own line and on the match-group card that carries it); Conquistador and Expansion v1 each handing over their units and opening no squares themselves; Expansion v2 and a Bomb still opening squares (both refused when the board is already whole, and a bomb's blast still counting itself); the tool renamed Excavator while the scorer stays the Drill (its verbs, its free use, its Dirt, its glyph and its codex row all unchanged); and Dynamite — its catalogue row (2 energy, magnitude 10, a structure target that is optional), used bare to blow open ten frontier squares (a folded one opening its own magnitude, the squares always next to the board it opened from), used on a structure to dig or reveal it (the reward taking the structure's square) with a mirror and a golem refused and the card and energy kept, two targets refused, a pack keeping it ARMED rather than firing it blind, the sidebar saying "no target, or 1 structure", and the announcement reporting squares and units together. |
+| `test_horseshoe.py` | The Horseshoe (1 energy): its catalogue row and the single number it carries ("+3" lives in `MAGNITUDES.HORSESHOE_EXTRA_DRAWS` and a folded one reads its own), its codex entry and icon; what its discard MEANS — the whole hand goes back into the DECK and nothing is destroyed (every thrown item is still owned, in the deck and off the board), the START and FINISH blocks keep their squares, a Spirit token stays for its run, a placed block comes off the board with its item, the level's props and enemies are left standing, and only the card itself leaves the game; the draw — the hand it threw back plus three (two more for a folded one), one energy, a refusal when out of energy, when nothing is anywhere or when another item is switched on with it, it stops when the deck runs out, an empty board still draws three, every drawn item gets its own unlocked square, the real keys work, a pack's copy fires at once, and a REUSABLE one is used rather than spent. |
+| `test_card_uniformity.py` | "Make all cards homogenous, and treat them the same way", and "when hovering over an item in the collection, show the same pop-up info box as when the player hovers over the same item in a real game". Every whole card (the catalogue's and every match-group card) reads `unplayable` and has no ability; every action reads `consume` (and `reusable` instead once the modifier says so); every tool keeps its verbs then which way it goes; the word's meaning covers a whole card. One box for all three kinds: the row naming the item is "Card - <name>", every card states its keywords, a consumed card explains `consume`, a whole card explains `unplayable` and says when it fires (start, end, fragile break, matching collision, or always on), an action states the energy alone (the table's cost for applying a card is "nothing" — the card spending itself is its keyword), a tool states its energy and contract, every card wears a mini face (a tool included), and no action's text calls itself an action. The codex: the cursor reads the entry under it, the hit test scrolls with the page and ignores the heading and button bands, every entry that is an item builds one (a match group reading as one of its cards, a trial as nothing), the codex box reads exactly the rows the game's box reads for the same item, hovering a revealed cell draws the box once for the right item and source, a locked cell draws nothing, and the hint says what the page is; plus the readouts beside the cards — the energy bar naming every action that spends it, and a structure's "Opened by" row naming the actions that can open it (see `Action.OPENS`). |
+| `test_recycling.py` | Recycling (0 energy, one item): its row and magnitude (`RECYCLING_DRAWS`, its text generated from it, a folded one reading four), that it takes exactly one target and any of the player's items (`Action.ANY_TARGET`), its sidebar contract ("Needs 1 target. Costs nothing."), and what it does — the selected item goes back into the DECK rather than being destroyed, two items come out of that same deck (four for a folded one), no energy is charged, the card itself is spent and counted, the first draw takes the square it freed, the recycled item can be dealt straight back, the real keys work, and its refusals (nothing selected, two targets, an empty deck, an unbought offer which is not even a target, a Spirit token, and the level's own blocks), plus a placed block recycled as the item it was built from and a loose component recycled like anything else. |
+| `test_stormcloud.py` | Stormcloud (1 energy, one structure): its catalogue row and magnitude (`STORMCLOUD_DESTROYS`, the text generated from it, a folded one reading two), that it is a structure target that NEEDS one (unlike the Dynamite), its codex entry, icon and sidebar contract; what it does — opening a pit, mirror, workbench and library each with the verb that fits, the reward taking the structure's square and the card spending its energy and itself, revealing the structure it opened, tearing down exactly one random structure that teaches the codex nothing, never wrecking the one it opened (and saying so when nothing else stood), a folded one tearing two down, and the real keys working; and its refusals — out of energy, no target, two structures, the golem, and a card (which is not a target at all) — each of which keeps the card and the energy. |
+| `test_floor_plans.py` | Floor plans (1 energy, no target): its catalogue row and magnitude (`FLOOR_PLANS_BLOCKS`, the text generated from it, a folded one reading ten), that S uses it at once, its codex entry, icon and sidebar contract; what it deals — five blocks out of the deck and nothing else (the cards beside them stay in the deck), fewer when the deck has fewer, a deck with no block at all refused, a FORGOTTEN block left alone, every drawn block getting its own unlocked square, ten for a folded one, and the real keys and an action pack's copy firing it — plus one energy and the card itself spent. |
+| `test_picky.py` | The two changes of this turn side by side. Enemy halving: a foe deals the marble's whole `chips x mult` and then HALVES both, so the second blow lands for a quarter (a marble that was worth nothing stays at nothing), and the enemy's own row says "…and both are then halved". Picky's reward: two triggers buy one structure and its count is permanent; the structure stands free on an open square as `is_level_structure` (opened with a real tool); the roll is a NEW random structure every run (`_reroll_bonus_structures`); one standing keeps its square through a layout pass; one opened stays gone for the level visit (`spent_bonus_structures`) and a new level deals them again; two never share a square; the count and the roll ride through a save and a load, and a save still counting `bonus_slots` reads them as structures; and both the scorer's text and the readout under the cash line say "structure". |
+| `test_board_camera.py` | The infinite board: screen/square conversion, dragging the view, squares far outside the window, and the top bar's furniture, which is COMPACT: every piece inside the shorter bar and off its bottom edge, no two pieces overlapping, the buttons sharing the lower row with MAIN MENU lined up, the two-line message clearing the energy bar's caption, the score readout (and three rows of resource points) fitting, the run/round dots actually DRAWN on the bar (they used to be painted over by its backplate), and the shelf's slot grid unchanged by the shorter bar. |
+| `test_item_copies.py` | Several copies of one item: copies are items of their own, one object is never owned twice, a block and its item are one existence, and portal/key groups share their count. Also the reserved square: the spot a placed block came from is kept for it, nothing is laid out on it (`_first_free_cell` skips it), and an item standing there — a screwdriver the player moved onto it, or one caught there when the block was placed elsewhere — steps aside to a free square instead of being knocked off the board into the deck (user report), while a square a block really stands on still returns the item to the deck. |
+| `test_levels.py` | The levels: their shapes, props, buried enemies, per-marble score and outcome — and the health budget, where a level's enemies add up to exactly the score its run used to require (split by kind, doubled by Sky High, zeroed by Grace v2) and every run puts out four structures; plus the fight itself, where a hit deals the marble's whole `chips x mult` and then halves both chips and mult instead of wiping them (and an enemy that dies leaves the board). |
 
 A split module only needs:
 

@@ -157,7 +157,8 @@ class EyeballTests(GameTestCase):
         rows = dict(self.game._describe_item(action))
 
         self.assertIn("1 energy", rows["Ability - Apply"])
-        self.assertIn("1 energy", rows["Action - Eyeball"])
+        self.assertIn("1 energy", rows["Card - Eyeball"])
+        self.assertEqual(rows["Keywords"], "consume")
         self.assertEqual(self.game._action_hint(action, "board"),
                          "Press S to pick a card in your deck to draw "
                          "(1 energy)")

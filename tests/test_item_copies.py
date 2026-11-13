@@ -247,6 +247,114 @@ class ItemCopyTests(GameTestCase):
         self.assertNotEqual(self.game.item_cell(piece), home)
 
 
+    # --- a reserved square never swallows an item -----------------------
+
+    def _tool(self):
+        """A screwdriver of the player's own, standing on the board."""
+        tool = main.ToolItem(main.Tool.SCREWDRIVER,
+                             main.Tool.PRICES[main.Tool.SCREWDRIVER])
+        self.game.toolbox.add(tool)
+        self.game.ensure_board_cells()
+        self.assertIsNotNone(self.game.item_cell(tool),
+                             "the screwdriver got no square")
+        return tool
+
+    def test_an_item_on_a_placed_items_old_square_is_not_deleted(self):
+        # User report: "when I selected the start block and a screwdriver at the
+        # same time, and tried to place them into a different square, the
+        # screwdriver was deleted." The square a placed block came from is only
+        # RESERVED (nothing is drawn there), so an item standing on it must step
+        # aside to a free square -- never be knocked into the deck, where the
+        # player cannot see it at all.
+        item = self._buy_block()
+        home = self.game.item_cell(item)
+        self._place(item, 6, 6)
+        tool = self._tool()
+        self.game.set_item_cell(tool, home)         # the screwdriver there now
+
+        block = self.game.grid[(6, 6)]
+        self.game.selection = [block, tool]
+        self.game.selected_toolbox_item = block
+        self.game._refresh_actor()
+        self.assertTrue(self.game._place_block_at(7, 6))
+        self.game.ensure_board_cells()
+
+        self.assertTrue(self.game.owns_item(tool), "the screwdriver was deleted")
+        self.assertIsNotNone(self.game.item_cell(tool),
+                             "the screwdriver was knocked off the board")
+        self.assertNotIn(tool, self.game.deck_items())
+        # ...and it is somewhere a player can click, not under the new block.
+        self.assertNotEqual(self.game.item_cell(tool), (7, 6))
+        # The block it stood on kept the square it moved to.
+        self.assertIn((7, 6), self.game.grid)
+
+    def test_moving_an_item_onto_a_reserved_square_hops_it_aside(self):
+        # The same reservation, met from the other side: the player moves a tool
+        # onto the empty square a placed block came from. The square is free to
+        # look at, so the move happens -- and the layout pass then gives the tool
+        # another square instead of dropping it into the deck.
+        item = self._buy_block()
+        home = self.game.item_cell(item)
+        self._place(item, 6, 6)
+        tool = self._tool()
+
+        self.assertTrue(self.game._move_item_to(tool, *home))
+
+        self.assertTrue(self.game.owns_item(tool))
+        cell = self.game.item_cell(tool)
+        self.assertIsNotNone(cell)
+        self.assertNotIn(tool, self.game.deck_items())
+        self.assertNotEqual(cell, home)
+        self.assertIn(tool, self.game.toolbox.items)
+
+    def test_two_items_never_stand_on_one_square(self):
+        # However an item ends up on a square another item claims, the layout
+        # pass resolves it by seating the LATER one somewhere free: both stay
+        # owned, both stay on the board, and no square answers for two items.
+        item = self._buy_block()
+        self._place(item, 6, 6)
+        tool = self._tool()
+        loose = main.Component.effect_component(main.Effect.BOUNCY)
+        self.game.toolbox.add(loose)
+        self.game.ensure_board_cells()
+        tool_cell = self.game.item_cell(tool)
+        self.game.set_item_cell(loose, tool_cell)
+
+        self.game.ensure_board_cells()
+
+        cells = [self.game.item_cell(tool), self.game.item_cell(loose)]
+        self.assertNotIn(None, cells)
+        self.assertEqual(len(set(cells)), 2)
+        self.assertTrue(self.game.owns_item(tool))
+        self.assertTrue(self.game.owns_item(loose))
+
+    def test_a_square_holding_a_block_still_returns_the_item_to_the_deck(self):
+        # What has NOT changed: a square a BLOCK actually stands on is taken.
+        # An item found there (a level prop put down over it, say) has no square
+        # to lie on, so it goes back into the deck where a draw can deal it.
+        tool = self._tool()
+        cell = self.game.item_cell(tool)
+        self.game.grid[cell] = main.Block(cell[0], cell[1],
+                                          scorer=main.Scorer.START,
+                                          scorer_amount=0)
+
+        self.game.ensure_board_cells()
+
+        self.assertIsNone(self.game.item_cell(tool))
+        self.assertIn(tool, self.game.deck_items())
+        self.assertTrue(self.game.owns_item(tool))
+
+    def test_the_first_free_cell_skips_a_placed_items_old_square(self):
+        # Nothing may be SEATED on a reserved square either (see _seat_aside), so
+        # the free-square search counts it as taken.
+        item = self._buy_block()
+        home = self.game.item_cell(item)
+        self._place(item, 6, 6)
+
+        self.assertNotEqual(self.game._first_free_cell(), home)
+        self.assertNotEqual(self.game._first_free_cell(blocked={home}), home)
+
+
     def test_selling_a_placed_blocks_item_switches_the_block_off(self):
         # The block on the board and the item it was built from are one switch
         # (see _selection_key). Selling that item takes the block with it, so the

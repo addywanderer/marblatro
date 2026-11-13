@@ -150,7 +150,7 @@ class DeckMixin:
         self._settle_smelly_socks(dealt)
         return dealt
 
-    def _draw_one_item(self, cell=None):
+    def _draw_one_item(self, cell=None, pool=None):
         """Draw ONE random item from the deck (see draw_deck_hand).
 
         What Wasteful uses when it throws two items away for a fresh one: the
@@ -158,8 +158,13 @@ class DeckMixin:
         (the square the discarded block was standing on) when it is free, so the
         replacement appears where the sacrifice was made. Returns the item, or
         None when the deck is empty.
+
+        ``pool`` draws from that list of items instead of the whole deck, which
+        is how a card that deals one KIND of item does it (Floor plans draws
+        blocks — see deck_blocks). The caller passes a fresh pool each time,
+        because what it just drew is no longer in the deck.
         """
-        deck = self.drawable_deck_items()
+        deck = self.drawable_deck_items() if pool is None else list(pool)
         if not deck:
             return None
         item = random.choice(deck)
@@ -169,6 +174,18 @@ class DeckMixin:
             self._on_item_gained(item)
         self._settle_smelly_socks([item])
         return item
+
+    def deck_blocks(self):
+        """The BLOCKS waiting in the deck (what a Floor plans draws).
+
+        A block is an item whose kind is "block" (see items.BlockItem): the
+        ready-made blocks a run is built from, as opposed to the parts they are
+        assembled from and the cards, actions, tools and packs the deck can also
+        hold. A FORGOTTEN block is not drawable, exactly as it is not for any
+        other draw (see drawable_deck_items).
+        """
+        return [item for item in self.drawable_deck_items()
+                if getattr(item, "kind", None) == "block"]
 
     def drawable_deck_items(self):
         """The deck items a draw may deal: everything not FORGOTTEN.
@@ -375,22 +392,67 @@ class DeckMixin:
             return True
         return getattr(item, "scorer", None) in (Scorer.START, Scorer.FINISH)
 
-    def _return_hand_to_deck(self):
+    def _return_hand_to_deck(self, keep=None):
         """Put the hand back in the deck: everything but the role blocks and the tokens.
 
         The one rule for "the board holds a HAND, not the collection": the run
-        that ends hands its hand back (see _cycle_deck), and a brand-new game
-        starts with everything it owns in the deck too, so its first hand is a
-        real DRAW of DECK_DRAW_SIZE items rather than a layout of whatever
-        happened to be standing on the board (user request: "make sure the
-        player always draws 4 items, besides the start and finish"). The START
-        and FINISH blocks and Spirit tokens stay where they are: a run can always
-        begin, and a token is live for its own run.
+        that ends hands its hand back (see _cycle_deck), the Horseshoe throws it
+        back mid-run (see _sweep_board_into_deck), and a brand-new game starts
+        with everything it owns in the deck too, so its first hand is a real DRAW
+        of DECK_DRAW_SIZE items rather than a layout of whatever happened to be
+        standing on the board (user request: "make sure the player always draws 4
+        items, besides the start and finish"). The START and FINISH blocks and
+        Spirit tokens stay where they are: a run can always begin, and a token is
+        live for its own run.
+
+        ``keep`` names the one item that stays put whatever it is (the card being
+        USED: a Horseshoe throws the hand back, not itself). Returns the items
+        that were ON THE BOARD when it was called — the hand it emptied.
         """
+        moved = []
         for item in list(self.owned_items()):
-            if self._stays_out_of_the_deck(item):
+            if item is keep or self._stays_out_of_the_deck(item):
                 continue
+            # An item with no square is already waiting in the deck (or in the
+            # stash the layout overflowed into); it is still put where it
+            # belongs — the deck — but it was not one of the hand's items, so it
+            # is not reported as one the caller took off the board.
+            if self.item_cell(item) is not None:
+                moved.append(item)
             self._to_deck(item)
+        return moved
+
+    def _sweep_board_into_deck(self, keep=None):
+        """Take everything the player owns off the board and into the deck.
+
+        Placed blocks come off first, through the same door erasing uses, so
+        each block hands its state back to the item it was built from; then the
+        hand goes back to the deck (see _return_hand_to_deck). The START and
+        FINISH blocks stay where the player put them and Spirit tokens stay for
+        the run they were made in, so a run can always begin.
+
+        Two rules read this: the end of a committed run (see _cycle_deck) and
+        the Horseshoe's discard (see Game._action_horseshoe), so "the board
+        shows a hand" is one behaviour rather than two. ``keep`` is the item
+        being used, which stays on its square. Returns the items it took off the
+        board (see _return_hand_to_deck).
+        """
+        for block in list(self.grid.values()):
+            if block.scorer in (Scorer.START, Scorer.FINISH):
+                continue
+            # The LEVEL's own blocks are not the player's: its props (walls,
+            # bouncers, accelerators...) and its enemies stay what they are, and
+            # the level that comes next rebuilds them anyway (see _begin_level).
+            # Sweeping them here refunded a BlockItem for each one, so a level's
+            # furniture turned up in the player's deck after every run.
+            if (getattr(block, "is_level_prop", False)
+                    or getattr(block, "is_enemy", False)):
+                continue
+            if keep is not None and getattr(block, "source_item", None) is keep:
+                continue
+            self._unplace_block(block)
+            self.grid.pop((block.x, block.y), None)
+        return self._return_hand_to_deck(keep)
 
     def _cycle_deck(self):
         """End of a committed run: everything goes back in the deck, then a hand.
@@ -408,22 +470,7 @@ class DeckMixin:
         # The finished run's marbles belong to the board that is coming apart;
         # the next run releases its own from the Start block it is built with.
         self.marbles = []
-        # Placed blocks come off first, through the same door erasing uses, so
-        # each block hands its state back to the item it was built from.
-        for block in list(self.grid.values()):
-            if block.scorer in (Scorer.START, Scorer.FINISH):
-                continue
-            # The LEVEL's own blocks are not the player's: its props (walls,
-            # bouncers, accelerators...) and its enemies stay what they are, and
-            # the level that comes next rebuilds them anyway (see _begin_level).
-            # Sweeping them here refunded a BlockItem for each one, so a level's
-            # furniture turned up in the player's deck after every run.
-            if (getattr(block, "is_level_prop", False)
-                    or getattr(block, "is_enemy", False)):
-                continue
-            self._unplace_block(block)
-            self.grid.pop((block.x, block.y), None)
-        self._return_hand_to_deck()
+        self._sweep_board_into_deck()
         self.ensure_board_cells()
         self.draw_deck_hand()
 

@@ -181,7 +181,8 @@ class GroupBadgeTests(GameTestCase):
             self.game, item, rect.width - 3 * main.ui.INFO_BOX_INSET)
         height = main.ui.group_badge_height(badge) - main.ui.GROUP_BADGE_GAP
         x = rect.x + main.ui.INFO_BOX_INSET
-        y = rect.y + main.ui.INFO_BOX_INSET + 26 * len(name_lines)
+        y = (rect.y + main.ui.INFO_BOX_INSET + 26 * len(name_lines)
+             + main.ui.info_face_height(item))
         width = rect.width - 3 * main.ui.INFO_BOX_INSET
         return rect, main.pygame.Rect(x, y, width, height)
 

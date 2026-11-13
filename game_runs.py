@@ -313,6 +313,11 @@ class RunsMixin:
             # Every Lock closes again at the start of each run, so the marble
             # must reach its Key again this run (see _unlock_matching_locks).
             block.locked = block.shape == Shape.LOCK
+        # Picky's permanent structures are rolled fresh for this run (user
+        # request: "a permanent new random structure generated every run"), so
+        # each run is offered a different one. It has to happen BEFORE the level
+        # is laid out below, which is what puts them on the board.
+        self._reroll_bonus_structures()
         # The level is put back BEFORE the marble exists (user request: "load the
         # level beforehand"), so the run starts on the board the player has been
         # building on: its squares are opened, its props are rebuilt on their own
@@ -386,6 +391,7 @@ class RunsMixin:
             # structures: the ones the last level spent were the last level's,
             # and so were the ones it rerolled into something else.
             self.spent_structures = set()
+            self.spent_bonus_structures = set()
             self.structure_rerolls = {}
         self.level_number = level.number
         self.enemies_defeated = 0
@@ -509,10 +515,13 @@ class RunsMixin:
         for _index, value, _dx, _dy in planned:
             still_needed[value] = still_needed.get(value, 0) + 1
         # What the level already has stays, and takes one of its plan's entries;
-        # anything over belongs to a level (or a run) that is over.
+        # anything over belongs to a level (or a run) that is over. A structure
+        # Picky put out is not the level's to count: it has its own plan (see
+        # _place_bonus_structures).
         kept = []
         for item in [item for item in self.shop.items
-                     if getattr(item, "is_level_structure", False)]:
+                     if getattr(item, "is_level_structure", False)
+                     and not getattr(item, "is_bonus_structure", False)]:
             if keep and still_needed.get(item.value, 0) > 0:
                 still_needed[item.value] -= 1
                 kept.append(item)
@@ -521,7 +530,12 @@ class RunsMixin:
                 self.shop.items.remove(item)
             self.set_item_cell(item, None)
             self._forget_item(item)
-        taken = self._player_block_cells() | {self.item_cell(item) for item in kept}
+        # The structures Picky generated for this run keep their squares too.
+        bonus_cells = {self.item_cell(item) for item in self.shop.items
+                       if getattr(item, "is_bonus_structure", False)}
+        taken = (self._player_block_cells()
+                 | {self.item_cell(item) for item in kept}
+                 | {cell for cell in bonus_cells if cell is not None})
         for index, value, dx, dy in planned:
             if still_needed.get(value, 0) <= 0:
                 continue
@@ -560,6 +574,107 @@ class RunsMixin:
             # its shelf col/row: those are the shop's drawing cells, and an item
             # with no board square is laid out by the next ensure_board_cells in
             # reading order -- which is the top of the board.
+            self.set_item_cell(item, cell)
+            self.shop.items.append(item)
+            taken.add(cell)
+        # ...and Picky's permanent structures stand alongside the level's own.
+        self._place_bonus_structures(level, taken)
+
+    def _reroll_bonus_structures(self):
+        """Roll this run's Picky structures: one random structure per point.
+
+        User request: "make the 'picky' scorer reward a permanent new random
+        structure generated every run instead of a new 'shop slot'." The COUNT
+        (``bonus_structures``) is permanent — one per whole Picky point banked —
+        while the structure itself is NEW every run, which is what the old bonus
+        shop slot did with an offer. Called at the start of a run, before the
+        level is laid out, so the roll lands on the board the player then builds
+        against and nothing in the run can reshuffle it.
+        """
+        count = max(0, int(getattr(self, "bonus_structures", 0)))
+        self.bonus_structure_values = [
+            random.choice(Structure.ORDER) for _ in range(count)]
+
+    def _refresh_bonus_structures(self):
+        """Top this run's Picky structures up after another one is banked.
+
+        A Picky point that converts mid-run (a resource pack can bank the last
+        half of one — see Game._convert_banked_points) buys a structure for the
+        run being played as well as for every run after it, so the plan grows by
+        one value and the board is topped up at once. The full re-roll still
+        happens at the start of the next run (see _reroll_bonus_structures).
+        """
+        while len(getattr(self, "bonus_structure_values", [])) < int(
+                getattr(self, "bonus_structures", 0)):
+            self.bonus_structure_values.append(random.choice(Structure.ORDER))
+        taken = set(self._player_block_cells())
+        for item in self.shop.items:
+            cell = self.item_cell(item)
+            if cell is not None and getattr(item, "is_level_structure", False):
+                taken.add(cell)
+        self._place_bonus_structures(self.current_level(), taken)
+
+    def _place_bonus_structures(self, level, taken):
+        """Put this run's Picky structures on the board, next to the level's own.
+
+        They are the player's REWARD rather than the level's furniture, but they
+        live in the same place (a free square of the level, standing free and
+        opened with a card like any other structure — see Game._apply_tool), so
+        they are marked ``is_level_structure`` too: nothing refunds them, nothing
+        sells them, and the level's own layout passes leave them alone. What
+        marks them apart is ``is_bonus_structure``, so the level's plan never
+        counts them against its own four and a re-roll can replace them.
+
+        One that already stands where its plan entry put it is KEPT, so an
+        unlock, a board edit, an R or a load cannot move it: only the run's own
+        re-roll (see _reroll_bonus_structures) changes what is standing. One the
+        player has already OPENED this visit stays gone (see
+        Game.spent_bonus_structures), exactly as an opened level structure does.
+        """
+        values = list(getattr(self, "bonus_structure_values", []))
+        count = max(0, int(getattr(self, "bonus_structures", 0)))
+        # The plan must be exactly as long as the permanent count: a save from
+        # before this reward (or a test that set only the count) has no values,
+        # and an old count may have left extras behind.
+        while len(values) < count:
+            values.append(random.choice(Structure.ORDER))
+        del values[count:]
+        self.bonus_structure_values = list(values)
+        spent = getattr(self, "spent_bonus_structures", set())
+        standing = [item for item in list(self.shop.items)
+                    if getattr(item, "is_bonus_structure", False)]
+        # Keep the ones that still match the plan, in order; everything else
+        # (an extra from an old count, or one the re-roll replaced) goes.
+        kept = []
+        for index, value in enumerate(values):
+            match = next((item for item in standing
+                          if getattr(item, "bonus_index", None) == index
+                          and item.value == value), None)
+            if match is not None:
+                kept.append(match)
+                standing.remove(match)
+                continue
+        for item in standing:
+            if item in self.shop.items:
+                self.shop.items.remove(item)
+            self.set_item_cell(item, None)
+            self._forget_item(item)
+        placed = {getattr(item, "bonus_index", None) for item in kept}
+        for index, value in enumerate(values):
+            if index in placed or index in spent:
+                continue
+            cell = self._free_level_cell(level, taken, 0, 0)
+            if cell is None:
+                # The level has no square left: the structure waits for a run
+                # with room rather than being forced onto the player's build.
+                continue
+            for other in self.owned_items():
+                if self.item_cell(other) == cell:
+                    self._seat_aside(other, cell)
+            item = StructureItem(value, Structure.PRICES[value])
+            item.is_level_structure = True
+            item.is_bonus_structure = True
+            item.bonus_index = index
             self.set_item_cell(item, cell)
             self.shop.items.append(item)
             taken.add(cell)

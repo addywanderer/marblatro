@@ -1307,6 +1307,75 @@ def _build_action_art(action):
         punch_circle(20, 20, 3)
         punch_circle(13, 27, 3)
         punch_circle(27, 27, 3)
+    elif action == Action.DYNAMITE:           # a bound bundle of sticks, lit
+        # Dynamite opens the board itself, so its icon is the charge: three
+        # sticks bound together, with a fuse curling off the middle one and a
+        # spark at its end.
+        rr(6, 15, 7, 21, 2)             # left stick
+        rr(16, 13, 8, 23, 2)            # middle stick (the fuse is lit on it)
+        rr(27, 15, 7, 21, 2)            # right stick
+        r(6, 21, 28, 3)                 # the band binding the bundle
+        l(20, 13, 25, 6, 2)             # the fuse...
+        l(25, 6, 31, 4, 2)
+        p([(33, 0), (34, 3), (37, 4), (34, 5), (33, 8),
+           (32, 5), (29, 4), (32, 3)])  # ...and the spark at its end
+    elif action == Action.HORSESHOE:          # a horseshoe, for luck
+        # The card is a redraw, and what it redraws is a hand: a horseshoe,
+        # open at the bottom, with its nail holes cut out and a calk on each
+        # foot. The arch is the top half of a ring, so the shoe curves rather
+        # than sitting square like the Expansion icon's grid.
+        arc(6, 4, 28, 28, 0, 180, 7)    # the arch over the top
+        r(6, 16, 7, 17)                 # leg (left)
+        r(27, 16, 7, 17)                # leg (right)
+        r(3, 32, 13, 4)                 # the calks the legs stand on
+        r(24, 32, 13, 4)
+        punch_circle(20, 8, 2)          # nail holes, cut out of the iron
+        punch_circle(9, 26, 2)
+        punch_circle(31, 26, 2)
+    elif action == Action.RECYCLING:          # three arrows chasing each other
+        # Recycling turns one item into a draw, so the picture is the mark for
+        # it: a triangle of three arrows, each chasing the next, with the
+        # corners left open so the arrowheads read at tile size. Deja Vu's loop
+        # is a single round arrow and Foresight's an eye, so the triangle is
+        # what tells this one apart.
+        def arrow(x1, y1, x2, y2):
+            """A shaft ending in a head that points the way it travels."""
+            l(x1, y1, x2, y2, 3)
+            dx, dy = x2 - x1, y2 - y1
+            length = math.hypot(dx, dy) or 1.0
+            ux, uy = dx / length, dy / length
+            tip = (x2 + ux * 6, y2 + uy * 6)
+            back = (x2 - ux * 1, y2 - uy * 1)
+            p([tip, (back[0] - uy * 4.5, back[1] + ux * 4.5),
+               (back[0] + uy * 4.5, back[1] - ux * 4.5)])
+
+        arrow(18, 9, 28.5, 25.5)        # top side, running down to the right
+        arrow(29, 29.5, 11.5, 29.5)     # bottom side, running left
+        arrow(11, 25.5, 19, 8.5)        # left side, running back up
+    elif action == Action.STORMCLOUD:         # a cloud with a lightning bolt
+        # The card does a tool's four jobs and then wrecks something, so the
+        # picture is the weather: a bank of cloud with a bolt out of it, cut
+        # clear of the cloud so the two shapes read apart even in one colour.
+        c(13, 15, 8)                    # the cloud's puff (left)
+        c(24, 12, 9)                    # ...its tall middle...
+        c(32, 17, 6)                    # ...and a smaller one (right)
+        r(8, 16, 26, 7)                 # the flat underside
+        punch_rect(0, 23, GRID_SIZE, 2)  # the gap the bolt starts in
+        p([(25, 22), (14, 33), (20, 33), (16, 39),
+           (29, 27), (22, 27), (28, 22)])   # the bolt
+    elif action == Action.FLOOR_PLANS:        # a plan of rooms, seen from above
+        # The card deals the blocks a run is BUILT from, so the picture is the
+        # drawing those blocks make: an outer wall, two partitions dividing it
+        # into rooms, and a doorway punched out of one of them.
+        l(7, 6, 33, 6, 3)               # the outer wall: top...
+        l(33, 6, 33, 34, 3)             # ...right...
+        l(33, 34, 7, 34, 3)             # ...bottom...
+        l(7, 34, 7, 6, 3)               # ...and left
+        l(7, 20, 23, 20, 3)             # a partition across the left rooms
+        l(23, 20, 23, 34, 3)            # one down the middle-right
+        l(23, 6, 23, 13, 3)             # a short wall off the top
+        punch_rect(11, 18, 6, 5)        # a doorway through the partition
+        punch_rect(20, 26, 7, 5)        # ...and one through the middle wall
     return art
 
 
@@ -4106,7 +4175,6 @@ def draw(game):
     box_border = (Scorer.color(Scorer.FINISH)
                   if game.active_trial == Trial.ALL_FINISHES else (30, 30, 30))
     draw_board(game, box_border)
-    draw_run_dots(game)
 
     # Everything the board holds is drawn through the CAMERA: the board is
     # infinitely large, so a square (or a marble) is drawn wherever the window
@@ -4225,6 +4293,11 @@ def draw(game):
     previous_clip = game.screen.get_clip()
     game.screen.set_clip(pygame.Rect(0, 0, SCREEN_WIDTH, TOP_BAR_HEIGHT))
     try:
+        # The run/round display is drawn HERE, on the bar's own backplate: it
+        # used to be drawn before the plate, which painted over it (the dots and
+        # their caption were invisible). It is bar furniture, so it is clipped
+        # with the rest of it.
+        draw_run_dots(game)
         draw_score_display(game)
         draw_trial_box(game)
         draw_inaccessible(game)
@@ -4398,10 +4471,10 @@ def draw_score_display(game):
         title = f"{level.name}  CLEARED"
         title_color = GREEN
     required = game.required_font.render(f"{level.number}", True, (255, 215, 0))
-    required_rect = required.get_rect(center=(cx, region.top + 26))
+    required_rect = required.get_rect(center=(cx, region.top + 20))
     game.screen.blit(required, required_rect)
     label = game.tiny_font.render("LEVEL", True, (255, 215, 0))
-    game.screen.blit(label, label.get_rect(midbottom=(cx, region.top + 6)))
+    game.screen.blit(label, label.get_rect(midbottom=(cx, region.top + 8)))
 
     total_distance = sum(getattr(marble, "distance", 0.0) for marble in game.marbles)
     distance = game.small_font.render(f"DIST {int(total_distance)}", True, GREEN)
@@ -4416,7 +4489,7 @@ def draw_score_display(game):
 
     # Total score is the centerpiece (rounded to a tenth for display).
     total = game.total_font.render(_fmt_tenth(game.score_total), True, WHITE)
-    total_rect = total.get_rect(center=(cx, region.top + 66))
+    total_rect = total.get_rect(center=(cx, region.top + 50))
     game.screen.blit(total, total_rect)
 
     # Chips sit left of the total, mult sits right of it.
@@ -4432,20 +4505,21 @@ def draw_score_display(game):
     # is cleared by killing them all -- there is no score target any more).
     time_good, dist_good, uniq_good, _unique_types = game._score_factors()
     uniq_label = game.small_font.render(title, True, title_color)
-    game.screen.blit(uniq_label, uniq_label.get_rect(center=(cx, region.top + 92)))
+    game.screen.blit(uniq_label, uniq_label.get_rect(center=(cx, region.top + 78)))
     factors = game.small_font.render(
         f"D {dist_good:.2f}  T {time_good:.2f}  U {uniq_good:.2f}", True, WHITE)
-    game.screen.blit(factors, factors.get_rect(center=(cx, region.top + 112)))
+    game.screen.blit(factors, factors.get_rect(center=(cx, region.top + 94)))
 
     # Resource points: "[N] points to next [block/card/component/action]" for
-    # each owned Parts/Shreds/Rubble/Ideas scorer, stacked under the readout.
-    y = region.top + 134
+    # each owned Parts/Shreds/Rubble/Ideas scorer, stacked under the readout on
+    # the tightest line spacing that still reads as separate rows.
+    y = region.top + 100
     for to_next, label in game._resource_display():
         res = game.tiny_font.render(
             f"{points_text(to_next)} point{'' if to_next <= 1 else 's'} "
             f"to next {label}", True, ORANGE)
         game.screen.blit(res, res.get_rect(center=(cx, y)))
-        y += res.get_height() + 2
+        y += res.get_height()
 
 
 def draw_run_dots(game):
@@ -4456,8 +4530,8 @@ def draw_run_dots(game):
     run hasn't been played, green when the score target was met, and red when it
     wasn't. Every run reads alike now: the 24th used to be a boss run and stood
     out (black, gold or a deeper red), but it is an ordinary run since the
-    bosses became trials. The round/run count is spelled out under the dots, so
-    the bar says where the player is as well as how they got there.
+    bosses became trials. The caption and the round/run count share one line
+    above the dots, so the bar says where the player is in the space it has.
     """
     x0, y0 = RUN_DOT_GRID
     for run_index in range(TOTAL_RUNS):
@@ -4473,14 +4547,20 @@ def draw_run_dots(game):
         pygame.draw.circle(game.screen, color, (cx, cy), RUN_DOT_RADIUS)
         pygame.draw.circle(game.screen, WHITE, (cx, cy), RUN_DOT_RADIUS, 1)
     heading = game.tiny_font.render("ROUND / RUN", True, WHITE)
-    game.screen.blit(heading, heading.get_rect(
-        midbottom=(RUN_DOT_GRID[0] + 4 * RUN_DOT_DX, RUN_DOT_GRID[1] - 14)))
-    where = game.small_font.render(
+    where = game.tiny_font.render(
         f"Round {min(game.round_index + 1, ROUND_COUNT)}/{ROUND_COUNT}  "
         f"Run {min(game.run_in_round + 1, RUNS_PER_ROUND)}/{RUNS_PER_ROUND}",
         True, (255, 215, 0))
-    game.screen.blit(where, where.get_rect(
-        midtop=(RUN_DOT_GRID[0] + 4 * RUN_DOT_DX, RUN_DOT_GRID[1] + 3 * RUN_DOT_DY + 6)))
+    # The caption and the round/run count share ONE line above the dots, so the
+    # whole display stays inside the compact bar (user request: "make the top bar
+    # more compact") and leaves the column under it to the DECK and BOARD UNIT
+    # buttons.
+    gap = 8
+    width = heading.get_width() + gap + where.get_width()
+    left = RUN_DOT_GRID[0] + 4 * RUN_DOT_DX - width // 2
+    top = RUN_DOT_GRID[1] - heading.get_height() - 6
+    game.screen.blit(heading, (left, top))
+    game.screen.blit(where, (left + heading.get_width() + gap, top))
 
 
 def draw_token(screen, token, rect):
@@ -4602,7 +4682,7 @@ def last_run_cash_rect(game):
     text = game.small_font.render(
         f"Last run cash gained: {game.last_run_cash_gained}", True, GREEN)
     cash = cash_caption_rect(game)
-    return text.get_rect(topleft=(cash.x, cash.bottom + 6))
+    return text.get_rect(topleft=(cash.x, cash.bottom + 4))
 
 
 def shop_message_layout(game, message):
@@ -4616,7 +4696,7 @@ def shop_message_layout(game, message):
     """
     gap = BAR_TEXT_WIDTH
     left = BAR_TEXT_X
-    top = last_run_cash_rect(game).bottom + 8
+    top = last_run_cash_rect(game).bottom + 4
     msg = game.small_font.render(message, True, YELLOW)
     if msg.get_width() <= gap:
         return [msg], msg.get_rect(topleft=(left, top))
@@ -4908,6 +4988,20 @@ GROUP_BADGE_GAP = 8         # space between the box and the lines around it
 INFO_BOX_INSET = 12
 
 
+def info_face_height(item):
+    """How tall the mini face at the top of an info box is (0 for no face).
+
+    Every card in the Cards family wears one — a whole card, an action and a
+    tool alike (user request: "make all cards homogenous, and treat them the
+    same way") — so the height is measured here once and used both by the
+    layout and by the drawing, and nothing can disagree about where the name
+    starts.
+    """
+    if getattr(item, "kind", None) in ("card", "action", "tool"):
+        return 62  # the face (40x52) + the gap under it
+    return 0
+
+
 def group_badge(game, item, width):
     """The text of an item's group box: (name, wrapped lines), or None.
 
@@ -4972,8 +5066,7 @@ def info_layout(game, item, source):
     width = min(width, max_text_width)
 
     height = len(name_lines) * 26
-    if getattr(item, "kind", None) in ("card", "action"):
-        height += 62  # mini-card/action face (40x52) + gap
+    height += info_face_height(item)
     # The group's box is measured at the width the text above it settled on, so
     # its own lines can never push the box wider than this.
     badge = group_badge(game, item, width)
@@ -5024,13 +5117,17 @@ def draw_item_info(game, item, source, mouse_pos):
     x = rect.x + INFO_BOX_INSET
     y = rect.y + INFO_BOX_INSET
 
-    # An owned card/action gets a mini face at the top of the box.
-    if getattr(item, "kind", None) in ("card", "action"):
+    # Every card in the Cards family gets a mini face at the top of the box: a
+    # whole card, an action and a tool alike (user request: "make all cards
+    # homogenous, and treat them the same way").
+    if info_face_height(item):
         face = pygame.Rect(x, y, 40, 52)
         if getattr(item, "kind", None) == "card":
             draw_card(game.screen, item, face)
-        else:
+        elif getattr(item, "kind", None) == "action":
             draw_action(game.screen, item, face)
+        else:
+            draw_tool(game.screen, item, face, label=False)
         # ...wearing the tier a golem left it at, like its tile on the board.
         _draw_modifier_marks(game.screen, face, item)
         y += face.height + 10
@@ -5059,8 +5156,20 @@ def draw_item_info(game, item, source, mouse_pos):
             game.screen.blit(total_text, (x, y))
             y += 20
 
+    # ...and the tier itself is written in the tier's own colour, so the rarity
+    # row reads the same way the card's stripe and the codex's tag do (see
+    # components.Rarity).
+    rarity = Rarity.of(item)
+    tier_color = Rarity.color(rarity) if rarity is not None else WHITE
+    last_label = None
     for line, kind in desc_lines:
-        color = GREEN if kind == "label" else WHITE
+        if kind == "label":
+            last_label = line
+            color = GREEN
+        elif last_label == "Rarity":
+            color = tier_color
+        else:
+            color = WHITE
         indent = 0 if kind == "label" else 8
         _draw_description_line(game, line, color, x + indent, y)
         y += 17
@@ -5359,6 +5468,11 @@ COLLECTION_DESC_WIDTH = COLLECTION_CARD_W - 62
 COLLECTION_COLS = 5        # entries per row
 COLLECTION_GAP = 14        # space between cells, both ways
 COLLECTION_TOP = 118       # the top of the first row
+# The bands the page paints over its own cells — the heading at the top and the
+# RETURN button's row at the bottom. A cursor over either reads nothing (see
+# Game.collection_entry_at), because no cell is really showing there.
+COLLECTION_HOVER_TOP = 110
+COLLECTION_HOVER_BOTTOM = 96
 
 
 def collection_entry_rect(index):
@@ -5466,18 +5580,14 @@ def draw_collection(game):
             _draw_description_line(game, line, desc_color, rect.left + 54, dy,
                                    game.tiny_font)
             dy += 14
-        # A card or match-group entry names its rarity tier under its text, in
-        # the tier's own colour (the same colour the card's face wears — see
-        # draw_card), so the codex is where a player learns what the stripe on a
-        # card means. A match-group entry's value is the GROUP's index, not a
-        # card id, so its tier is read from the group (every card built on a
-        # group is Common — see Card.RARITIES).
-        if discovered and kind == "card":
-            rarity = Card.rarity(value)
-        elif discovered and kind == "match_group":
-            rarity = Rarity.COMMON
-        else:
-            rarity = None
+        # ...and its RARITY tier under the text, in the tier's own colour (the
+        # same colour a card's face wears — see draw_card), so the codex is where
+        # a player learns what the stripe means. Every item has a tier (user
+        # request: "give all items a rarity" — see components.Rarity.of_kind), so
+        # every entry states one: a part, an action, a tool, a pack, a structure,
+        # a passive and a card alike. A match-group entry's value is the GROUP's
+        # index, not a card id, and every card built on a group is Common.
+        rarity = Rarity.of_kind(kind, value) if discovered else None
         if rarity is not None:
             tag = game.tiny_font.render(
                 Rarity.name(rarity), True, Rarity.color(rarity))
@@ -5500,6 +5610,17 @@ def draw_collection(game):
     pygame.draw.rect(game.screen, WHITE, back, 2)
     text = game.font.render("RETURN TO MAIN MENU", True, WHITE)
     game.screen.blit(text, text.get_rect(center=back.center))
+    # Hovering a cell shows the SAME info box the item gets in a game (user
+    # request: "when hovering over an item in the collection, show the same
+    # pop-up info box as when the player hovers over the same item in a real
+    # game"). It is drawn last, so it sits over the page like it sits over the
+    # board; a locked cell has no item to describe, so it shows nothing at all.
+    mouse_pos = pygame.mouse.get_pos()
+    entry = game.collection_entry_at(mouse_pos)
+    if entry is not None and entry[5]:
+        item = game._collection_entry_item(entry)
+        if item is not None:
+            game._draw_item_info(item, "collection", mouse_pos)
 def profile_menu_geometry(names):
     """Rects for the expandable profile list stacked above the PROFILE button.
 

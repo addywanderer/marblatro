@@ -568,6 +568,11 @@ class StoreMixin:
         """
         self.pending_pack_action = action
         self._select_action(action)
+        if Action.optional_target(action.value):
+            # Dynamite: a pack hands it over armed, because the player may want
+            # it on a structure or bare on the board (see _action_dynamite).
+            return True, (f"Kept action: {self._item_name(action)} — click a "
+                          f"target structure, or press S with nothing selected")
         if Action.needs_target(action.value):
             return True, (f"Kept action: {self._item_name(action)} — click a "
                           f"target block/card, then press S")

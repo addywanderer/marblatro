@@ -227,13 +227,13 @@ class Scorer:
     RANDOM = 13  # random payoff: +35 chips, +5 mult, or +0.3 xMult
     EFFECTIVE = 14  # +1 xMult when the block has 2+ effects
     FRESH = 15  # 1 Reroll card on the board when touched
-    PICKY = 16  # 1 unit: banks half an option point a trigger; 1 point = a shop slot
+    PICKY = 16  # 1 unit: banks half a structure point a trigger; 1 point = a structure every run
     VOYAGER = 17  # +0.01 mult per px the marble traveled before the touch (rolled)
     SATANIC = 18  # x6.66 mult; a block dies once a marble leaves, a card after a run
     SUMMIT = 19  # +0.75 mult per unit (row) above the bottom row it sits on
     AIRBALL = 20  # +8 mult per second the marble was airborne before the touch
     SEED = 21  # +3 mult (scorer_amount) per Seed block on the board when touched
-    DRILL = 22  # when touched, unlock two locked board squares after the run
+    DRILL = 22  # when touched, gives two Board Units after the run
     LUCKY = 23  # per trigger, independent rolls: 1/3 chance +130 chips, 1/9 chance +$40
     ROOMY = 24  # +2 chips (scorer_amount) per unlocked board unit when touched
     RALLY = 25  # +1 mult per fresh block touch this run before it (re-touches count)
@@ -774,22 +774,35 @@ class MarbleType:
 
 
 class Rarity:
-    """How rare a card is: its tier, from Common up to Legendary.
+    """How rare an ITEM is: its tier, from Common up to Legendary.
 
-    Every card has one (see Card.RARITIES). The tiers are ORDERED — Common is
-    the most ordinary and Legendary the rarest — and the ORDER is also the
-    display order, so a list of the tiers reads cheapest first.
+    User request: "give all items a rarity." Every item has one — a card, an
+    action, a tool, a passive, a part (a shape, an effect, a scorer), a pack and
+    a structure (see Rarity.of, which answers for any of them). A block reads the
+    tier of its parts and a Spirit token the tier of the block it keeps. The
+    level's own things (a foe, its furniture, a trial) and the bar's readouts are
+    not items and have no tier. The tiers are ORDERED — Common is the most
+    ordinary and Legendary the rarest — and the ORDER is also the display order,
+    so a list of the tiers reads cheapest first.
 
-    The tier sets how often the shop OFFERS it: WEIGHTS is the relative
+    ONE RULE: an item's tier is its PRICE's tier (see BANDS and from_price), so
+    a $28 part and a $28 card and a $28 action are all Common. That is the
+    codebase's usual rarity rule, and it is the same number the shop already
+    draws by — a part is offered at 1/price (see component_weight) — so an
+    item's stripe and its odds can never disagree. Card.RARITIES was authored on
+    exactly these bands. The two kinds that are not priced one item at a time
+    say so themselves: a STRUCTURE is free (Structure.RARITIES) and a PACK is
+    priced by its SIZE (Pack.RARITIES).
+
+    The tier sets how often the shop OFFERS a card: WEIGHTS is the relative
     frequency of the TIERS — 1 : 0.7 : 0.5 : 0.3 : 0.2 from Common up to
     Legendary — and the shop's card offers draw the tier first and the card
     inside it second (see main.random_card_option_value). An offer is therefore
     Rare 0.5 times as often as it is Common however many cards carry each tier:
     the CARD COUNT of a tier must not change the tier's own odds, which is
     exactly why the tier is drawn first. Every match-group card — the 832
-    shape-group and effect cards — is COMMON, which is what the design asks
-    for; the whole cards are tiered by price, the codebase's usual rarity rule
-    (a dearer card does more, so it is rarer).
+    shape-group and effect cards — is COMMON, which is what the design asks for
+    (a group card is priced by its group, not by its tier: see match_group_price).
     """
     COMMON = 0
     UNUSUAL = 1
@@ -834,6 +847,13 @@ class Rarity:
         LEGENDARY: 0.2,
     }
     ORDER: ClassVar[list[int]] = [COMMON, UNUSUAL, RARE, EPIC, LEGENDARY]
+    # The price bands every item's tier follows, cheapest first: an item worth
+    # up to the ceiling is that tier, and anything dearer is Legendary. Card's
+    # whole cards were tiered on exactly these bands (the $28 Gate and Challenger
+    # are Common, the $29-$38 helpers Unusual, the $48 Showman Legendary), which
+    # is what makes one rule cover every kind of item.
+    BANDS: ClassVar[tuple] = ((28, COMMON), (38, UNUSUAL), (44, RARE),
+                              (47, EPIC))
 
     @classmethod
     def name(cls, rarity):
@@ -847,6 +867,78 @@ class Rarity:
     def weight(cls, rarity):
         """The tier's shop frequency weight (see WEIGHTS); Common if unknown."""
         return cls.WEIGHTS.get(rarity, cls.WEIGHTS[cls.COMMON])
+
+    @classmethod
+    def from_price(cls, price):
+        """The tier an item of this price sits in (see BANDS).
+
+        The one rarity rule: the dearer an item is, the rarer it is. A free item
+        (a starter tool, a lump of dirt) is Common.
+        """
+        for ceiling, tier in cls.BANDS:
+            if price <= ceiling:
+                return tier
+        return cls.LEGENDARY
+
+    @classmethod
+    def of_kind(cls, kind, value):
+        """The tier of an item of this KIND and value, or None (see Rarity.of).
+
+        A card and a match-group card read Card.RARITIES (every card built on a
+        group is Common); a structure and a pack read their own table, because
+        one is free and the other is priced by its size; everything else is
+        priced one item at a time, so its tier is that price's tier.
+        """
+        if kind == "card":
+            return Card.rarity(value)
+        if kind == "match_group":
+            # The codex's entry for a match group stands for every card built on
+            # it, and every one of those is Common (see Card.RARITIES).
+            return cls.COMMON
+        if kind == "structure":
+            return Structure.rarity(value)
+        if kind == "pack":
+            return Pack.rarity(value)
+        if kind in (Component.SHAPE, Component.EFFECT, Component.SCORER):
+            return cls.from_price(COMPONENT_PRICES.get((kind, value), 0))
+        if kind == "action":
+            return cls.from_price(Action.PRICES.get(value, 0))
+        if kind == "tool":
+            return cls.from_price(Tool.PRICES.get(value, 0))
+        if kind == "passive":
+            return cls.from_price(Passive.PRICES.get(value, 0))
+        return None
+
+    @classmethod
+    def of(cls, item):
+        """The tier of an ITEM, or None for something that is not an item.
+
+        The kinds without a price table are read from what they are MADE of: a
+        block — built, offered or standing on the board — is worth the parts it
+        is built from (see block_price_for), and a Spirit token keeps a whole
+        block, so it wears that block's tier. The level's own things (an enemy,
+        its furniture) are not the player's items and have no tier, exactly as
+        they have no price.
+        """
+        if item is None:
+            return None
+        if (getattr(item, "is_enemy", False)
+                or getattr(item, "is_level_prop", False)):
+            return None
+        kind = getattr(item, "kind", None)
+        if kind == "token":
+            return cls.of(getattr(item, "block", None))
+        if kind == "pack":
+            # A pack names what it holds by its TYPE, not by a `value` (see
+            # items.offer_key, which resolves the same difference).
+            return cls.of_kind("pack", getattr(item, "pack_type", None))
+        if kind is None and hasattr(item, "rect") and hasattr(item, "shape"):
+            kind = "block"  # a block standing on the board carries no kind
+        if kind == "block":
+            effects = getattr(item, "effects", None) or ()
+            return cls.from_price(block_price_for(item.shape, effects,
+                                                  item.scorer))
+        return cls.of_kind(kind, getattr(item, "value", None))
 
 
 class Card:
@@ -917,7 +1009,8 @@ class Card:
     GARDEN = 80
     # Rigged Casino re-weights Random blocks toward +xMult and away from +chips.
     RIGGED_CASINO = 81
-    # Conquistador unlocks board squares after every run.
+    # Conquistador hands over board units after every run (user request: board
+    # squares its owner picks, instead of squares it picked for them).
     CONQUISTADOR = 82
     # The nine utility whole cards: run-shape and economy modifiers that no
     # condition + scorer pair can express. Their ids continue the free 83..91
@@ -1117,7 +1210,7 @@ class Card:
         SHOWMAN: "Lets cards you already own show up in the shop again, so you can own more than one of the same card",
         GARDEN: "Seed blocks give +6 mult per seed on the board instead of +3",
         RIGGED_CASINO: "Random blocks give +xMult 3x more often and +chips 3x less often",
-        CONQUISTADOR: "After each run, unlocks 4 random locked board squares adjacent to unlocked ones",
+        CONQUISTADOR: "After each run, gives 4 Board Units — each one opens a locked board square you pick",
         PEDESTAL: "Retriggers the scorer of the first 3 blocks the marble touches in a run",
         INFERNO: "Adds 0.07 to the exponent the total score is raised to",
         DOPPELGANGER: "Each Start block releases a second marble, which starts with an x-velocity of 1",
@@ -1350,11 +1443,15 @@ class Card:
                                   SMELLY_SOCKS]
     # How rare each whole card is. A whole card's tier follows its price, the
     # codebase's usual rarity rule (see component_weight): up to $28 Common,
-    # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — so the
-    # cheap economy cards are Common and the cards that rewrite how a run is
-    # played (Showman, Essence, Inferno) are Legendary. Every match-group card is
-    # COMMON instead (set in the MATCH GROUPS catalogue below), so every tier
-    # above Common is a whole card.
+    # $29-$38 Unusual, $39-$44 Rare, $45-$47 Epic, $48 and up Legendary — the
+    # very bands Rarity.from_price reads (see Rarity.BANDS), so every card's row
+    # here is the tier its price would give it anyway. They are written out
+    # because a card's tier is also what the shop draws by (see Rarity.WEIGHTS),
+    # so the table is the shop's odds, not just a label. The cheap economy cards
+    # are Common and the cards that rewrite how a run is played (Showman,
+    # Essence, Inferno) are Legendary. Every match-group card is COMMON instead
+    # (set in the MATCH GROUPS catalogue below), so every tier above Common is a
+    # whole card.
     RARITIES: ClassVar[dict[int, int]] = {
         # Common: the joke card and the cheap utility.
         ERR_404: Rarity.COMMON, MARKET: Rarity.COMMON,
@@ -1528,13 +1625,13 @@ class MAGNITUDES:
         Scorer.RANDOM: 0,  # picks among fixed rewards; no single amount
         Scorer.EFFECTIVE: 2.5,  # multiplies the multiplier by 2.5 (+1.5 xMult)
         Scorer.FRESH: 1,  # 1 Reroll card per trigger
-        Scorer.PICKY: 1,  # 1 unit; banks PICKY's half an option point a trigger
+        Scorer.PICKY: 1,  # 1 unit; banks PICKY's half a structure point a trigger
         Scorer.VOYAGER: 0.01,  # mult per PIXEL the marble traveled before the touch
         Scorer.SATANIC: 6.66,  # multiplies the multiplier by 6.66 when touched
         Scorer.SUMMIT: 0.75,  # +0.75 mult per row above the bottom row
         Scorer.AIRBALL: 8,  # +8 mult per second of air time before the touch
         Scorer.SEED: 4,  # +4 mult per Seed block on the board
-        Scorer.DRILL: 2,  # two locked board squares unlocked after the run
+        Scorer.DRILL: 2,  # two Board Units after the run
         Scorer.LUCKY: 0,  # rolls fixed rewards; no single amount
         Scorer.ROOMY: 2,  # +2 chips per unlocked board unit
         Scorer.RALLY: 1,  # +1 mult per fresh touch before it
@@ -1627,6 +1724,25 @@ class MAGNITUDES:
     # selected structure into another one (see Game._action_reroll), so a golem
     # doubles the draw with the rest of the card.
     REROLL_DRAWS = 1
+    # The Dynamite's: the locked board squares one blast opens (user request:
+    # "unlock 10 random board squares"). A golem-folded Dynamite opens twice as
+    # many (see Game._action_dynamite).
+    DYNAMITE_SQUARES = 10
+    # The Horseshoe's: the items it draws ON TOP of the hand it threw back (user
+    # request: "draw the same number plus 3 new items"), so a golem-folded one
+    # draws two more than it threw away (see Game._action_horseshoe).
+    HORSESHOE_EXTRA_DRAWS = 3
+    # The Recycling's: the items it draws out of the deck after it has put the
+    # selected item back (user request: "draw 2 items"), so a golem-folded one
+    # draws two more (see Game._action_recycling).
+    RECYCLING_DRAWS = 2
+    # The Stormcloud's: the random structures it tears down after opening the one
+    # it was aimed at (user request: "destroy 1 random structure"), so a
+    # golem-folded one brings down two (see Game._action_stormcloud).
+    STORMCLOUD_DESTROYS = 1
+    # The Floor plans': the BLOCKS it draws out of the deck (user request: "draw
+    # 5 blocks"), so a golem-folded one draws ten (see Game._action_floor_plans).
+    FLOOR_PLANS_BLOCKS = 5
 
 
     # --- Fixed scorer rewards ------------------------------------------------
@@ -1654,6 +1770,11 @@ class MAGNITUDES:
     # with it back to the deck.
     SMELLY_SOCKS_CHIPS = 15
     SMELLY_SOCKS_MULT = 2
+    # The Conquistador whole card hands over this many Board Units after every
+    # run (user request: "make conquistador give 4x board square when used").
+    # The Drill scorer's own magnitude (SCORERS[Scorer.DRILL] = 2) is the number
+    # of units it gives per trigger, so its "2x board square" needs no row here.
+    BOARD_UNITS_PER_CONQUISTADOR = 4
 
 
 # Bind the two average tables back onto the classes they describe, so every
@@ -1979,6 +2100,38 @@ class Action:
     # rerolls): 0 energy to point at a structure and turn it into another one,
     # then discard itself and draw a card (see Game._action_reroll).
     REROLL = 18
+    # The Dynamite is the one card that both opens the BOARD and opens a
+    # structure: used with nothing selected it blasts DYNAMITE_SQUARES random
+    # locked squares open; used on a structure it digs or reveals it (user
+    # request: "add a card, 'dynamite': when used with no items selected, unlock
+    # 10 random board squares adjacent to the unlocked area this card was used
+    # in. or, dig or reveal. costs 2 energy."). It is the one action that takes
+    # a structure (see STRUCTURE_TARGET) without requiring one (OPTIONAL_TARGET).
+    DYNAMITE = 19
+    # The Horseshoe is the deck's own card (user request: "add a card:
+    # 'horseshoe' (discard all items on the board that you own, draw the same
+    # number plus 3 new items. costs 1 energy)"): it throws the hand back into
+    # the deck and draws a bigger one, so it is a draw rather than a target —
+    # no items selected, just S (see Game._action_horseshoe).
+    HORSESHOE = 20
+    # The Recycling takes ONE item (user request: "add a card, 'recycling'
+    # (discard selected item, draw 2 items for 0 energy)"), so unlike the
+    # Horseshoe it is aimed at the item it recycles. What it discards goes back
+    # into the deck — the answer the Horseshoe's discard gave is the rule for
+    # every discard that is not the card being used (see Game._to_deck) — and
+    # the two draws come out of the same deck (see Game._action_recycling).
+    RECYCLING = 21
+    # The Stormcloud is the one action with a TOOL's reach (user request: "add a
+    # card, 'stormcloud' (break, fix, dig, or reveal, and destroy 1 random
+    # structure. costs 1 energy)"): it is aimed at a structure and opens it with
+    # whichever of the four verbs it answers, then tears down one random other
+    # structure on its way (see Game._action_stormcloud).
+    STORMCLOUD = 22
+    # The Floor plans is the deck's block card (user request: "add a new card,
+    # 'floor plans' (draw 5 blocks. costs 1 energy)"): it draws BLOCKS — the
+    # ready-made ones waiting in the deck, not cards or parts — so a run can be
+    # built from what it deals (see Game._action_floor_plans).
+    FLOOR_PLANS = 23
 
     NAMES: ClassVar[dict[int, str]] = {
         DEATH: "Death",
@@ -2000,6 +2153,11 @@ class Action:
         DEEP_POCKETS: "Deep Pockets",
         NASTY_COCKTAIL: "Nasty Cocktail",
         REROLL: "Reroll",
+        DYNAMITE: "Dynamite",
+        HORSESHOE: "Horseshoe",
+        RECYCLING: "Recycling",
+        STORMCLOUD: "Stormcloud",
+        FLOOR_PLANS: "Floor plans",
     }
     # What the v1 action does. The descriptions mention the v2 upgrade so the
     # shop and collection show both versions at a glance.
@@ -2012,7 +2170,7 @@ class Action:
         SPIRIT: "Destroys a chosen block and applies its scorer at the start of the next 2 runs (v2: permanently).",
         CLEANSWEEP: "Spends every dollar you hold (cash goes to $0) to fill each empty card slot with a "
                     "random card (v2: keeps your cash).",
-        EXPANSION: "Unlocks 4 locked board squares next to the playable board (v2: the whole board).",
+        EXPANSION: "Gives 4 Board Units — each opens one locked board square you pick (v2: unlocks the whole board instead).",
         BRAINSTORM: "Creates 2 Reroll cards (v2: creates 4).",
         MASS_PRODUCTION: "Triples the resource points this run earns (v2: doubles them for the "
                          "rest of the game).",
@@ -2061,6 +2219,11 @@ class Action:
         DEEP_POCKETS: "There's more where that came from.",
         NASTY_COCKTAIL: "Shaken, not stirred.",
         REROLL: "Roll the bones.",
+        DYNAMITE: "Fire in the hole.",
+        HORSESHOE: "Lucky for some.",
+        RECYCLING: "Reduce, reuse, redraw.",
+        STORMCLOUD: "Thunder and lightning.",
+        FLOOR_PLANS: "Something to build from.",
     }
     # Actions are cheap one-use power-ups: their prices were halved (48 -> 24,
     # 56 -> 28), so a run can afford one almost any time. Deja Vu costs a little
@@ -2103,7 +2266,35 @@ class Action:
                                         # The Reroll is a level's furniture in
                                         # another shape plus a card, so it sits
                                         # with the cheap actions.
-                                        REROLL: 26}
+                                        REROLL: 26,
+                                        # Dynamite buys ten board squares in one
+                                        # go (or opens a structure), which is
+                                        # worth more than any other action that
+                                        # does one thing.
+                                        DYNAMITE: 38,
+                                        # The Horseshoe is a hand refresh plus
+                                        # three items, so it is priced with the
+                                        # deck's own cards: Eyeball draws one
+                                        # card of the player's choice for $28,
+                                        # and this draws three nobody chose.
+                                        HORSESHOE: 36,
+                                        # Recycling costs nothing to use but
+                                        # the card itself, and it draws two
+                                        # without losing anything (the item it
+                                        # recycles goes back in the deck), so
+                                        # it is priced as a Rare.
+                                        RECYCLING: 42,
+                                        # The Stormcloud opens a structure and
+                                        # then tears another one down without
+                                        # opening it, so it buys a reward with a
+                                        # structure the player loses: priced
+                                        # with the cheap actions.
+                                        STORMCLOUD: 34,
+                                        # The Floor plans deals five blocks, and
+                                        # blocks are what a run is BUILT from,
+                                        # so it is the dearest of the actions
+                                        # that reach into the deck.
+                                        FLOOR_PLANS: 46}
     # Face colors and center glyphs for the mini-action look (one per action).
     COLORS: ClassVar[dict[int, tuple]] = {
         DEATH: (120, 45, 45),        # deathly red
@@ -2125,6 +2316,11 @@ class Action:
         DEEP_POCKETS: (130, 96, 62), # a deep coat's brown
         NASTY_COCKTAIL: (205, 90, 155),  # a bright, doubtful drink
         REROLL: (90, 160, 110),      # a fresh green roll
+        DYNAMITE: (196, 72, 58),     # a warning red
+        HORSESHOE: (168, 124, 52),   # lucky brass
+        RECYCLING: (58, 132, 92),    # recycled green
+        STORMCLOUD: (74, 84, 112),   # a storm's slate
+        FLOOR_PLANS: (38, 92, 124), # drafting blue
     }
     GLYPHS: ClassVar[dict[int, str]] = {
         DEATH: "D", RECOGNITION: "R", DEJA_VU: "V",
@@ -2135,14 +2331,19 @@ class Action:
         CLEANSING: "L",
         LANTERN: "N",
         EYEBALL: "Y", DEEP_POCKETS: "K", NASTY_COCKTAIL: "X",
-        REROLL: "\u21bb",
+        REROLL: "\u21bb", DYNAMITE: "Z",
+        HORSESHOE: "U",
+        RECYCLING: "O",
+        STORMCLOUD: "W",
+        FLOOR_PLANS: "Q",
     }
     ORDER: ClassVar[list[int]] = [DEATH, RECOGNITION, DEJA_VU, ANOINTMENT,
                                   STRENGTH, SPIRIT, CLEANSWEEP, EXPANSION,
                                   BRAINSTORM, MASS_PRODUCTION, GRACE,
                                   INACTION, FORESIGHT, CLEANSING, LANTERN,
                                   EYEBALL, DEEP_POCKETS, NASTY_COCKTAIL,
-                                  REROLL]
+                                  REROLL, DYNAMITE, HORSESHOE, RECYCLING,
+                                  STORMCLOUD, FLOOR_PLANS]
     # Actions that act on the game itself rather than on a chosen block or card:
     # they need no subject, so selecting one and pressing S uses it straight
     # away (see Game._apply_action). Eyeball takes its subject from the DECK
@@ -2151,12 +2352,31 @@ class Action:
     NO_TARGET: ClassVar[tuple[int, ...]] = (CLEANSWEEP, EXPANSION, BRAINSTORM,
                                             MASS_PRODUCTION, GRACE, INACTION,
                                             FORESIGHT, LANTERN, EYEBALL,
-                                            DEEP_POCKETS, NASTY_COCKTAIL)
+                                            DEEP_POCKETS, NASTY_COCKTAIL,
+                                            HORSESHOE, FLOOR_PLANS)
     # The actions aimed at a STRUCTURE instead of at a block or a card (see
-    # Game.is_action_target): a reroll is pointed at the level's own furniture.
-    # Every other action still refuses a structure, which is why the target
-    # kind is a table rather than a widening of what an action may be aimed at.
-    STRUCTURE_TARGET: ClassVar[tuple[int, ...]] = (REROLL,)
+    # Game.is_action_target): a reroll is pointed at the level's own furniture,
+    # and Dynamite into a structure to dig or reveal it. Every other action
+    # still refuses a structure, which is why the target kind is a table rather
+    # than a widening of what an action may be aimed at.
+    STRUCTURE_TARGET: ClassVar[tuple[int, ...]] = (REROLL, DYNAMITE,
+                                                   STORMCLOUD)
+    # The actions that take a structure if there is one, and act on the game
+    # itself if there is not (user request: Dynamite unlocks squares "when used
+    # with no items selected. or, dig or reveal"). Such an action accepts no
+    # target or exactly one; its own handler decides what either means.
+    OPTIONAL_TARGET: ClassVar[tuple[int, ...]] = (DYNAMITE,)
+    # The actions that may be aimed at ANY of the player's items rather than at a
+    # block, a card or a part (see Game.is_action_target): the Recycling takes
+    # whatever the player wants to put back in the deck — a tool, a passive, a
+    # whole card, a component. An action is never a target, here or anywhere.
+    ANY_TARGET: ClassVar[tuple[int, ...]] = (RECYCLING,)
+    # The actions that OPEN a structure, and the verbs each one brings (see
+    # Game._action_dynamite / _action_stormcloud). A table rather than a tuple
+    # in each handler, so the structure's own "Opened by" row is built from the
+    # same words the handlers use and can never leave a way in out. It is bound
+    # under the class once the Verb table exists (Verb is declared below).
+    OPENS: ClassVar[dict[int, tuple]] = {}
     # What using an action costs from the run's ENERGY budget (see
     # Game._apply_action). Actions are one-shot items, so most cost nothing —
     # an action that is still in the table asks for energy on top of itself,
@@ -2166,12 +2386,17 @@ class Action:
         DEEP_POCKETS: 1,
         NASTY_COCKTAIL: 0,   # costs nothing to pour, and gives energy back
         REROLL: 0,           # user request: "(0 energy)"
+        DYNAMITE: 2,         # user request: "costs 2 energy"
+        HORSESHOE: 1,        # user request: "costs 1 energy"
+        RECYCLING: 0,        # user request: "for 0 energy"
+        STORMCLOUD: 1,       # user request: "costs 1 energy"
+        FLOOR_PLANS: 1,      # user request: "costs 1 energy"
     }
     # The actions whose text states their own MAGNITUDE, as a template for
     # Action.description: the number comes from the item (a merged Lantern
     # describes itself as drawing four), never from this table.
     MAGNITUDE_TEXT: ClassVar[dict[int, str]] = {
-        LANTERN: "Draws {amount} item{s} from the deck, then discards this action.",
+        LANTERN: "Draws {amount} item{s} from the deck, then discards this card.",
         EYEBALL: ("Draws {amount} card{s} of your choice from the deck "
                   "({energy} energy)."),
         DEEP_POCKETS: ("Creates {amount} random pack{s} and destroys {amount} "
@@ -2181,6 +2406,18 @@ class Action:
         REROLL: ("Turns the selected structure into another random one, "
                  "discards this card and draws {amount} card{s} "
                  "({energy} energy)."),
+        DYNAMITE: ("With nothing selected, opens {amount} random board squares. "
+                   "Or digs or reveals a structure ({energy} energy)."),
+        HORSESHOE: ("Discards every item you own on the board back into the "
+                    "deck, then draws that many plus {amount} "
+                    "({energy} energy)."),
+        RECYCLING: ("Puts the selected item back into the deck, then draws "
+                    "{amount} item{s} ({energy} energy)."),
+        STORMCLOUD: ("Breaks, fixes, digs or reveals the selected structure, and "
+                     "destroys {amount} other random structure{s} "
+                     "({energy} energy)."),
+        FLOOR_PLANS: ("Draws {amount} block{s} out of the deck "
+                      "({energy} energy)."),
     }
 
     @classmethod
@@ -2231,6 +2468,36 @@ class Action:
         return action in cls.STRUCTURE_TARGET
 
     @classmethod
+    def optional_target(cls, action):
+        """True when the action takes a structure OR nothing (see OPTIONAL_TARGET).
+
+        Such an action is used bare to act on the board and pointed at a
+        structure to act on that instead, so Game._apply_action accepts no
+        target or exactly one — never two.
+        """
+        return action in cls.OPTIONAL_TARGET
+
+    @classmethod
+    def targets_anything(cls, action):
+        """True when the action takes ANY item as its target (see ANY_TARGET).
+
+        Every other action is aimed at one kind of thing — a structure, a block,
+        a card, a part — so its handler can name what it refuses. An action that
+        acts on an item for its own sake (the Recycling) takes whatever the
+        player points at, and Game.is_action_target asks this instead.
+        """
+        return action in cls.ANY_TARGET
+
+    @classmethod
+    def opens_with(cls, action):
+        """The verbs an action opens a structure with (see OPENS).
+
+        The empty tuple for an action that opens nothing, so a caller can ask
+        without knowing which actions the table covers.
+        """
+        return cls.OPENS.get(action, ())
+
+    @classmethod
     def energy(cls, action):
         """What USING this action costs from the run's energy (0 for most).
 
@@ -2260,6 +2527,11 @@ Action.MAGNITUDE = {
     Action.DEEP_POCKETS: MAGNITUDES.DEEP_POCKETS_PACKS,
     Action.NASTY_COCKTAIL: MAGNITUDES.COCKTAIL_ENERGY_PER_MODIFIER,
     Action.REROLL: MAGNITUDES.REROLL_DRAWS,
+    Action.DYNAMITE: MAGNITUDES.DYNAMITE_SQUARES,
+    Action.HORSESHOE: MAGNITUDES.HORSESHOE_EXTRA_DRAWS,
+    Action.RECYCLING: MAGNITUDES.RECYCLING_DRAWS,
+    Action.STORMCLOUD: MAGNITUDES.STORMCLOUD_DESTROYS,
+    Action.FLOOR_PLANS: MAGNITUDES.FLOOR_PLANS_BLOCKS,
 }
 Action.DESCRIPTIONS[Action.LANTERN] = Action.description(Action.LANTERN)
 Action.DESCRIPTIONS[Action.EYEBALL] = Action.description(Action.EYEBALL)
@@ -2267,6 +2539,11 @@ Action.DESCRIPTIONS[Action.DEEP_POCKETS] = Action.description(Action.DEEP_POCKET
 Action.DESCRIPTIONS[Action.NASTY_COCKTAIL] = Action.description(
     Action.NASTY_COCKTAIL)
 Action.DESCRIPTIONS[Action.REROLL] = Action.description(Action.REROLL)
+Action.DESCRIPTIONS[Action.DYNAMITE] = Action.description(Action.DYNAMITE)
+Action.DESCRIPTIONS[Action.HORSESHOE] = Action.description(Action.HORSESHOE)
+Action.DESCRIPTIONS[Action.RECYCLING] = Action.description(Action.RECYCLING)
+Action.DESCRIPTIONS[Action.STORMCLOUD] = Action.description(Action.STORMCLOUD)
+Action.DESCRIPTIONS[Action.FLOOR_PLANS] = Action.description(Action.FLOOR_PLANS)
 # Tesseract's line states its own number too, so it is built from MAGNITUDES
 # instead of typing the same figure in two places.
 Card.DESCRIPTIONS[Card.TESSERACT] = (
@@ -2277,7 +2554,7 @@ Card.DESCRIPTIONS[Card.TESSERACT] = (
 
 # The rate a resource pack pays an option at: twice what a trigger of the
 # scorer would bank, so a Picky option at its default magnitude (0.5 of a
-# point) is worth one whole option point.
+# point) is worth one whole structure point.
 RESOURCE_PACK_FACTOR = 2.0
 
 
@@ -2301,7 +2578,7 @@ class Pack:
     * a RESOURCE pack offers resource points rather than items, each worth
       RESOURCE_PACK_FACTOR times what a trigger of that scorer banks, rolled at
       that scorer's own magnitude — so a Picky option at its default magnitude
-      is worth 2 x 0.5 = 1 option point.
+      is worth 2 x 0.5 = 1 structure point.
     """
     SHAPE = 0
     EFFECT = 1
@@ -2391,6 +2668,18 @@ class Pack:
     }
     ORDER: ClassVar[list[int]] = [SHAPE, EFFECT, SCORER, PART, BLOCK, CARD,
                                   ACTION, RESOURCE, RANDOM, TOOL]
+    # How rare each pack type is (see Rarity). The tier follows what the type
+    # hands over, not the price (which moves with the pack's SIZE): the packs of
+    # loose PARTS and points are the ordinary goods, the ones that deal finished
+    # items are dearer, and the random pack — which can hold anything any other
+    # pack can — is the one Epic.
+    RARITIES: ClassVar[dict[int, int]] = {
+        SHAPE: Rarity.COMMON, PART: Rarity.COMMON, RESOURCE: Rarity.COMMON,
+        EFFECT: Rarity.UNUSUAL, SCORER: Rarity.UNUSUAL, BLOCK: Rarity.UNUSUAL,
+        TOOL: Rarity.UNUSUAL,
+        CARD: Rarity.RARE, ACTION: Rarity.RARE,
+        RANDOM: Rarity.EPIC,
+    }
     # The types a RANDOM pack draws from, and the ones a PART pack draws from.
     # A random pack offers anything another pack might, so it includes the
     # resource points; the two "meta" types (part and random) are never an
@@ -2429,6 +2718,16 @@ class Pack:
     @classmethod
     def color(cls, pack_type):
         return cls.COLORS.get(pack_type, (120, 120, 130))
+
+    @classmethod
+    def rarity(cls, pack_type):
+        """How rare a pack of this type is (see RARITIES); Common if no row.
+
+        A pack is priced by its SIZE (see SIZE_PRICE_FACTORS), so its tier is
+        not its price's: it follows what the type HANDS OVER, the same way a
+        structure's does.
+        """
+        return cls.RARITIES.get(pack_type, Rarity.COMMON)
 
     @classmethod
     def glyph(cls, pack_type):
@@ -2772,16 +3071,16 @@ def scorer_description(scorer, amount=None):
                           "has 2 or more effects",
         Scorer.FRESH: f"Gives {amount:g} Reroll card{_plural(amount)}{dev} when touched",
         Scorer.PICKY: f"Gives {points_text(resource_points_for(Scorer.PICKY, amount))} "
-                      f"option point{_plural_points(resource_points_for(Scorer.PICKY, amount))}"
-                      f"{pdev}. 1 point converts into a random shop slot",
+                      f"structure point{_plural_points(resource_points_for(Scorer.PICKY, amount))}"
+                      f"{pdev}. 1 point adds a permanent structure to every run",
         Scorer.VOYAGER: f"Gives +{amount:g} mult{dev} for each pixel the marble traveled before touching it",
         Scorer.SATANIC: f"Multiplies the multiplier by {amount:g}{dev} when touched, then is "
                         "permanently destroyed once a marble leaves it.",
         Scorer.SUMMIT: f"Gives +{amount:g} mult{dev} for each unit above the bottom row it is located on",
         Scorer.AIRBALL: f"Gives +{amount:g} mult{dev} for each second the marble was airborne before touching it",
         Scorer.SEED: f"Gives +{amount:g} mult{dev} for each Seed block on the board when touched",
-        Scorer.DRILL: f"When touched, drills out {amount:g} locked board square{_plural(amount)}"
-                      f"{dev} next to unlocked ones — they unlock after the run",
+        Scorer.DRILL: f"When touched, gives {amount:g} Board Unit{_plural(amount)}"
+                      f"{dev} after the run — each opens one locked square you pick",
         Scorer.PACKED: f"When touched, gives {amount:g} inventory slot{_plural(amount)}"
                        f"{dev} to carry more items, for good",
         Scorer.LUCKY: f"When touched, has a 1/3 chance to give {MAGNITUDES.LUCKY_CHIPS} chips "
@@ -2850,6 +3149,17 @@ class Verb:
         return cls.DONE.get(verb, "opened")
 
 
+# The actions that open a structure, bound here because the verbs they bring are
+# the Verb table's (declared just above: the Action class is written before it).
+# Both handlers read it (see Game._action_dynamite / _action_stormcloud) and so
+# does a structure's "Opened by" row, so no card that can open a door is left
+# out of the list a player reads.
+Action.OPENS = {
+    Action.DYNAMITE: (Verb.DIG, Verb.REVEAL),
+    Action.STORMCLOUD: (Verb.BREAK, Verb.FIX, Verb.DIG, Verb.REVEAL),
+}
+
+
 class Modifier:
     """A MODIFIER: something that has been DONE to an item, and its stacks.
 
@@ -2879,12 +3189,18 @@ class Modifier:
     V2 = 6            # the upgraded version of an action
     FLIPPED = 7       # face down for the run (the Shuffled trial)
     DISABLED = 8      # silenced for the run (the Card cutter trial)
+    # Using the item does not throw it away: it stays in hand, ready to use
+    # again (user request: "when a card is used, discard it unless it has the
+    # keyword reusable"). The keyword of the same name is derived from this, so
+    # anything that can carry a modifier can be made reusable (see
+    # Game._discard_used_card).
+    REUSABLE = 9
 
     NAMES: ClassVar[dict[int, str]] = {
         GOLDEN: "golden", DIAMOND: "diamond", FORGOTTEN: "forgotten",
         TEMPORARY: "temporary", TOKEN: "token",
         RETRIGGERABLE: "retriggerable", V2: "v2", FLIPPED: "flipped",
-        DISABLED: "disabled",
+        DISABLED: "disabled", REUSABLE: "reusable",
     }
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
         FORGOTTEN: "Cannot be drawn. It loses 1 stack every run, and can be "
@@ -2895,6 +3211,8 @@ class Modifier:
         V2: "The upgraded version of an action.",
         FLIPPED: "Face down: its text and its payoffs are turned over for the run.",
         DISABLED: "Silenced for the run: its score effect does nothing.",
+        REUSABLE: "Using it does not discard it: it stays in your hand, ready "
+                  "to be used again.",
     }
     # The colour a mark on the tile wears (see ui._draw_modifier_marks). A
     # modifier that already has its own face in the UI (v2's gold frame, a
@@ -2909,6 +3227,9 @@ class Modifier:
         V2: None,
         FLIPPED: None,
         DISABLED: (120, 120, 120),
+        # Reusable has no mark of its own: its whole point is that the item
+        # stays, so a badge would only decorate a tile that never moves.
+        REUSABLE: None,
     }
     # A modifier whose stacks are a COUNTDOWN: one is spent at the end of every
     # run (see Game._age_modifiers).
@@ -2916,7 +3237,8 @@ class Modifier:
     # The stacks a TOKEN carries when it never expires (a v2 token).
     PERMANENT: ClassVar[int] = -1
     ORDER: ClassVar[list[int]] = [GOLDEN, DIAMOND, FORGOTTEN, TEMPORARY,
-                                  TOKEN, RETRIGGERABLE, V2, FLIPPED, DISABLED]
+                                  TOKEN, RETRIGGERABLE, V2, FLIPPED, DISABLED,
+                                  REUSABLE]
 
     @classmethod
     def name(cls, modifier):
@@ -3188,9 +3510,13 @@ class Ability:
     }
     # What firing it spends, in the game's OWN currencies: energy (per run), the
     # item itself, or the items it throws away. There is no fifth currency.
+    # APPLY costs NOTHING by itself now (user request: "make all cards
+    # homogenous"): a used card is destroyed because it says "consume" (see
+    # Keyword), so the contract line only has to name the energy the card asks
+    # for — the keyword row above it already says the card is spent.
     COSTS: ClassVar[dict[int, str]] = {
         OPEN: "1 energy",
-        APPLY: "the action itself",
+        APPLY: "nothing",
         OPEN_PACK: "nothing",
         DISCARD: "this item and the one with it",
         MODIFY: "1 energy",
@@ -3268,9 +3594,15 @@ class Ability:
         return cls.COSTS.get(ability, "nothing")
 
     @classmethod
-    def contract(cls, ability, count=None, cost=None):
-        """The whole contract in one line: needs (if any), then cost."""
-        needs = cls.needs_text(ability, count)
+    def contract(cls, ability, count=None, cost=None, needs=None):
+        """The whole contract in one line: needs (if any), then cost.
+
+        ``needs`` and ``cost`` state the ITEM's own rule where the table's row
+        is only the default: a reusable action is never spent (see
+        Game._discard_used_card), and an action that takes a structure if there
+        is one needs "no target, or 1 structure" rather than the plain number.
+        """
+        needs = cls.needs_text(ability, count) if needs is None else needs
         spent = cls.cost_text(ability, cost)
         if not needs:
             return f"Costs {spent}."
@@ -3410,6 +3742,21 @@ class Structure:
         QUARRY: 6, SHRINE: 6, VAULT: 6, WORKBENCH: 6, DEPOT: 6,
         LIBRARY: 6, CABINET: 6, MINT: 6, RIFT: 6, SHED: 6,
     }
+    # How rare each structure is (see Rarity). A structure is FREE, so its tier
+    # cannot be its price the way an action's or a part's is: it follows what the
+    # structure HANDS OVER instead. The plainest doors — the pit, the pool and
+    # the workbench of loose parts — are Common; a mirror and the single-pack
+    # doors that hand over a finished thing are dearer; and the rift, which can
+    # deal anything any other door can, is the one Epic.
+    RARITIES: ClassVar[dict[int, int]] = {
+        PIT: Rarity.COMMON, CRYSTAL_POOL: Rarity.COMMON,
+        QUARRY: Rarity.COMMON, WORKBENCH: Rarity.COMMON, MINT: Rarity.COMMON,
+        MIRROR: Rarity.UNUSUAL, SHRINE: Rarity.UNUSUAL, VAULT: Rarity.UNUSUAL,
+        DEPOT: Rarity.UNUSUAL,
+        LIBRARY: Rarity.RARE, CABINET: Rarity.RARE, SHED: Rarity.RARE,
+        GOLEM: Rarity.RARE,
+        RIFT: Rarity.EPIC,
+    }
     # Structures are FREE (user request: "make all structures free (no need to
     # buy them for them to be used)"): a shelf slot hands one over as scenery the
     # player's tools open, so there is nothing to pay and nothing to unlock. The
@@ -3529,6 +3876,15 @@ class Structure:
     def weight(cls, structure):
         return cls.OFFER_WEIGHTS.get(structure, 0)
 
+    @classmethod
+    def rarity(cls, structure):
+        """How rare this structure is (see RARITIES); Common if it has no row.
+
+        A structure is free, so its tier is the one thing about it the price
+        cannot answer (see Rarity).
+        """
+        return cls.RARITIES.get(structure, Rarity.COMMON)
+
 
 class Tool:
     """A verb, carried by an item: what a structure is opened WITH (see Structure).
@@ -3576,7 +3932,7 @@ class Tool:
         GLOWSTICK: "Glowstick", PRY_BAR: "Pry Bar", CHISEL: "Chisel",
         GILDING_CLOTH: "Gilding Cloth", WRECKING_BAR: "Wrecking Bar",
         MULTI_TOOL: "Multi-Tool",
-        DIRT: "Dirt", DRILL: "Drill", PICKAXE: "Pickaxe", SPARK: "Spark",
+        DIRT: "Dirt", DRILL: "Excavator", PICKAXE: "Pickaxe", SPARK: "Spark",
         VODKA: "Vodka",
     }
     # The verbs each tool applies, in the order it tries them. The four starters
@@ -3722,7 +4078,7 @@ class Tool:
         BRICK: "k", MATCH: "m",
         GLOWSTICK: "g", PRY_BAR: "p", CHISEL: "c", GILDING_CLOTH: "l",
         WRECKING_BAR: "w", MULTI_TOOL: "t",
-        DIRT: ".", DRILL: "D", PICKAXE: "i", SPARK: "*", VODKA: "v",
+        DIRT: ".", DRILL: "E", PICKAXE: "i", SPARK: "*", VODKA: "v",
     }
     # What a one-shot tool is worth if it is sold, and what a TOOL pack prices
     # its options at (see components.pack_base_price).
@@ -3792,16 +4148,19 @@ class Tool:
     def keywords(cls, tool):
         """The tool's text, as keywords (see Keyword).
 
-        A tool with no verbs and nothing to modify -- a lump of DIRT -- reads
-        "unplayable", because that is exactly what it does: nothing.
+        A tool that is DESTROYED by using it reads "consume", and one that
+        survives reads "reusable": a used card is discarded unless its keywords
+        say otherwise (see Game._discard_used_card), so every tool states which
+        way it goes and the word is never a decoration. A tool with no verbs and
+        nothing to modify -- a lump of DIRT -- reads "unplayable", because that
+        is exactly what it does: nothing.
         """
         words = [Keyword.for_verb(verb) for verb in cls.verbs(tool)]
-        if cls.consumes(tool):
-            words.append(Keyword.CONSUME)
+        if not words and cls.modifies(tool) is None:
+            return (Keyword.UNPLAYABLE,)
+        words.append(Keyword.CONSUME if cls.consumes(tool) else Keyword.REUSABLE)
         if cls.draws(tool):
             words.append(Keyword.DRAW)
-        if not words:
-            words.append(Keyword.UNPLAYABLE)
         return tuple(words)
 
     @classmethod
@@ -3969,12 +4328,31 @@ class Keyword:
 
         dig, reveal, fix, break  -- which verb opens a structure (see Verb)
         consume                  -- the item is destroyed when it is used
+        reusable                 -- using it does NOT discard it (see below)
         draw N                   -- using it draws N items
-        unplayable               -- it cannot be used at all: a passive item
+        unplayable               -- it cannot be used: it acts on its own
 
-    Items never spell these rules out a second time: a tool's, a structure's and
-    a passive item's keywords all come from here (see Keyword.of), which is the
-    one place the vocabulary lives.
+    Every CARD is written with these words now (user request: "make all cards
+    homogenous, and treat them the same way"). The three kinds of card in the
+    Cards family — a whole card, an action and a tool — differ in which words
+    they carry, not in what the words mean:
+
+    * a WHOLE CARD is unplayable: it is never used, it pays on its own (Joker,
+      Explorer, Inferno, ... just as a passive item does);
+    * an ACTION is consumed by being used, so it says "consume" (or "reusable"
+      when a modifier says otherwise);
+    * a TOOL carries its verbs, then which way it goes, and often "draw".
+
+    CONSUME and REUSABLE are opposites, so an item that is used is one or the
+    other: a used card is DISCARDED unless its keywords say "reusable" (user
+    request: "when a card is used, discard it unless it has the keyword
+    reusable" — see Game._discard_used_card). Any item can be made reusable with
+    the modifier of the same name (see Modifier.REUSABLE), which prints the word
+    here.
+
+    Items never spell these rules out a second time: a tool's, a structure's, a
+    passive item's, a whole card's and an action's keywords all come from here
+    (see Keyword.of), which is the one place the vocabulary lives.
     """
     # The four verbs share the Verb table's own words, so a verb and its keyword
     # can never drift apart.
@@ -3986,11 +4364,12 @@ class Keyword:
     DRAW = 5
     UNPLAYABLE = 6
     TEMPORARY = 7
+    REUSABLE = 8
 
     NAMES: ClassVar[dict[int, str]] = {
         DIG: "dig", REVEAL: "reveal", FIX: "fix", BREAK: "break",
         CONSUME: "consume", DRAW: "draw", UNPLAYABLE: "unplayable",
-        TEMPORARY: "temporary",
+        TEMPORARY: "temporary", REUSABLE: "reusable",
     }
     DESCRIPTIONS: ClassVar[dict[int, str]] = {
         DIG: "Opens a structure by digging it up",
@@ -3999,15 +4378,17 @@ class Keyword:
         BREAK: "Opens a structure by smashing it open",
         CONSUME: "Destroyed when it is used",
         DRAW: "Using it draws this many items",
-        UNPLAYABLE: "Cannot be used: it is a passive item",
+        UNPLAYABLE: ("Cannot be used: it acts on its own, without being played "
+                     "(a whole card, or a passive item)"),
         TEMPORARY: "Destroyed at the end of the run it was made for",
+        REUSABLE: "Using it does not discard it: it stays in your hand",
     }
     # The keyword each Verb is written with.
     VERB_KEYWORDS: ClassVar[dict[int, int]] = {
         Verb.DIG: DIG, Verb.REVEAL: REVEAL, Verb.FIX: FIX, Verb.BREAK: BREAK,
     }
     ORDER: ClassVar[list[int]] = [DIG, REVEAL, FIX, BREAK, CONSUME, DRAW,
-                                  UNPLAYABLE, TEMPORARY]
+                                  UNPLAYABLE, TEMPORARY, REUSABLE]
 
     @classmethod
     def for_verb(cls, verb):
@@ -4056,10 +4437,13 @@ class Keyword:
     def of(cls, item):
         """The keywords an item is described with, in Keyword.ORDER.
 
-        A tool reads its verbs, whether it is consumed and what it draws; a
-        passive item reads "unplayable"; a structure reads the verbs it answers
-        to. Anything else (a block, a component, a card) has no keywords: its
-        behaviour is its own text.
+        A tool reads its verbs, whether it is consumed or reusable, and what it
+        draws; a passive item and a WHOLE CARD read "unplayable" (neither is ever
+        used: both pay on their own); an ACTION reads "consume", because using
+        one destroys it; a structure reads the verbs it answers to. User request:
+        "make all cards homogenous, and treat them the same way" — a whole card
+        says "unplayable" and an action says "consume" because that is how each
+        one behaves, rather than leaving the kind's name to imply it.
         """
         kind = getattr(item, "kind", None)
         if kind == "tool":
@@ -4068,15 +4452,41 @@ class Keyword:
             words = list(Passive.keywords(item.value))
         elif kind == "structure":
             words = [cls.for_verb(verb) for verb in Structure.verbs(item.value)]
+        elif kind == "card":
+            # A whole card is never played: it pays at the start or the end of a
+            # run (or when its trigger happens) simply by being owned, exactly
+            # as a passive item does.
+            words = [cls.UNPLAYABLE]
+        elif kind == "action":
+            # Using an action destroys it — that IS what "consume" means, and it
+            # is the word the card now wears instead of the kind implying it.
+            words = [cls.CONSUME]
         else:
             words = []
         # A modifier can ALSO be a word on the tile: TEMPORARY is one (user
         # request: "the keyword 'temporary' means it will be destroyed next
-        # round"), and it reads wherever the item is shown. The words keep the
+        # round"), and so is REUSABLE -- an item marked reusable says so
+        # wherever it is shown (see Modifier.REUSABLE). The words keep the
         # order the item's own table gave them (a brick reads "break, dig").
         if Modifier.has(item, Modifier.TEMPORARY) and cls.TEMPORARY not in words:
             words.append(cls.TEMPORARY)
+        if Modifier.has(item, Modifier.REUSABLE) and cls.REUSABLE not in words:
+            words.append(cls.REUSABLE)
+        # ...and the two are opposites: an item that is not thrown away when it
+        # is used says "reusable", not "consume", whatever its table says.
+        if cls.REUSABLE in words and cls.CONSUME in words:
+            words = [word for word in words if word != cls.CONSUME]
         return tuple(words)
+
+    @classmethod
+    def has(cls, item, keyword):
+        """True when ``item`` carries ``keyword`` (see Keyword.of).
+
+        This is the question the game asks about a rule: an item is DISCARDED
+        when it is used unless Keyword.has(item, Keyword.REUSABLE) (see
+        Game._discard_used_card), so the word and the rule can never disagree.
+        """
+        return keyword in cls.of(item)
 
 
 
@@ -4227,9 +4637,10 @@ class Group:
                 "shape, its effects and its scorer."),
         PART: ("A piece of a block — a shape, an effect or a scorer — laid out "
                "with the others and assembled into a block with S."),
-        CARDS: ("Something you keep and play: a card pays every run, an action "
-                "fires once, and a tool opens a structure."),
-        STRUCTURE: ("Scenery a tool opens into an action or a pack. It costs "
+        CARDS: ("Something you keep and play: it pays on its own, or is used "
+                "once and spent, or opens a structure it is aimed at "
+                "(the keywords say which)."),
+        STRUCTURE: ("Scenery a tool opens into a card or a pack. It costs "
                     "nothing and is spent when it opens."),
         PACK: ("A bundle of offers: press S to deal its options and keep the "
                "ones you choose."),
@@ -5073,7 +5484,7 @@ def _generic_effect_phrase(scorer, amount=None, dev="", block_phrase=None):
         return (f"{points_text(resource_points_for(Scorer.IDEAS, amount))} idea "
                 f"point{_plural_points(resource_points_for(Scorer.IDEAS, amount))}{pdev}")
     if scorer == Scorer.PICKY:
-        return (f"{points_text(resource_points_for(Scorer.PICKY, amount))} option "
+        return (f"{points_text(resource_points_for(Scorer.PICKY, amount))} structure "
                 f"point{_plural_points(resource_points_for(Scorer.PICKY, amount))}{pdev}")
     if scorer == Scorer.FRESH:
         return f"{amount:g} Reroll card{_plural(amount)}{dev}"
@@ -5098,8 +5509,8 @@ def _generic_effect_phrase(scorer, amount=None, dev="", block_phrase=None):
         return (f"{amount:g} mult{dev} for each pixel the run's marbles have "
                 "traveled so far")
     if scorer == Scorer.DRILL:
-        return (f"{amount:g} locked board square{_plural(amount)}{dev} unlocked "
-                "after the run")
+        return (f"{amount:g} Board Unit{_plural(amount)}{dev} after the run, each "
+                "opening a locked square you pick")
     if scorer == Scorer.PACKED:
         return (f"{amount:g} inventory slot{_plural(amount)}{dev} when touched, "
                 "kept for good")

@@ -74,7 +74,7 @@ class CardsTests(GameTestCase):
         self.game.rubble_points = 3
         self.game.idea_points = 1
         self.game.option_points = 4
-        self.game.bonus_slots = 1  # already converted: not a point any more
+        self.game.bonus_structures = 1  # already converted: not a point any more
         self.game.run_active = True
         block = main.Block(0, 0, scorer=main.Scorer.RUBBLE)
         marble = self._add_marble()
@@ -93,7 +93,7 @@ class CardsTests(GameTestCase):
         self.assertEqual(self.game.idea_points, 0)
         self.assertEqual(self.game.option_points, 0)
         # A reward the bank already paid for stays (it is no longer a point).
-        self.assertEqual(self.game.bonus_slots, 1)
+        self.assertEqual(self.game.bonus_structures, 1)
         blocks = [i for i in self.game.toolbox.items if getattr(i, "kind", None) == "block"]
         self.assertEqual(blocks, [])
 
@@ -1297,7 +1297,7 @@ class CardsTests(GameTestCase):
         self.assertIn("+6 mult", main.Card.description(main.Card.GARDEN))
         self.assertIn("+xMult 3x more often",
                       main.Card.description(main.Card.RIGGED_CASINO))
-        self.assertIn("4 random locked board squares",
+        self.assertIn("4 Board Units",
                       main.Card.description(main.Card.CONQUISTADOR))
         # The ERR 404 card keeps its exact fake-fatal-error description.
         self.assertEqual(

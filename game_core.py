@@ -265,6 +265,11 @@ class CoreMixin:
         # structure using a tool, and then moves the tool, the structure will
         # revert itself back into a locked state").
         self.spent_structures = set()
+        # The Picky structures this VISIT has already spent, by bonus index (see
+        # _place_bonus_structures). They are the player's reward rather than the
+        # level's furniture, so they are remembered apart — but the rule is the
+        # same: one that was opened stays gone until the level is laid out anew.
+        self.spent_bonus_structures = set()
         # The level's structures this visit has REROLLED, as plan_index -> the
         # value it became (see Game._action_reroll). The level lays its plan out
         # afresh on every board edit, so what a reroll turned a structure into
@@ -343,11 +348,19 @@ class CoreMixin:
         # run keeps them (see _continue_run).
         self.reroll_cards_run_gain = []
         self.option_points = 0
-        # Bonus shop slots banked by Picky points (every 2 points). Each slot
-        # adds one extra random offer to every shop refresh, drawn exactly as a
-        # shelf slot's is (see Shop._random_offer); the slots are permanent
-        # once banked.
-        self.bonus_slots = 0
+        # PERMANENT STRUCTURES banked by Picky points (one per whole point).
+        # Each one puts a new random structure on the board for every run, which
+        # the run's layout generates afresh (see _reroll_bonus_structures /
+        # _place_bonus_structures): the COUNT is permanent, the structure itself
+        # is new every run (user request: "make the 'picky' scorer reward a
+        # permanent new random structure generated every run instead of a new
+        # 'shop slot'").
+        self.bonus_structures = 0
+        # The structure each of those is standing as for the run being played,
+        # one value per permanent structure (see _reroll_bonus_structures). It is
+        # generated at the start of a run and kept for that run's whole length,
+        # so a board edit, an R, a T or a load cannot reshuffle it.
+        self.bonus_structure_values = []
         # Resource points earned THIS RUN. Like the wrecking ball's per-run
         # gain, they only move into the permanent bank — and convert into
         # rewards — after a run; retrying or restarting discards them.
@@ -518,8 +531,6 @@ class CoreMixin:
         # Seconds marbles spent being pulled by black holes THIS RUN (astronaut).
         self.black_hole_time = 0.0
         self.shop = Shop(SHOP_COORDS, self)
-        # The shop shows this many extra Picky offers on every refresh.
-        self.shop.bonus_slots = self.bonus_slots
         # The dynamic board: which (col, row) squares of the box are playable,
         # and how many Board Units the player holds. It is set up BEFORE the
         # toolbox below, because laying an item out asks whether its square is
@@ -896,10 +907,11 @@ class CoreMixin:
     def _grant_locked_units(self, count, announce=True):
         """Unlock up to ``count`` random locked squares next to an unlocked one.
 
-        The Drill scorer earns two such squares per trigger (granted after a
-        run) and the Conquistador card earns four after every run. Returns how
-        many squares were actually unlocked (0 when the board is already fully
-        unlocked or ``count`` is 0).
+        Only the items that state they unlock squares still use this: a Bomb's
+        blast, a Dynamite's 10 squares and Expansion's upgrade (see
+        _grant_board_units for what the other expansion items hand over now).
+        Returns how many squares were actually unlocked (0 when the board is
+        already fully unlocked or ``count`` is 0).
 
         The squares are picked off the frontier (see _locked_adjacent_cells) one
         at a time, so what the caller gets is always ``count`` squares the board
@@ -926,6 +938,30 @@ class CoreMixin:
                     f"Board expanded ({granted} square{plural} unlocked)")
             sounds.play_coin()
         return granted
+
+    def _grant_board_units(self, count, announce=True):
+        """Hand over Board Units: what the board-expanding items reward now.
+
+        User request: "make all items that unlock random board squares give
+        board squares instead, unless otherwise stated." A Board Unit is what
+        the BOARD UNIT button sells (see _buy_board_unit): one unit opens one
+        locked square the PLAYER picks (see InputMixin.handle_events), so an
+        item that used to pick squares for them hands the choice over instead.
+        The items that state otherwise — a Bomb's radius, Dynamite's blast,
+        Expansion's upgrade — still unlock squares themselves (see
+        _grant_locked_units). Returns how many units were handed over.
+        """
+        count = int(count)
+        if count <= 0:
+            return 0
+        self.board_units += count
+        if announce:
+            plural = "" if count == 1 else "s"
+            self._set_shop_message(
+                f"{count} Board Unit{plural} in hand — click a locked square "
+                f"to open it ({self.board_units} left)")
+            sounds.play_coin()
+        return count
 
     def _detonate_bombs(self, announce=True):
         """Detonate Bomb blocks primed this run (called after a run).
@@ -968,18 +1004,21 @@ class CoreMixin:
         return unlocked
 
     def _announce_board_expansion(self, blasted, drilled, conquered):
-        """Report every square the finished run unlocked, and where they came from.
+        """Report what the finished run's board expansion gave, and from where.
 
         The three sources are Bombs (a fixed 1-cell blast around each primed
-        bomb), the Drill scorer (squares banked by its triggers), and the
-        Conquistador card. They are granted as one step and reported as one
-        message naming each that contributed, because each grant used to
-        announce itself on its own — and with a bomb in the run the blast
-        always went last, so its message replaced the drill's and a player whose
-        drill had just expanded the board was told only about the bomb.
+        bomb, which still opens squares itself), the Drill scorer and the
+        Conquistador card (which hand over Board Units — user request: "make all
+        items that unlock random board squares give board squares instead"). They
+        are granted as one step and reported as one message naming each that
+        contributed, because each grant used to announce itself on its own — and
+        with a bomb in the run the blast always went last, so its message
+        replaced the drill's and a player whose drill had just expanded the board
+        was told only about the bomb.
         """
-        total = blasted + drilled + conquered
-        if not total:
+        squares = blasted
+        units = drilled + conquered
+        if not squares and not units:
             return
         sources = []
         if blasted:
@@ -988,10 +1027,14 @@ class CoreMixin:
             sources.append(f"{drilled} from the drill")
         if conquered:
             sources.append(f"{conquered} from Conquistador")
-        plural = "s" if total != 1 else ""
         detail = f" ({', '.join(sources)})" if sources else ""
+        parts = []
+        if squares:
+            parts.append(f"{squares} square{'' if squares == 1 else 's'}")
+        if units:
+            parts.append(f"{units} Board Unit{'' if units == 1 else 's'}")
         self._set_shop_message(
-            f"Board expanded {total} square{plural}{detail}")
+            f"Board expanded by {' and '.join(parts)}{detail}")
 
     # The Board Unit used to be a tile in the shop panel, then an offer lying on
     # the board; it is a BUTTON in the top bar now (user request: "make board
@@ -1182,17 +1225,41 @@ class CoreMixin:
         on the shelf counts as a claim, so an item re-seated here never lands on
         top of another one — which is how a structure moved onto a tool leaves the
         tool on the board instead of dropping it into the deck (user report).
+
+        The square a PLACED block's item came from is a claim as well: the layout
+        pass keeps it for that item, so an item seated on it would be moved off
+        again at once (see ensure_board_cells). The rule that an item is never
+        placed where another item lives is the same one, whether that other item
+        is standing there or is only remembered by the inventory.
         """
         claimed = set(self.grid) | set(blocked)
         for item in self.owned_items():
             cell = self.item_cell(item)
             if cell is not None:
                 claimed.add(cell)
+            home = self._item_home(item)
+            if home is not None:
+                claimed.add(home)
         for offer in getattr(self.shop, "items", ()):
             cell = self.item_cell(offer)
             if cell is not None:
                 claimed.add(cell)
         return self._free_board_cell(claimed)
+
+    def _item_home(self, item):
+        """The square a PLACED block's item will come back to, or None.
+
+        A block's item stays in the inventory where it was (see
+        BlockItem.placed_cell), so its own ``board_cell`` is the spot it returns
+        to when the block is taken up (see _restore_item_from_block): the layout
+        pass keeps that square free for it. An item that is not standing as a
+        block on the board has no such spot — its ``board_cell`` is where it
+        lives right now.
+        """
+        if getattr(item, "placed_cell", None) is None:
+            return None
+        home = getattr(item, "board_cell", None)
+        return None if home is None else tuple(home)
 
     def _seat_aside(self, item, cell):
         """Move an item off ``cell``, keeping it ON the board, or say why not.
@@ -1256,23 +1323,43 @@ class CoreMixin:
         twice. Its own spot stays RESERVED for it, though (user request: "when a
         block is placed on the board, make its spot in the inventory still
         occupied with the block"): nothing else may be laid out where the item
-        will come back to when its block is taken up.
+        will come back to when its block is taken up. A reserved spot is only the
+        inventory's memory of a square, though, so an item that is somehow
+        standing on one STEPS ASIDE to a free square rather than being knocked
+        into the deck: a spot nothing is drawn on must never make an item
+        disappear off the board (user report: a screwdriver standing where a
+        start block had come from was deleted when that block was moved).
         """
         items = []
         claimed = set(self.grid)
         for item in self.owned_items():
-            if getattr(item, "placed_cell", None) is not None:
-                home = getattr(item, "board_cell", None)
-                if home is not None:
-                    claimed.add(tuple(home))
+            home = self._item_home(item)
+            if home is not None:
+                claimed.add(home)
                 continue
             items.append(item)
         for item in items:
             cell = self.item_cell(item)
-            if cell is None or cell in claimed or self.is_cell_locked(*cell):
+            if cell is None:
+                continue
+            if cell in self.grid or self.is_cell_locked(*cell):
+                # A block stands there (or the square is not playable at all),
+                # so the item goes back into the deck.
                 self.set_item_cell(item, None)
-            else:
-                claimed.add(cell)
+                continue
+            if cell in claimed:
+                # Only another ITEM's spot is in the way. That square is empty to
+                # look at — it is either another item's square or a placed
+                # block's home — so this item is moved to a free square and stays
+                # on the board instead of dropping into the deck.
+                free = self._free_board_cell(claimed)
+                if free is None:
+                    self.set_item_cell(item, None)
+                    continue
+                self.set_item_cell(item, free)
+                claimed.add(free)
+                continue
+            claimed.add(cell)
         # A role block is never in the deck: the START and FINISH blocks stay on
         # the board so the player can always build a run (see _cycle_deck). The
         # TOOLS are dealt with the rest of the deck now (user request: "shovel,

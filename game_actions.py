@@ -122,7 +122,13 @@ class ActionsMixin:
         self.selected_toolbox_index = self._shown_index_of(action)
         self.selected_action = action
         self.selected_action_subject = None
-        if Action.needs_target(action.value):
+        if Action.optional_target(action.value):
+            # Dynamite: a structure if the player points at one, the board
+            # itself if they do not (see _action_dynamite).
+            self._set_shop_message(
+                f"{action.name} (v{action.version}) — press S to blast the "
+                f"board open, or click a structure to dig or reveal it")
+        elif Action.needs_target(action.value):
             what = ("structure" if Action.targets_structures(action.value)
                     else "block/card")
             self._set_shop_message(
@@ -139,15 +145,27 @@ class ActionsMixin:
         _action_cleansing) and each action refuses the targets it cannot use.
 
         ``action`` is the action being aimed: the kind of target it takes comes
-        from its own table (see Action.STRUCTURE_TARGET), so a Reroll can only
-        ever be pointed at a structure and every other action never is. Without
-        an action the question is the general one — what an action may be aimed
+        from its own table (see Action.STRUCTURE_TARGET and Action.ANY_TARGET),
+        so a Reroll can only ever be pointed at a structure, a Recycling at any
+        item the player owns, and every other action never is. Without an action
+        the question is the general one — what an action may be aimed
         at — which is what the selection highlight and the tool prompt ask.
         """
         if item is None or getattr(item, "kind", None) == "action":
             return False
         if Action.targets_structures(getattr(action, "value", None)):
             return self.is_structure(item)
+        if Action.targets_anything(getattr(action, "value", None)):
+            # Recycling is aimed at whatever the player wants to put back in the
+            # deck, so any of their items will do (a tool and a component are
+            # items like the rest). An action is still never a target, a Spirit
+            # token is LIVE for its run rather than a card in the deck (see
+            # _stays_out_of_the_deck), and a thing the player does not own — the
+            # level's own blocks, an offer still on the shelf — cannot be picked
+            # up by the highlight either.
+            if getattr(item, "kind", None) == "token":
+                return False
+            return self.owns_item(item) or isinstance(item, Block)
         return (isinstance(item, Block)
                 or getattr(item, "kind", None) in ("block", "card",
                                                    Component.EFFECT,
@@ -228,7 +246,16 @@ class ActionsMixin:
         # of it counts.
         targets = [t for t in self.selection
                    if t is not action and self.is_action_target(t, action)]
-        if needed is not None and len(targets) != needed:
+        if Action.optional_target(getattr(action, "value", None)):
+            # An action that takes a structure IF there is one (Dynamite) is
+            # used bare or on exactly one: two structures would be ambiguous,
+            # and the card's own handler decides what no target means.
+            if len(targets) > 1:
+                self._set_shop_message(
+                    f"{action.name} takes no target or 1 structure — "
+                    f"{len(targets)} selected")
+                return False
+        elif needed is not None and len(targets) != needed:
             # Not the right number of targets: nothing happens at all.
             self._set_shop_message(
                 f"{action.name} needs {needed} target"
@@ -283,6 +310,16 @@ class ActionsMixin:
             applied = self._action_cleansing(action, subject)
         elif action.value == Action.REROLL:
             applied = self._action_reroll(action, subject)
+        elif action.value == Action.DYNAMITE:
+            applied = self._action_dynamite(action, subject)
+        elif action.value == Action.HORSESHOE:
+            applied = self._action_horseshoe(action)
+        elif action.value == Action.RECYCLING:
+            applied = self._action_recycling(action, subject)
+        elif action.value == Action.STORMCLOUD:
+            applied = self._action_stormcloud(action, subject)
+        elif action.value == Action.FLOOR_PLANS:
+            applied = self._action_floor_plans(action)
         else:
             self._set_shop_message("That action does nothing yet")
             return False
@@ -296,21 +333,46 @@ class ActionsMixin:
             self._consume_action(action)
         return applied
 
-    def _consume_action(self, action):
-        """Spend a used action: out of the action area, or off the pack.
+    def _discard_used_card(self, card):
+        """Throw a card away BECAUSE IT WAS USED — unless it is reusable.
 
-        An action a PACK handed over is not in the action area at all, so it is
-        spent by clearing the pending slot instead (see
-        _keep_action_from_pack). Everything else leaves the action area.
+        The one rule behind every "and discard this card" in the game: a spent
+        action (see _consume_action), a Lantern burning out (see _action_lantern)
+        and a Reroll turning a structure over (see _action_reroll). User request:
+        "when a card is used, discard it unless it has the keyword reusable", so
+        the card leaves through the ordinary discard door — the run counts it
+        (the Trash Can card pays for those) — and a card whose keywords include
+        REUSABLE simply stays where it is: it has been used, not used up.
+
+        An action a PACK handed over never joined the hand, so there is nothing
+        of the player's to take off the board: its slot is cleared and the run
+        still counts it as an item it threw away.
+
+        Returns True when the card left the game.
+        """
+        if Keyword.has(card, Keyword.REUSABLE):
+            return False
+        if card is self.pending_pack_action:
+            self.pending_pack_action = None
+            self._count_discard()
+            return True
+        return self._discard_item(card)
+
+    def _consume_action(self, action):
+        """Use a card up: it is DISCARDED, unless its keywords say "reusable".
+
+        User request: "when a card is used, discard it unless it has the keyword
+        reusable." So a used action goes through the ordinary discard door (see
+        _discard_used_card) — it leaves the action area and the run counts it as
+        an item it threw away — while a reusable action stays exactly where it
+        was (in the action area, or armed on a pack) and can simply be used
+        again. Either way its energy has already been spent (see _apply_action).
 
         Using an action also turns the inventory's selection over (see
         _reshuffle_inventory): the inventory holds everything the player owns,
         and what its panel shows is a random draw from it.
         """
-        if action is self.pending_pack_action:
-            self.pending_pack_action = None
-        elif action in self.actions:
-            self.actions.remove(action)
+        self._discard_used_card(action)
         self._clear_action_selection(announce=False)
         self._reshuffle_inventory()
 
@@ -347,20 +409,23 @@ class ActionsMixin:
         return True
 
     def _action_expansion(self, action):
-        """Expansion opens board squares: 4 of them (v1) or the whole board (v2).
+        """Expansion hands over Board Units: 4 of them (v1) or the whole board (v2).
 
-        The squares come from the same frontier a Drill trigger or the
-        Conquistador card expands into (see _grant_locked_units), so the board
-        grows the way it always does — one edge-adjacent ring at a time. v2
-        sweeps the whole board: each pass unlocks the current frontier, and the
-        loop runs until a pass unlocks nothing, which is what takes it past the
-        first ring. Refused (and kept) when nothing is left to unlock, so the
-        action is never wasted on a finished board.
+        User request: "make all items that unlock random board squares give
+        board squares instead, unless otherwise stated." A v1 no longer picks
+        four squares for the player — it gives four Board Units, which each open
+        the locked square the player chooses (see _grant_board_units). The
+        UPGRADE states otherwise and keeps its own rule: a v2 unlocks every
+        locked square on the board, one frontier ring at a time (see
+        _grant_locked_units). Either version is refused (and kept) when the
+        board is already fully open, so the action is never wasted on a finished
+        board.
         """
+        if not self.board_locked():
+            self._set_shop_message("The board is already fully unlocked — kept")
+            return False
         if action.version < 2:
-            if not self._grant_locked_units(EXPANSION_SQUARES):
-                self._set_shop_message("The board is already fully unlocked")
-                return False
+            self._grant_board_units(EXPANSION_SQUARES)
             return True
         total = 0
         while True:
@@ -369,9 +434,6 @@ class ActionsMixin:
             if not granted:
                 break
             total += granted
-        if not total:
-            self._set_shop_message("The board is already fully unlocked")
-            return False
         plural = "s" if total != 1 else ""
         self._set_shop_message(
             f"{action.name} unlocked the whole board ({total} square{plural})")
@@ -511,9 +573,11 @@ class ActionsMixin:
         really does draw twice as many. The items come out of the deck through
         the same door Wasteful uses (see _draw_one_item) and the first takes the
         Lantern's own square, so the draw appears where the light was; the
-        Lantern itself is then thrown away through _discard_item, which is what
-        makes the run's discard count go up (the Trash Can card pays for it).
-        With an empty deck nothing happens and nothing is spent.
+        Lantern itself is then thrown away through _discard_used_card, which is
+        what makes the run's discard count go up (the Trash Can card pays for
+        it) — unless it is REUSABLE, in which case it stays lit (see
+        Game._discard_used_card). With an empty deck nothing happens and nothing
+        is spent.
         """
         if not self.deck_items():
             self._set_shop_message("The Lantern needs an item in the deck to draw")
@@ -521,8 +585,9 @@ class ActionsMixin:
         draws = max(0, int(action.amount))
         origin = self.item_cell(action)
         # "and discards this card": the action leaves for good, and the run
-        # counts it as one of the items it threw away.
-        self._discard_item(action)
+        # counts it as one of the items it threw away — unless it is reusable,
+        # in which case it merely gave its light and stays.
+        thrown = self._discard_used_card(action)
         drawn = []
         for index in range(draws):
             item = self._draw_one_item(origin if index == 0 else None)
@@ -530,7 +595,8 @@ class ActionsMixin:
                 break
             drawn.append(item)
         names = ", ".join(self._item_name(item) for item in drawn) or "nothing"
-        self._set_shop_message(f"Lantern drew {names} and burned out")
+        ending = "and burned out" if thrown else "and stayed lit"
+        self._set_shop_message(f"Lantern drew {names} {ending}")
         sounds.play_mech()
         return True
 
@@ -942,7 +1008,8 @@ class ActionsMixin:
         level's plan (see _reroll_structure), so the board never moves about
         under the player and no later layout pass can undo the reroll. Then the
         card leaves through the ordinary discard door and what it draws takes
-        the square it gave up, exactly like the Lantern.
+        the square it gave up, exactly like the Lantern — unless the card is
+        REUSABLE, in which case it stays in hand (see Game._discard_used_card).
 
         Tesseract pays for a reroll (see Game._grow_tesseract): a reroll is this
         card now, so using one is what the card counts.
@@ -962,8 +1029,9 @@ class ActionsMixin:
         note = self._grow_tesseract()
         origin = self.item_cell(action)
         # "discards this card": it leaves for good, and the run counts it as one
-        # of the items it threw away (the Trash Can card pays for those).
-        self._discard_item(action)
+        # of the items it threw away (the Trash Can card pays for those) —
+        # unless it is REUSABLE (see Game._discard_used_card).
+        self._discard_used_card(action)
         drawn = []
         for index in range(max(0, int(action.amount))):
             item = self._draw_one_item(origin if index == 0 else None)
@@ -992,6 +1060,275 @@ class ActionsMixin:
                    and not (cell is not None
                             and (value, cell[0], cell[1]) in spent)]
         return random.choice(options) if options else None
+
+    def _action_dynamite(self, action, subject):
+        """Dynamite: a bang that opens the board — or a structure — wide open.
+
+        User request: "add a card, 'dynamite': when used with no items selected,
+        unlock 10 random board squares adjacent to the unlocked area this card
+        was used in. or, dig or reveal. costs 2 energy."
+
+        With NOTHING selected the blast opens its own magnitude in random
+        locked squares on the frontier of the unlocked board (see
+        _grant_locked_units) — one of the few items that still unlocks squares
+        rather than handing over a Board Unit, because that is exactly what it
+        says it does (the "unless otherwise stated" of _grant_board_units).
+        With a structure selected it is used like a tool instead: it digs or
+        reveals it, and the reward takes the square it gave up. Either way the
+        card's 2 energy is charged and the card discarded by _apply_action.
+        """
+        others = [item for item in self.selection if item is not action]
+        if not others:
+            granted = self._grant_locked_units(max(0, int(action.amount)),
+                                               announce=False)
+            if not granted:
+                self._set_shop_message(
+                    "The board is already fully unlocked — kept")
+                return False
+            self._set_shop_message(
+                f"{action.name} blew open {granted} board square"
+                f"{'' if granted == 1 else 's'}")
+            sounds.play_mech()
+            return True
+        if not self.is_structure(subject) or len(others) != 1:
+            self._set_shop_message(
+                f"{action.name} needs nothing selected or 1 structure — kept")
+            return False
+        verbs = Action.opens_with(action.value)
+        verb = next((candidate for candidate in verbs
+                     if Structure.result(subject.value, candidate) is not None),
+                    None)
+        kind, value = (Structure.result(subject.value, verb) if verb is not None
+                       else (None, None))
+        if verb is None:
+            self._set_shop_message(
+                f"The {self._item_name(subject).lower()} cannot be dug or "
+                f"revealed — kept")
+            return False
+        if kind == "merge":
+            # The golem does not hold a reward: it needs TWO of the player's
+            # items (see _golem_pair), and a blast cannot bring them.
+            self._set_shop_message(
+                f"The {self._item_name(subject).lower()} needs a tool and two "
+                f"items, not a blast — kept")
+            return False
+        was = self._item_name(subject).lower()
+        origin = self.item_cell(subject)
+        reward = self._structure_reward(kind, value)
+        self._consume_structure(subject)
+        if origin is not None:
+            self.set_item_cell(reward, origin)
+        self._adopt_reward(reward)
+        made = Pack.name(value) if kind == "pack" else Action.name(value)
+        self._set_shop_message(
+            f"{action.name} {Verb.done(verb)} the {was} — {made}")
+        sounds.play_mech()
+        return True
+
+    def _action_horseshoe(self, action):
+        """Horseshoe: throw the hand back into the deck and draw a bigger one.
+
+        User request: "add a card: 'horseshoe' (discard all items on the board
+        that you own, draw the same number plus 3 new items. costs 1 energy)".
+        A discard is not a destruction here — the answer Smelly Socks' discard
+        gave is the rule the whole game follows — so everything the player owns
+        on the board goes back INTO THE DECK (see _sweep_board_into_deck) and the
+        very next draw can deal it again: the card is a mulligan with a bonus,
+        not a sacrifice. What never leaves the board is what _stays_out_of_the_
+        deck names (the role blocks a run is built from and the Spirit tokens),
+        and the card itself sits out its own sweep, so a REUSABLE Horseshoe is
+        used rather than thrown.
+
+        The draw is the hand it threw back PLUS its own magnitude (see
+        MAGNITUDES.HORSESHOE_EXTRA_DRAWS), so a golem-folded one draws two more
+        than it discarded. It comes out of the deck through the same door every
+        other draw uses (see _draw_one_item) and stops when the deck runs out.
+        """
+        on_board = [item for item in self.hand_items()
+                    if item is not action
+                    and not self._stays_out_of_the_deck(item)]
+        if not on_board and not self.drawable_deck_items():
+            self._set_shop_message(
+                f"{action.name} needs an item on the board or in the deck — "
+                f"kept")
+            return False
+        returned = self._sweep_board_into_deck(keep=action)
+        wanted = len(returned) + max(0, int(action.amount))
+        drawn = []
+        for _ in range(wanted):
+            item = self._draw_one_item()
+            if item is None:
+                break
+            drawn.append(item)
+        self._set_shop_message(
+            f"{action.name} threw {len(returned)} item"
+            f"{'' if len(returned) == 1 else 's'} back into the deck and drew "
+            f"{len(drawn)}"
+            + (" (the deck ran out)" if len(drawn) < wanted else ""))
+        sounds.play_coin()
+        return True
+
+    def _action_recycling(self, action, subject):
+        """Recycling: the selected item goes back in the deck, and two come out.
+
+        User request: "add a card, 'recycling' (discard selected item, draw 2
+        items for 0 energy)". It is the one action aimed at an item that gives
+        the item back: the target is put in the DECK (see _to_deck — the answer
+        the Horseshoe's discard gave, so nothing is destroyed), then the card
+        draws its magnitude out of that same deck through the ordinary draw (see
+        _draw_one_item). The first item drawn takes the square the recycled one
+        gave up, so the board does not shuffle about under the player; the
+        recycled item is a deck item again, so a draw may deal it straight back.
+
+        A placed BLOCK is recycled as the item it was built from (the block
+        comes off the board first, exactly as the end of a run takes it off),
+        because a block and its item are one existence. The level's own props and
+        enemies, and an offer the player has not bought, are refused — as is a
+        deck with nothing in it to draw, where the card would be spent for
+        nothing.
+        """
+        target = subject
+        if isinstance(target, Block):
+            if (getattr(target, "is_level_prop", False)
+                    or getattr(target, "is_enemy", False)
+                    or not self.owns_item(getattr(target, "source_item", None))):
+                self._set_shop_message(
+                    f"{action.name} needs one of your own items to recycle — kept")
+                return False
+            self._unplace_block(target)
+            self.grid.pop((target.x, target.y), None)
+            target = target.source_item
+        elif target is None or not self.owns_item(target):
+            self._set_shop_message(
+                f"{action.name} needs one of your own items to recycle — kept")
+            return False
+        others = [item for item in self.drawable_deck_items()
+                  if item is not target]
+        if not others:
+            self._set_shop_message(
+                f"{action.name} needs an item in the deck to draw — kept")
+            return False
+        was = self._item_name(target)
+        origin = self.item_cell(target)
+        self._to_deck(target)
+        drawn = []
+        for index in range(max(0, int(action.amount))):
+            item = self._draw_one_item(origin if index == 0 else None)
+            if item is None:
+                break
+            drawn.append(self._item_name(item))
+        drew = ", ".join(drawn) if drawn else "nothing"
+        self._set_shop_message(
+            f"{action.name} put {was} back in the deck and drew {drew}")
+        sounds.play_mech()
+        return True
+
+    def _action_stormcloud(self, action, subject):
+        """Stormcloud: a whole tool's reach, and a structure lost to the wind.
+
+        User request: "add a card, 'stormcloud' (break, fix, dig, or reveal, and
+        destroy 1 random structure. costs 1 energy)". It is the one action that
+        opens a structure exactly as a tool would: it is aimed at one (see
+        STRUCTURE_TARGET) and uses the first of its four verbs the structure
+        answers, so any door can be opened with it (a golem still cannot — it
+        wants a tool and two items, not weather). The reward REPLACES the
+        structure on its square, as every opening's does (see _apply_tool).
+
+        Then the storm brings one down: a random structure still standing — the
+        one just opened is already off the board, so a card can never open and
+        destroy the same door — is torn down through _consume_structure with
+        discover=False, because a structure is revealed by OPENING it and this
+        one never was (see _action_deep_pockets). With nothing else left
+        standing, the opening still happens and says so. A golem, a structure
+        the four verbs cannot open and a missing target are refused before
+        anything is spent.
+        """
+        if not self.is_structure(subject):
+            self._set_shop_message(
+                f"{action.name} needs a structure to open — kept")
+            return False
+        verbs = Action.opens_with(action.value)
+        verb = next((candidate for candidate in verbs
+                     if Structure.result(subject.value, candidate) is not None),
+                    None)
+        if verb is None:
+            self._set_shop_message(
+                f"The {self._item_name(subject).lower()} cannot be broken, "
+                f"fixed, dug or revealed — kept")
+            return False
+        kind, value = Structure.result(subject.value, verb)
+        if kind == "merge":
+            self._set_shop_message(
+                f"The {self._item_name(subject).lower()} needs a tool and two "
+                f"items, not a storm — kept")
+            return False
+        was = self._item_name(subject).lower()
+        origin = self.item_cell(subject)
+        reward = self._structure_reward(kind, value)
+        self._consume_structure(subject)
+        if origin is not None:
+            self.set_item_cell(reward, origin)
+        self._adopt_reward(reward)
+        made = Pack.name(value) if kind == "pack" else Action.name(value)
+        # The storm's own damage: structures still standing, chosen at random.
+        torn = []
+        for _ in range(max(0, int(action.amount))):
+            standing = self.level_structures()
+            if not standing:
+                break
+            victim = random.choice(standing)
+            torn.append(self._item_name(victim).lower())
+            self._consume_structure(victim, discover=False)
+        message = (f"{action.name} {Verb.done(verb)} the {was} — {made}")
+        if torn:
+            plural = "" if len(torn) == 1 else "s"
+            message += (f", and tore down the {', '.join(torn)} "
+                        f"(structure{plural} gone for this level)")
+        else:
+            message += " — no other structure was left to tear down"
+        self._set_shop_message(message)
+        sounds.play_mech()
+        return True
+
+    def _action_floor_plans(self, action):
+        """Floor plans: draw BLOCKS — five of them — out of the deck.
+
+        User request: "add a new card, 'floor plans' (draw 5 blocks. costs 1
+        energy)". Unlike the Lantern, which draws any item at all, this one
+        deals only the ready-made BLOCKS waiting in the deck (see deck_blocks):
+        what a run is built from, not the parts, cards, actions and tools a deck
+        can also hold. The number is the card's own magnitude (see
+        MAGNITUDES.FLOOR_PLANS_BLOCKS), so a golem-folded one draws ten.
+
+        The blocks come out through the ordinary draw (see _draw_one_item with
+        its own pool), so each takes an unlocked square of its own and a block
+        the deck no longer has simply is not dealt; the draw stops when the deck
+        has no blocks left. A deck with no block at all refuses the use and
+        keeps the card, so the energy is never spent for nothing.
+        """
+        if not self.deck_blocks():
+            self._set_shop_message(
+                f"{action.name} needs a block in the deck to draw — kept")
+            return False
+        drawn = []
+        for _ in range(max(0, int(action.amount))):
+            item = self._draw_one_item(pool=self.deck_blocks())
+            if item is None:
+                break
+            drawn.append(self._item_name(item))
+        # Five of the same block reads as "5x Block" rather than five names.
+        counts = {}
+        for name in drawn:
+            counts[name] = counts.get(name, 0) + 1
+        names = ", ".join(name if count == 1 else f"{count}x {name}"
+                          for name, count in counts.items()) or "nothing"
+        self._set_shop_message(
+            f"{action.name} drew {len(drawn)} block"
+            f"{'' if len(drawn) == 1 else 's'}: {names}"
+            + (" (the deck has no more blocks)" if len(drawn) < int(action.amount)
+               else ""))
+        sounds.play_mech()
+        return True
 
     def _reroll_structure(self, structure, new_value):
         """Turn a structure into another one in place, and remember it.
@@ -1356,8 +1693,13 @@ class ActionsMixin:
         through the ordinary discard door, so the run counts it as an item it
         threw away (the Trash Can card pays for those), and what it draws lands
         on the square it gave up -- the same courtesy a structure's reward gets.
+
+        The question is the item's own keyword, not the tool's table: a one-shot
+        tool that has been marked REUSABLE survives being used and keeps its
+        draw (see components.Keyword.of), which is the same rule every used card
+        follows.
         """
-        if not getattr(tool, "consumes", False) or not self.owns_item(tool):
+        if not Keyword.has(tool, Keyword.CONSUME) or not self.owns_item(tool):
             return ""
         name = self._item_name(tool)
         home = self.item_cell(tool)
@@ -1395,6 +1737,11 @@ class ActionsMixin:
         cell = self.item_cell(structure)
         if cell is not None:
             self.spent_structures.add((structure.value, cell[0], cell[1]))
+        if getattr(structure, "is_bonus_structure", False):
+            # A Picky structure is remembered by its own index as well, so the
+            # layout pass that tops them up cannot deal it again this visit (see
+            # Game._place_bonus_structures).
+            self.spent_bonus_structures.add(structure.bonus_index)
         # Opening one is what reveals it in the collection (see
         # Game._discover_structure): the entry describes what the opening hands
         # over, so a player learns it by opening one.

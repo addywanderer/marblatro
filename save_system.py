@@ -650,7 +650,6 @@ def _save_data(game):
         "idea_points": game.idea_points,
         "free_rerolls": game.free_rerolls,
         "option_points": game.option_points,
-        "bonus_slots": game.bonus_slots,
         # The slots cards and actions have won: Inaction's banked uses (every
         # INACTION_USES_PER_SLOT of them is a card slot, and a v2 use hands one
         # over outright), Foresight's action slots, and whether its v2 has
@@ -708,6 +707,17 @@ def _save_data(game):
         # instead of being dealt again (see Game.spent_structures).
         "spent_structures": [list(entry) for entry in
                              sorted(getattr(game, "spent_structures", ()))],
+        # Picky's permanent structures: how many the player has banked, which
+        # random structure each one is standing as this run, and which of them
+        # this level visit has already spent (user request: "a permanent new
+        # random structure generated every run"). The count is permanent, the
+        # values are this run's roll, and the spent ones stay gone (see
+        # Game.bonus_structures / _place_bonus_structures).
+        "bonus_structures": getattr(game, "bonus_structures", 0),
+        "bonus_structure_values": list(
+            getattr(game, "bonus_structure_values", ())),
+        "spent_bonus_structures": sorted(
+            getattr(game, "spent_bonus_structures", ())),
         # The level's plan entries the player has REROLLED, as [index, value]:
         # the layout deals what the reroll made of a structure, so a load does
         # not quietly undo one (see Game.structure_rerolls).
@@ -821,16 +831,23 @@ def _load_save_data(game, data, slot):
             Block(_x, _y, shape=_sh, effect=Effect.NONE, scorer=_s,
                   scorer_amount=_a, effects=_ef),
             runs_left=None if _runs < 0 else _runs))
-    # Resource points from Shreds/Rubble/Ideas scorers persist too, as do free
-    # rerolls (granted by Fresh) and Picky points / bonus shop slots. A legacy
-    # part_points key from before Parts granted components directly is ignored.
+    # Resource points from Shreds/Rubble/Ideas/Picky scorers persist too, as do
+    # free rerolls (granted by Fresh). A legacy part_points key from before
+    # Parts granted components directly is ignored. Picky's reward is now a
+    # permanent STRUCTURE generated every run (user request), so a save that
+    # still counts "bonus shop slots" has them carried over as structures: the
+    # reward changed shape, not the points spent on it.
     game.shred_points = data.get("shred_points", 0)
     game.rubble_points = data.get("rubble_points", 0)
     game.idea_points = data.get("idea_points", 0)
     game.free_rerolls = data.get("free_rerolls", 0)
     game.option_points = data.get("option_points", 0)
-    game.bonus_slots = data.get("bonus_slots", 0)
-    game.shop.bonus_slots = game.bonus_slots
+    game.bonus_structures = data.get(
+        "bonus_structures", data.get("bonus_slots", 0))
+    game.bonus_structure_values = [int(value) for value in
+                                   data.get("bonus_structure_values") or ()]
+    game.spent_bonus_structures = {int(index) for index in
+                                   data.get("spent_bonus_structures") or ()}
     # The gained slots (Inaction's uses and handed-over slots, Foresight's
     # action slots and its unlimited flag, Packed's inventory slots) persist; a
     # save written before any of them existed simply has none of them.

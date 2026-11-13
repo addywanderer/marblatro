@@ -37,7 +37,7 @@ from components import (
     MAGNITUDE_SCALE,
     MAGNITUDE_STEP_DIVISOR,
     MAGNITUDES,
-    PIPE_GROUP_SHAPES,
+    PIPE_GROUP_SHAPES,  # noqa: F401  re-exported for ui.py and the tests
     RESOURCE_PACK_FACTOR,
     RESOURCE_THRESHOLD,
     Action,
@@ -71,7 +71,6 @@ from components import (
     pack_price,
     paired_shape,
     points_text,
-    resource_points_for,
     scorer_component_price,
     scorer_description,
     scorer_magnitude_floor,
@@ -193,6 +192,7 @@ match_group_for_effect = components.match_group_for_effect
 match_group_for_shape = components.match_group_for_shape
 match_group_matches_block = components.match_group_matches_block
 match_group_price = components.match_group_price
+resource_points_for = components.resource_points_for
 draw_card = ui.draw_card
 draw_card_back = ui.draw_card_back
 draw_marble_box = ui.draw_marble_box

@@ -300,6 +300,14 @@ class DescribeMixin:
         thing.
         """
         rows = list(self._describe_item_parts(item))
+        # How RARE it is (user request: "give all items a rarity"): one row for
+        # every kind of item, from the one table (see components.Rarity), so a
+        # part, an action, a tool, a pack, a structure, a passive, a block and a
+        # token all say their tier beside a card. An item with no tier (the bar's
+        # Cash and Energy readouts, the level's own things) has no row at all.
+        rarity = Rarity.of(item)
+        if rarity is not None:
+            rows.append(("Rarity", Rarity.name(rarity)))
         # What FAMILY it belongs to, and what that family is for (see Group):
         # every item says which group it is in, right after its own text. The
         # info box lifts this row out and draws it as a highlighted box under the
@@ -321,6 +329,13 @@ class DescribeMixin:
         if ability is not None and not getattr(item, "is_enemy", False):
             count = (self.required_targets(item)
                      if ability == Ability.APPLY else None)
+            # A card that takes a structure IF there is one (Dynamite) says so
+            # in its own words: "Needs 1 target" would be a lie (see
+            # Action.OPTIONAL_TARGET).
+            needs = None
+            if ability == Ability.APPLY and Action.optional_target(
+                    getattr(item, "value", None)):
+                needs = "no target, or 1 structure"
             # A tool's opening costs ITS energy: 1 for the four the player
             # starts with, nothing for a brick (see Tool.ENERGY).
             cost = None
@@ -328,14 +343,20 @@ class DescribeMixin:
                 energy = Tool.energy(item.value)
                 cost = f"{energy} energy" if energy else "nothing"
             if ability == Ability.APPLY:
-                # An ACTION that asks for energy (the newest three) says so
-                # here, on top of the action itself being spent (see
-                # Action.ENERGY).
+                # An ACTION that asks for energy (the newest ones) says so here.
+                # What a used card spends of ITSELF is its own keyword now — a
+                # used card says "consume" (see components.Keyword), and a
+                # reusable one says "reusable" and is never discarded — so the
+                # contract line names the energy alone (user request: "make all
+                # cards homogenous").
                 asks = Action.energy(getattr(item, "value", None))
-                if asks:
-                    cost = f"the action itself and {asks} energy"
+                if Keyword.has(item, Keyword.REUSABLE):
+                    cost = (f"{asks} energy" if asks
+                            else "nothing — it is not discarded")
+                elif asks:
+                    cost = f"{asks} energy"
             rows.append((f"Ability - {Ability.name(ability)}",
-                         f"{Ability.contract(ability, count, cost)} "
+                         f"{Ability.contract(ability, count, cost, needs)} "
                          f"Press S to use it."))
         return rows
 
@@ -390,7 +411,7 @@ class DescribeMixin:
                 ("Health", f"{_hit_points(item.hp)} of "
                            f"{_hit_points(item.max_hp)} left"),
                 ("Damage", "The marble that touches it deals its chips x mult "
-                           "as damage and spends them"),
+                           "as damage, and both are then halved"),
             ]
         if getattr(item, "kind", None) == "pack":
             # A pack describes itself by what it holds and by its size's rule:
@@ -416,33 +437,36 @@ class DescribeMixin:
                             f"at once")),
             ]
         if getattr(item, "kind", None) == "structure":
-            # A structure says what opens it and what comes out: the tool is
-            # the player's clue to which of the four they need.
+            # A structure says what opens it and what comes out: the card is
+            # the player's clue to which of the four they need. Every card that
+            # can open one is listed — the tools by the verb each carries, and
+            # the actions whose tables say they open structures (Dynamite,
+            # Stormcloud) — so the row can never leave out a way in.
+            openers = [f"{Tool.name(Tool.for_verb(verb))} ({Verb.name(verb)})"
+                       for verb in Structure.verbs(item.value)]
+            for value in Action.OPENS:
+                if any(Structure.result(item.value, verb) is not None
+                       for verb in Action.opens_with(value)):
+                    openers.append(Action.name(value))
             rows = [(f"Structure - {Structure.name(item.value)}",
                      Structure.description(item.value)),
-                    ("Opened by", ", ".join(
-                        f"{Tool.name(Tool.for_verb(verb))} "
-                        f"({Verb.name(verb)})"
-                        for verb in Structure.verbs(item.value)) or "nothing"),
-                    ("Cost", ("Free — a tool opens it where it lies, 1 energy "
-                              "a use"))]
+                    ("Opened by", ", ".join(openers) or "nothing"),
+                    ("Cost", ("Free — aim a card that opens structures at it and "
+                              "press S; the opening costs that card's energy"))]
             comment = Structure.comment(item.value)
             if comment:
                 rows.append(("Note", comment))
             return rows
         if getattr(item, "kind", None) == "tool":
-            # A tool is its KEYWORDS (see components.Keyword): the verbs it
-            # applies, whether using it destroys it and what it draws. The four
-            # the player starts with are words 1-4 of the whole vocabulary.
-            rows = [
-                (f"Tool - {Tool.name(item.value)}",
-                 Tool.description(item.value)),
-                ("Keywords", Keyword.line(item)),
-                ("Energy", (f"{Tool.energy(item.value)} a use"
-                            f" ({self.energy} left this run)")),
-            ]
-            if Tool.consumes(item.value):
-                rows.append(("Consume", Keyword.description(Keyword.CONSUME)))
+            # Every item in the Cards family reads as a CARD here (user request:
+            # "make all cards homogenous, and treat them the same way"): what
+            # tells a tool from a whole card is its KEYWORDS and its ability, not
+            # a label, so the row is the same shape for all three kinds.
+            rows = [(f"Card - {Tool.name(item.value)}",
+                     Tool.description(item.value))]
+            rows += self._keyword_rows(item)
+            rows.append(("Energy", (f"{Tool.energy(item.value)} a use"
+                                    f" ({self.energy} left this run)")))
             if Tool.draws(item.value):
                 rows.append(("Draw",
                              f"{Tool.draws(item.value):g} item"
@@ -464,12 +488,9 @@ class DescribeMixin:
             # run, and that is the whole of it (user request: the Concrete). It
             # describes the magnitude it actually carries, so a combined one
             # reads out the chips it really adds.
-            return [
-                (f"Item - {Passive.name(item.value)}",
-                 Passive.description(item.value, item.amount)),
-                ("Keywords", Keyword.line(item)),
-                ("Passive", Keyword.description(Keyword.UNPLAYABLE)),
-            ]
+            return ([(f"Item - {Passive.name(item.value)}",
+                      Passive.description(item.value, item.amount))]
+                    + self._keyword_rows(item))
         if getattr(item, "kind", None) == "token":
             # A token is a whole kept block, so it describes itself the way that
             # block did on the board (shape, effects, scorer), plus when it
@@ -537,14 +558,17 @@ class DescribeMixin:
                     rows.append(("Trigger", f"Scores {limit} times per run"))
             return rows
         if getattr(item, "kind", None) == "card":
-            rows = [
-                (f"Card - {Card.name(item.value)}",
-                 card_description(item.value, getattr(item, "amount", 0))),
-            ]
+            # A whole card is a CARD like an action or a tool: its own line says
+            # what it pays, its keywords say it is unplayable, and the Timing row
+            # says when it pays (see _card_timing_row) — so nothing it does is
+            # left to the word "card" to imply (user request).
+            rows = [(f"Card - {Card.name(item.value)}",
+                     card_description(item.value, getattr(item, "amount", 0)))]
+            rows += self._keyword_rows(item)
+            rows.append(self._card_timing_row(item))
             if live:
                 rows.append(live)
-            rows += [("Rarity", Card.rarity_name(item.value)),
-                     ("Comment", Card.comment(item.value))]
+            rows.append(("Comment", Card.comment(item.value)))
             return rows
         if getattr(item, "kind", None) == "action":
             version = getattr(item, "version", 1)
@@ -557,12 +581,14 @@ class DescribeMixin:
             else:
                 version_text = ("v1 — upgrade to v2 for "
                                 f"${self._inflated(ACTION_UPGRADE_COST)}")
-            rows = [
-                (f"Action - {Action.name(item.value)}",
-                 Action.description(item.value, version,
-                                    getattr(item, "amount", 0))),
-                ("Version", version_text),
-            ]
+            # An action is a CARD too (user request: "make all cards homogenous"):
+            # its own line says what it does, and its keywords say what using it
+            # costs it — "consume", or "reusable" when the card is not spent.
+            rows = [(f"Card - {Action.name(item.value)}",
+                     Action.description(item.value, version,
+                                        getattr(item, "amount", 0)))]
+            rows += self._keyword_rows(item)
+            rows.append(("Version", version_text))
             if getattr(item, "amount", 0):
                 # An action that carries a magnitude states the number it is
                 # holding, so a Lantern a golem doubled reads out the draws it
@@ -589,6 +615,57 @@ class DescribeMixin:
         #     return [(f"Condition - {Condition.name(item.value)}",
         #              condition_description(item.value))]
         return []
+
+    def _keyword_rows(self, item):
+        """An item's KEYWORDS, and a row for each word that needs explaining.
+
+        User request: "make sure everything a card does is shown in its info
+        box, using keywords or other explanatory mechanisms." The words
+        themselves go on one row (see components.Keyword); a word whose rule is
+        not obvious from the noun gets its own row directly under it, from the
+        same table, so a whole card explains "unplayable" and a consumed card
+        explains "consume" in the very words the vocabulary defines.
+
+        The words are read from the ITEM, not from its kind, so a reusable card
+        reads "reusable" and says nothing about being destroyed (see
+        components.Keyword.of).
+        """
+        rows = []
+        words = Keyword.line(item)
+        if words:
+            rows.append(("Keywords", words))
+        if Keyword.has(item, Keyword.CONSUME):
+            rows.append(("Consume", Keyword.description(Keyword.CONSUME)))
+        if Keyword.has(item, Keyword.UNPLAYABLE):
+            rows.append(("Passive", Keyword.description(Keyword.UNPLAYABLE)))
+        return rows
+
+    def _card_timing_row(self, item):
+        """WHEN a whole card acts, in words — every whole card says so.
+
+        A whole card is unplayable (see components.Keyword): nothing is pressed
+        to make it fire, so when it fires is the one thing its face cannot show.
+        The answer is the card's own row, never a guess: a measured card fires at
+        the start or the end of a run, or when a fragile block breaks (see
+        Card.NAMED); a match-group card fires when a marble collides with a block
+        its group matches (see match_group_trigger); every other whole card is
+        always on, and its own text says when it pays.
+        """
+        value = getattr(item, "value", None)
+        meta = Card.NAMED.get(value)
+        if meta is not None:
+            phase = meta[0]
+            if phase == "start":
+                return ("Timing", "Fires at the start of every run")
+            if phase == "end":
+                return ("Timing", "Fires at the end of every run")
+            return ("Timing",
+                    "Fires whenever one of your fragile blocks breaks")
+        meta = match_group_card_meta(value)
+        if meta is not None:
+            return ("Timing", f"Fires {match_group_trigger(meta[0])}")
+        return ("Timing", ("Always on while you own it \u2014 its text says when "
+                           "it pays"))
 
     def _pair_description_rows(self, item):
         """Sidebar rows explaining a block's pairing (key/lock pairs).
@@ -640,16 +717,23 @@ class DescribeMixin:
     def _energy_rows(self):
         """Sidebar rows for the top bar's ENERGY bar (see ui.draw_energy_bar).
 
-        Energy is the run's budget for the four tools, so the readout says what
+        Energy is the run's budget for every card that asks for it — the four
+        tools the player starts with, the one-shot tools, and the actions whose
+        table names an energy cost (`Action.ENERGY`) — so the readout says what
         it is for, what it stands at right now, and that it comes back with the
         next run (user request: "the player's max energy is 3, and energy resets
         to max each run").
         """
+        spenders = ", ".join(
+            f"{Action.name(value)} ({Action.energy(value)} energy)"
+            for value in Action.ORDER
+            if Action.energy(value))
         return [
             ("Energy", (f"{self.energy} of {self.max_energy} left this run.")),
-            ("Spent by", ("Using a tool: the shovel (digs), the flashlight "
-                          "(reveals), the screwdriver (fixes) or the hammer "
-                          "(breaks) costs 1 energy per structure it opens.")),
+            ("Spent by", ("Using a card that asks for it: the shovel (digs), "
+                          "the flashlight (reveals), the screwdriver (fixes) or "
+                          "the hammer (breaks) costs 1 energy a use, and so do "
+                          f"{spenders}.")),
             ("Refills", ("Back to full at the start of every run — restarting or "
                          "retrying a run gives the same budget again.")),
         ]
@@ -657,6 +741,12 @@ class DescribeMixin:
 
     def _action_hint(self, item, source):
         """A short hint telling the player how to act on the hovered item."""
+        if source == "collection":
+            # The codex is a reference: hovering one of its cells shows the very
+            # info box the item gets in a game (user request), so the hint is
+            # about the page rather than about the item — there is nothing to
+            # press here.
+            return "Codex entry | scroll to browse, RETURN TO MAIN MENU to leave"
         if source == "shop":
             # A shop offer lies on the board like any other item and is BOUGHT by
             # right-clicking it (user request); its price is only shown here, on
@@ -745,11 +835,37 @@ class DescribeMixin:
             # the cards, the actions and the parts (see Game.ensure_board_cells).
             kind = getattr(item, "kind", None)
             if kind == "card":
-                return "Click to select (click again to deselect) | B to sell"
+                # A whole card is never played (see components.Keyword): the
+                # hint says so, because "click to select" alone would imply
+                # there is something to use it on.
+                return ("Unplayable — it pays on its own | click to select, "
+                        "B to sell")
             if kind == "action":
                 if getattr(item, "value", None) == Action.EYEBALL:
                     return ("Press S to pick a card in your deck to draw "
                             f"({Action.energy(Action.EYEBALL)} energy)")
+                if getattr(item, "value", None) == Action.HORSESHOE:
+                    return ("Press S to put every item you own on the board back "
+                            "in the deck and draw a bigger hand "
+                            f"({Action.energy(Action.HORSESHOE)} energy)")
+                if getattr(item, "value", None) == Action.RECYCLING:
+                    return ("Click the item to recycle, then press S: it goes back "
+                            f"in the deck and you draw "
+                            f"{Action.MAGNITUDE[Action.RECYCLING]:g} "
+                            f"({Action.energy(Action.RECYCLING)} energy)")
+                if getattr(item, "value", None) == Action.STORMCLOUD:
+                    return ("Click the structure to open, then press S: break, "
+                            "fix, dig or reveal works, and the storm tears down "
+                            f"a random other one "
+                            f"({Action.energy(Action.STORMCLOUD)} energy)")
+                if getattr(item, "value", None) == Action.FLOOR_PLANS:
+                    return ("Press S to draw "
+                            f"{Action.MAGNITUDE[Action.FLOOR_PLANS]:g} blocks out "
+                            f"of the deck "
+                            f"({Action.energy(Action.FLOOR_PLANS)} energy)")
+                if Action.optional_target(getattr(item, "value", None)):
+                    return ("Press S with nothing selected to open the board, "
+                            "or click a structure to dig or reveal it")
                 if Action.targets_structures(getattr(item, "value", None)):
                     return "Click a target structure, then press S to reroll it"
                 if not Action.needs_target(getattr(item, "value", None)):

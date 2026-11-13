@@ -332,9 +332,11 @@ class ScorersTests(GameTestCase):
                       main.Card.description(card))
 
 
-    def test_picky_points_convert_to_bonus_slot_on_continue(self):
-        # Two Picky points earned during a run convert into one bonus shop
-        # slot after a run.
+    def test_picky_points_convert_to_a_structure_on_continue(self):
+        # Two Picky points earned during a run convert into one PERMANENT
+        # STRUCTURE after a run (user request: "a permanent new random structure
+        # generated every run"), and that structure is on the board every run
+        # from then on.
         self.game.run_active = True
         for _ in range(2):
             block = main.Block(0, 0, scorer=main.Scorer.PICKY)
@@ -342,15 +344,20 @@ class ScorersTests(GameTestCase):
             marble.collisions_this_tick = [block]
             self.game._handle_block_contacts([block])
         self.assertEqual(self.game.option_run_gain, 1.0)
-        self.assertEqual(self.game.bonus_slots, 0)
+        self.assertEqual(self.game.bonus_structures, 0)
         self.game.run_complete = True
         self.game.awaiting_after_run = True
         self.game._continue_run()
         self.assertEqual(self.game.option_run_gain, 0)
         self.assertEqual(self.game.option_points, 0)
-        self.assertEqual(self.game.bonus_slots, 1)
-        self.assertEqual(self.game.shop.bonus_slots, 1)
-
+        self.assertEqual(self.game.bonus_structures, 1)
+        # ...and it is standing on the board as a free structure, not a shelf
+        # slot: it is scenery a card opens, laid out with the level.
+        extra = [item for item in self.game.shop.items
+                 if getattr(item, "is_bonus_structure", False)]
+        self.assertEqual(len(extra), 1)
+        self.assertIsNotNone(self.game.item_cell(extra[0]))
+        self.assertIn(extra[0].value, main.Structure.ORDER)
 
     def test_picky_leftover_points_bank_on_continue(self):
         # Points below a whole point stay banked for a future run: three Picky
@@ -367,7 +374,7 @@ class ScorersTests(GameTestCase):
         self.game._continue_run()
         self.assertEqual(self.game.option_run_gain, 0)
         self.assertEqual(self.game.option_points, 0.5)  # 1.5 - one point
-        self.assertEqual(self.game.bonus_slots, 1)
+        self.assertEqual(self.game.bonus_structures, 1)
 
 
     def test_shreds_scorer_points_convert_only_on_continue(self):
@@ -895,7 +902,7 @@ class ScorersTests(GameTestCase):
         # to 1.4 banks 0.7 points, which is (+0.2) over the 0.5 average — not
         # the (+0.4) its own magnitude is over 1.
         desc = main.scorer_description(main.Scorer.PICKY, 1.4)
-        self.assertIn("Gives 0.7 option point (+0.2).", desc)
+        self.assertIn("Gives 0.7 structure point (+0.2).", desc)
         self.assertNotIn("+0.4", desc)
         # A whole-point scorer's count steps with its own magnitude.
         self.assertIn("Gives 1.1 shred points (+0.1).",
@@ -909,7 +916,7 @@ class ScorersTests(GameTestCase):
         group = main.match_group_for_shape(main.Shape.PIPE)
         card_text = components._match_group_description(group, main.Scorer.PICKY,
                                                         1.4)
-        self.assertIn("Gives 0.7 option point (+0.2)", card_text)
+        self.assertIn("Gives 0.7 structure point (+0.2)", card_text)
         # A catalogue card (no rolled magnitude) states no token at all.
         token = re.compile(r"\([+-]?\d+(\.\d+)?\)")
         catalogue = main.Card.description(
@@ -1483,7 +1490,7 @@ class ScorersTests(GameTestCase):
         # The amount-dependent scorers all follow their own magnitude.
         self.assertIn("Gives 2 components (+1)", main.scorer_description(main.Scorer.PARTS, 2))
         self.assertIn("Gives 1 component (0)", main.scorer_description(main.Scorer.PARTS, 1))
-        self.assertIn("drills out 3 locked board squares (+1)",
+        self.assertIn("gives 3 Board Units (+1)",
                       main.scorer_description(main.Scorer.DRILL, 3))
 
 

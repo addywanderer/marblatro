@@ -85,12 +85,13 @@ MAX_CARDS = 5  # Maximum owned cards the card area can hold at once
 MAX_ACTIONS = 2  # Maximum owned actions the action area can hold at once
 
 MARGIN_TOP = 0
-# The top bar: every piece of the game's furniture — the shop, the score, the
-# trial box, the run/round display and the MAIN MENU button — lives in a strip
-# along the top of the screen, and the BOARD fills everything under it (user
-# request). The bar's height is the shop's own height (SHOP_COORDS below), so
-# the shop is exactly as tall as the strip it sits in.
-TOP_BAR_HEIGHT = 200
+# The top bar: every piece of the game's furniture — the readouts, the run/round
+# display, the score, the trial box, the DECK and BOARD UNIT buttons and the MAIN
+# MENU button — lives in a strip along the top of the screen, and the BOARD fills
+# everything under it (user request). The bar is COMPACT (user request: "make the
+# top bar more compact ... and making the top bar's height smaller"): every piece
+# is laid out inside 160 px, in columns, with the buttons along the bar's bottom.
+TOP_BAR_HEIGHT = 160
 # The board: the whole rest of the screen. It is INFINITELY large (its squares
 # are addressed by any integer coordinate — see Game.board_cell_at), and this
 # rect is only the WINDOW onto it: the part the player can see at once. The
@@ -108,8 +109,10 @@ CARD_COLOR = (210, 180, 60)  # gold card look for cards in the shop and on the b
 # panel that used to be drawn here is gone (user request: "completely remove the
 # shop's box") — every offer is an item lying on the board now — but the grid
 # still decides how many offers a shelf holds and which slot each one came from
-# (see Shop.reseat / Shop.slot_key).
-SHOP_COORDS = (0, 0, 400, TOP_BAR_HEIGHT)  # x, y, width, height of the old panel
+# (see Shop.reseat / Shop.slot_key). Its height is therefore a slot count, NOT
+# the top bar's height: the bar is shorter than this grid, and the offers it
+# counts stand on board squares, so the two never had to match.
+SHOP_COORDS = (0, 0, 400, 200)  # x, y, width, height of the shelf's logical grid
 # The trial box, right of the score readout in the top bar.
 TRIAL_BOX_COORDS = (810, 14, 200, 92)
 SHOP_GRID_COLS = SHOP_COORDS[2] // GRID_SIZE
@@ -252,7 +255,7 @@ ACTION_UPGRADE_COST = 200  # Cash to upgrade an action from v1 to v2
 ACTION_V2_CHANCE = 0.01
 SHOP_REFRESH_COST = 20  # Cash cost to reroll the shop
 # What the four later actions move (see their handlers in Game._action_*).
-EXPANSION_SQUARES = 4            # locked squares Expansion (v1) unlocks
+EXPANSION_SQUARES = 4            # Board Units Expansion (v1) hands over
 BRAINSTORM_REROLLS = 2           # Reroll cards Brainstorm (v1) creates
 BRAINSTORM_REROLLS_V2 = 4        # ...and its upgrade
 MASS_PRODUCTION_RUN_FACTOR = 3.0      # Mass production's v1 resource factor
@@ -284,8 +287,9 @@ TOTAL_RUNS = ROUND_COUNT * RUNS_PER_ROUND  # 24 runs per game
 REQUIRED_RUNS_TO_WIN = 22  # Meet the score target in at least 22 of the 24 runs to win (failing 3 runs means defeat)
 # Run/round dots: a transposed 8x3 grid (8 rounds across, 3 runs down) that
 # sits in the top bar, with the final (boss) run at the bottom right.
-# RUN_DOT_GRID is the center of round 1 / run 1 (the top-left dot).
-RUN_DOT_GRID = (440, 66)
+# RUN_DOT_GRID is the center of round 1 / run 1 (the top-left dot). The block is
+# compact so the DECK and BOARD UNIT buttons fit under it (see TOP_BAR_HEIGHT).
+RUN_DOT_GRID = (440, 34)
 RUN_DOT_DX = 16  # Horizontal spacing between rounds (columns)
 RUN_DOT_DY = 15  # Vertical spacing between a round's runs (rows)
 RUN_DOT_RADIUS = 6
@@ -310,12 +314,14 @@ FIRE_DECAY_SPEED = 1.5  # fire strength lost per second after the run ends
 # this corner; the panel is gone (every offer is an item on the board now), so
 # the captions simply stay where the player already looked for them.
 BAR_TEXT_X = 10
-BAR_TEXT_Y = 10
+BAR_TEXT_Y = 8
 BAR_TEXT_WIDTH = 380
 # The DECK button: a bar button that opens the deck overlay, showing every item
 # the player owns and which DECK_DRAW_SIZE of them are drawn into the hand for
-# the run (see ui.draw_deck_button / ui.draw_deck_overlay).
-DECK_BUTTON_RECT = pygame.Rect(440, 120, 140, 34)
+# the run (see ui.draw_deck_button / ui.draw_deck_overlay). It sits under the
+# run/round display, and the BOARD UNIT button sits under it, both moved up with
+# the rest of the bar's furniture (user request: "make the top bar more compact").
+DECK_BUTTON_RECT = pygame.Rect(440, 74, 140, 30)
 DECK_OVERLAY_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 60,
                                       180, 36)
 # The BOARD UNIT button, under the DECK button: buying one adds a Board Unit to
@@ -323,7 +329,7 @@ DECK_OVERLAY_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 90, SCREEN_HEIGHT - 6
 # Game._buy_board_unit / ui.draw_board_unit_button). It is a bar button rather
 # than a shop offer (user request: "make board slots a button in the top bar
 # instead of a shop item"), so it is always buyable and never clutters the shelf.
-BOARD_UNIT_BUTTON_RECT = pygame.Rect(440, 158, 140, 32)
+BOARD_UNIT_BUTTON_RECT = pygame.Rect(440, 108, 140, 30)
 # The trial display above the cards. Its LEFT half buys a different random
 # trial and its RIGHT half buys no trial for the run (see
 # _click_trial_display); hovering it shows both prices.
@@ -335,7 +341,7 @@ TRIAL_BOX_RECT = pygame.Rect(TRIAL_BOX_COORDS)
 # pips in the top bar, under the cash captions and the message line, where the
 # player already looks for the game's own numbers (see ui.draw_energy_bar).
 MAX_ENERGY = 3
-ENERGY_BAR_RECT = pygame.Rect(BAR_TEXT_X, 120, 150, 24)
+ENERGY_BAR_RECT = pygame.Rect(BAR_TEXT_X, 106, 150, 24)
 ENERGY_COLOR = (110, 205, 255)  # a charged pip; an empty one is dark
 GAME_OVER_MENU_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 320, 560, 200, 48)
 GAME_OVER_NEW_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 100, 560, 200, 48)
@@ -353,7 +359,7 @@ MARBLE_BACK_BUTTON_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 90, 620, 180, 40)
 MARBLE_UPGRADES_TOGGLE_RECT = pygame.Rect(SCREEN_WIDTH // 2 - 180, 668, 360, 44)
 # Action-upgrade button: a tile in the top bar, drawn while an action is
 # selected, upgrading it from v1 to v2 for ACTION_UPGRADE_COST.
-ACTION_UPGRADE_RECT = pygame.Rect(810, 116, 200, 40)
+ACTION_UPGRADE_RECT = pygame.Rect(810, 110, 200, 40)
 # --- Slots that cards and actions can win (Inaction, Foresight) ----------------
 # Inaction does nothing, five times over: every INACTION_USES_PER_SLOT uses win
 # the card area one more slot, and a v2 Inaction hands one over outright (see
@@ -376,11 +382,12 @@ CHALLENGER_COST_FACTOR = 0.5
 # shown in. That column is an area of its own, at the right-hand end of the top
 # bar, because those items are put AWAY for the run rather than carried.
 ODYSSEY_CASH_FRACTION = MAGNITUDES.ODYSSEY_CASH_FRACTION
-INACCESSIBLE_COORDS = (1160, 20, GRID_SIZE, GRID_SIZE * 4)
+INACCESSIBLE_COORDS = (1160, 8, GRID_SIZE, GRID_SIZE * 4)
 # The MAIN MENU button on the play screen (bottom right of the bar): leaving the
 # current game and returning to the title screen (same action as the game-over
-# screen's MAIN MENU button).
-RETURN_TO_MENU_BUTTON_RECT = pygame.Rect(1020, TOP_BAR_HEIGHT - 44, 130, 32)
+# screen's MAIN MENU button). It lines up with the BOARD UNIT button, so the
+# bar's buttons read as one row (user request: "make the top bar more compact").
+RETURN_TO_MENU_BUTTON_RECT = pygame.Rect(1020, 108, 130, 30)
 BLOCK_INTERIOR_COLOR = BLACK
 MARBLE_COLOR = WHITE
 # The board's own extent, in squares: the WINDOW onto the infinite board (see

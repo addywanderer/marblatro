@@ -158,7 +158,7 @@ class PackPriceTests(GameTestCase):
 
     def test_a_resource_option_is_worth_twice_what_the_scorer_banks(self):
         # The user's own example: one option of a Picky resource pack is worth
-        # 2 x 0.5 = one whole option point, because 0.5 is what a Picky trigger
+        # 2 x 0.5 = one whole structure point, because 0.5 is what a Picky trigger
         # banks at its default magnitude.
         self.assertAlmostEqual(
             components.RESOURCE_PACK_FACTOR
@@ -728,15 +728,19 @@ class ResourcePackTests(GameTestCase):
         self._buy_pack(pack)
 
     def test_the_points_are_banked_and_converted_immediately(self):
-        # One whole option point buys a permanent shop slot at once — not at the
-        # end of the run, which is where a TRIGGER's points are committed.
-        self.assertEqual(self.game.bonus_slots, 0)
+        # One whole structure point buys a permanent structure at once — not at
+        # the end of the run, which is where a TRIGGER's points are committed.
+        self.assertEqual(self.game.bonus_structures, 0)
         self._open(main.ResourceOption(main.Scorer.PICKY, 1.0, 1.0))
         self.game._keep_pack_option(0)
-        self.assertEqual(self.game.option_points, 0.0)  # spent on the slot
-        self.assertEqual(self.game.bonus_slots, 1)
-        self.assertEqual(self.game.shop.bonus_slots, 1)
-        self.assertIn("1 option point", self.game.shop_message)
+        self.assertEqual(self.game.option_points, 0.0)  # spent on the structure
+        self.assertEqual(self.game.bonus_structures, 1)
+        self.assertIn("1 structure point", self.game.shop_message)
+        # ...and the structure joins the run being played, not just the next one.
+        extra = [item for item in self.game.shop.items
+                 if getattr(item, "is_bonus_structure", False)]
+        self.assertEqual(len(extra), 1)
+        self.assertIsNotNone(self.game.item_cell(extra[0]))
 
     def test_a_fraction_of_a_point_stays_banked(self):
         self._open(main.ResourceOption(main.Scorer.RUBBLE, 0.9, 0.9))
